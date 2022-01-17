@@ -1,0 +1,23 @@
+{
+  "name": "mytechblogcontents",
+  "version": "1.0.0",
+  "description": "![Qiita Sync](https://github.com/touyou/MyTechblogContents/actions/workflows/qiita_sync_check.yml/badge.svg)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/touyou/MyTechblogContents.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/touyou/MyTechblogContents/issues"
+  },
+  "homepage": "https://github.com/touyou/MyTechblogContents#readme",
+  "dependencies": {
+    "zenn-cli": "^0.1.102"
+  }
+}

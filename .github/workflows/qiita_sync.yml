@@ -22,7 +22,7 @@ jobs:
           python -m pip install qiita-sync
       - name: Run qiita-sync
         run: |
-          qiita_sync sync .
+          qiita_sync sync qiita/
         env:
           QIITA_ACCESS_TOKEN: ${{ secrets.QIITA_ACCESS_TOKEN }}
       - name: Git

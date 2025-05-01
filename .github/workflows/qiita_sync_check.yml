@@ -25,7 +25,8 @@ jobs:
           python -m pip install qiita-sync
       - name: Run qiita-sync check
         run: |
-          qiita_sync check qiita/ > ./qiita_sync_output.txt
+          cd qiita
+          qiita_sync check . > ./qiita_sync_output.txt
           cat ./qiita_sync_output.txt
           [ ! -s "qiita_sync_output.txt" ] || exit 1
         env:

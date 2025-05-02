@@ -35,10 +35,21 @@ https://shop.yushakobo.jp/products/3905?variant=42888066400487
 
 ## Jizai Style での購入品
 
-ケーブルは Jizai Style で購入しました。
+TRRS ケーブルは Jizai Style で購入しました。
 
 **METASPIRA DENSE TRRS ケーブル L 型**
 価格: 2800 円
 送料: 185 円
 
 https://jizaistyle.com/products/metaspira-dense-trrscable-typel?variant=49848405360945/
+
+## Shirogane Lab での購入品
+
+本来は上記のみで済むはずだったのですが、めちゃくちゃビルドガイドで念を押されているトラックボールのセンサーの向きを間違えてしまったので追加で購入しました。
+購入者限定で問い合わせをすると買えるものです。
+
+**Keyball 向けトラックボールセンサーと基板**
+価格: 4800 円
+送料: 300 円
+
+https://shirogane-lab.net

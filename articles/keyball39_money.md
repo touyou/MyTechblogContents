@@ -3,7 +3,7 @@ title: "Keyball39にデビューしたのでかかった費用とかまとめて
 emoji: "💰"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["Keyball39", "Keyball", "キーボード"]
-published: false
+published: true
 ---
 
 自作キーボードデビュー記念にどういうことをするとどのくらいお金がかかるのか？

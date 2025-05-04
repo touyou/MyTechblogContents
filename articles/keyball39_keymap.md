@@ -42,7 +42,7 @@ Keyball39 のキーマップが定まってきたので紹介です。
 
 ## キーマップの変更
 
-デフォルトのキーマップを現時点での最適状態になるように変更していました。
+デフォルトのキーマップが現時点での最適状態になるように設定しておきました。
 その際の指定方法は記事などを参考にしているとなかなか書いてくれている人がいないのですが、QMK のリポジトリと Keyball のリポジトリを見ることで使える全機能がわかります。
 
 - [qmk_firmware/docs/keycodes.md at master · qmk/qmk_firmware](https://github.com/qmk/qmk_firmware/blob/master/docs/keycodes.md)

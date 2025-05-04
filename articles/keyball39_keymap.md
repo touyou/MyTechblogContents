@@ -105,9 +105,6 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 }
 ```
 
-またこれに加えてピンチイン・ピンチアウトを実現するためには Mac Mouse Fix を使っています。
-ここもいずれはファームウェアでできないかなとも思ってます。
-
 ## OLED のカスタマイズ
 
 一番こだわったのはこちらです。

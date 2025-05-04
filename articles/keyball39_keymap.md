@@ -3,7 +3,7 @@ title: "Keyball39のキーマップ ver.0.1"
 emoji: "🗺️"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["Keyball39", "Keyball", "キーボード"]
-published: false
+published: true
 ---
 
 Keyball39 のキーマップが定まってきたので紹介です。
@@ -136,6 +136,11 @@ https://javl.github.io/image2cpp/
 
 向きはもちろんのこと、背景色も正しく指定しないと表示が崩れるようなので注意しましょう。
 
+これらを終えてしっかりオリジナルの表示ができました。
+
+![](/images/keyball39_keymap/layer.jpg)
+![](/images/keyball39_keymap/ver.jpg)
+
 ## その他の工夫
 
 その他には開発面で工夫をしました。
@@ -149,3 +154,10 @@ https://javl.github.io/image2cpp/
 以上対応を行なったのがこちらのリポジトリです。
 
 https://github.com/touyou/keyball
+
+# まとめ
+
+今回はキーマップに加えて、自分なりのカスタマイズにも挑戦してみました。
+個人的に OLED のカスタマイズができたのがとても良かったです。自分だけのものという気持ちが増しました。
+
+無線分割になっても OLED したいなとも思いつつ、ここからもっと分割キーボードに慣れていければと思います。

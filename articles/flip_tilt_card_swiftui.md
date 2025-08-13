@@ -137,7 +137,7 @@ three.jsのこちらの記事を参考にしています。
 
 [キラカードシェーダーでポケカ再現！](https://note.com/sawa_zen/n/n77a7527c290e)
 
-```metal
+```cpp
 #include <metal_stdlib>
 #include <SwiftUI/SwiftUI_Metal.h>
 using namespace metal;

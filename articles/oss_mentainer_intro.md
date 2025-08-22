@@ -17,6 +17,7 @@ ghコマンドでチェックアウトする。ターミナル上であればfzf
 
 ```sh
 brew install gh fzf
+gh auth login
 ```
 
 ### スクリプト

@@ -65,7 +65,7 @@ Human Interface Guidelinesで定義されたLiquid Glassに関するデザイン
 - インターフェイス要素がデバイス間でソフトウェアとハードウェアのデザインに調和するようにする
 - 標準的なアイコン表現と予測可能なアクション配置を採用し、プラットフォームまたいで一貫性を持たせる
 
-詳細はHuman Inteface Guidelinesに記載されています。この内容に関しては別途まとめていこうと思います。
+詳細はHuman Inteface Guidelinesに記載されています。
 
 https://developer.apple.com/design/human-interface-guidelines
 

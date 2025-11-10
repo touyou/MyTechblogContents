@@ -1,12 +1,12 @@
 ---
-title: "Swift for Androidがファーストプレビューリリースしたので触ってみる"
+title: "Swift SDK for Androidがファーストプレビューリリースしたので触ってみる"
 emoji: "📱"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["Swift", "Android", "モバイル開発"]
 published: true
 ---
 
-WWDC2025やその後の発表でワーキンググループが結成され話題になっていたSwift for Androidですが、2025年10月24日に初のプレビューリリースが公開されたため、早速触ってみました。
+WWDC2025やその後の発表でワーキンググループが結成され話題になっていたSwift SDK for Androidですが、2025年10月24日に初のプレビューリリースが公開されたため、早速触ってみました。
 
 動かすまでに少しつまづくところがあったので、注意点等を紹介します。
 
@@ -86,7 +86,7 @@ hashing-appは追加でswift-javaを利用するため、READMEに書かれて�
 
 ## まとめ
 
-以上、Swift for Androidを触ってみた様子を紹介しました。
+以上、Swift SDK for Androidを触ってみた様子を紹介しました。
 コードを見てみると、まだまだJavaやCが露出している味と言いますか、Kotlin MultiplatformでSwiftを利用する際と同じようなぎこちなさを感じるのですが、そこも今後Swiftyに改善されていくところだと思うので引き続き注目していきたいと思います。
 
 そのうちUIはSwiftUIとJetpack Composeで、裏側をSwiftもしくはKotlin好きな方で書くみたいな、そんな世界観が来ると面白そうと思います。

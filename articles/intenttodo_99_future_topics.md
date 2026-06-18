@@ -103,6 +103,18 @@ list 適合で App Schema の仕組み自体は検証できたので、本体適
 これがあると Provider / Intent / View 層を通じて『データが無い』と『データが取れなかった』を別の概念として扱えるようになり、ユーザーに嘘の安心感を与える silent failure が減らせるはず。
 silent failure 系の個別修正は `main` 側でいくつか入れた (fetch 失敗を黙って 0 件にせず throw する、等) んですが、`LoadResult<T>` を全 layer に通すとなるとコストが大きいので、prototype 程度で試してから記事化する予定です。
 
+### I. WWDC 2026 セッションを読み直して増えた採用候補
+
+WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 345 / Group Lab) を読み直したら「これは IntentTodo に入れて検証したら記事になりそう」という候補がいくつか出てきました。まだ実装は追えていないので、忘れないように IntentTodo 側へ issue を立てて追跡しています。
+
+- **`@Property(indexingKey:)` でセマンティック Spotlight インデックス** (#240): 本文を `indexingKey` 付きで公開すると、意味ベース検索 / Q&A の対象になる。今は `CSSearchableIndex` の明示登録 (5/N) だけなので、その上の経路を試したい。
+- **`Transferable` + `ValueRepresentation` で構造化値エクスポート** (#345): Todo の場所を `PlaceDescriptor` として書き出すなど、cross-app の口を作る。
+- **`IntentParameter.valueState` で UpdateTodoIntent** (#344): optional パラメータの「新しい値 / 明示クリア / 据え置き」を `.set(value)` / `.set(nil)` / `.unset` で区別する更新 Intent。
+- **コレクション onscreen + 通知 / AlarmKit への entity アノテーション** (#343): 一覧の行に `.appEntityIdentifier(forSelectionType:)`、通知やアラームにも entity-identifier を付けて「3 番目のやつ」のような参照に対応する。
+- **`.system.searchInApp` 適合** (#343): `SearchEverythingIntent` をこのスキーマに適合させ、Siri がアプリ自身の検索 UI で結果を出せるようにする。
+- **`allowedExecutionTargets` の再検証** (#345): 9/N で訂正したとおり `.widgetKitExtension` も選べるので、これで Primary / FromExtension 分離を畳めないか改めて確かめる。
+- **reminder 本体スキーマ適合の優先度** (Group Lab): 「新しい Siri と連携するにはいずれかの App Schema 採用が前提」とのことなので、コアの `TodoAppEntity` を意味理解させるには上記 F の本体適合がやはり要る、という位置づけが見えてきた。
+
 ## まとめ
 
 - 本編は「実機で詰まった話」、WWDC 2026 編は「採用していいか / 設計判断」と、軸を分けて書いている

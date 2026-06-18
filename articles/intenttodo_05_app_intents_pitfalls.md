@@ -54,7 +54,7 @@ extension ToggleTodoCompletionFromExtensionIntent: LiveActivityIntent {}
 ### 運用ルール
 
 このパターンは workaround 寄りなので、コード内に「いつ削除する想定か」を明記しておくのが大事だと思っています。
-Apple のバグが直ったら 2 系統に分ける必要はなくなるので、削除タイミングが分からないと永久に技術債として残ります。
+Apple のバグが直ったら 2 系統に分ける必要はなくなるので、削除タイミングが分からないと永久に技術的負債として残ります。
 
 ```swift
 //  ⚠️ Apple bug workaround (keep until Issue #30 A-3 is verified fixed).

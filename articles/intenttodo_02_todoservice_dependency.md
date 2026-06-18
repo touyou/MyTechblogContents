@@ -212,4 +212,4 @@ public extension TodoService {
 - mutation には `defer { WidgetReloader.reloadAllWidgets() }` で副作用を集約すると、呼び忘れバグがコンパイル時に消せる
 - `swiftDataBacked(container:)` のような薄いファクトリを置くと、consumer 側のターゲット依存を最小化できる
 
-次回は、Extension target を SPM パッケージ化してマルチプラットフォーム対応を進めた話を書きます。
+次回は、[Extension target を SPM パッケージ化してマルチプラットフォーム対応を進めた話 (3/N)](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) を書きます。

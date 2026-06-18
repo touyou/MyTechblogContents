@@ -210,4 +210,4 @@ try? await IntentDonationManager.shared.deleteDonations(
 - Interactive Snippet はボタンを押すたびにシステムが `SnippetIntent` を再 perform するので、perform で毎回最新 entity を取り直す。app プロセス提示なので entity 解決クラッシュは無関係
 - `IntentDonationManager` は「追加で `donate()`、削除で `deleteDonations(...)`」をペアにして、提案が実体とズレないようにする
 
-次回は、大量の Todo を一括処理する `EntityCollection` / `LongRunningIntent` / `CancellableIntent` と、逆に「検証してみたら自分のアプリには適合しなかった」`RelevantEntities` の話を書きます。
+次回は、[大量の Todo を一括処理する `EntityCollection` / `LongRunningIntent` / `CancellableIntent` と、「検証してみたら自分のアプリには適合しなかった」`RelevantEntities` の話 (9/N)](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis) を書きます。

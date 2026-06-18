@@ -305,4 +305,4 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 - プロパティマクロは `Hashable` 自動合成を壊すので `==` / `hash(into:)` を明示実装する
 - `SyncableEntity` は CloudKit id をそのまま使っていれば適合を書き足すだけで済む
 
-次回は、ここで Entity 化した `Category` を `@AppEntity(schema: .reminders.list)` に適合させた話と、逆に Todo 本体を reminder スキーマに適合させようとして保留した話を書きます。
+次回は、[ここで Entity 化した `Category` を `@AppEntity(schema: .reminders.list)` に適合させた話と、Todo 本体を reminder スキーマに適合させようとして保留した話 (7/N)](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents) を書きます。

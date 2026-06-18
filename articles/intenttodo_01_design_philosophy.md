@@ -25,7 +25,7 @@ published: true
 - **Action-Centered Design** (Vidit Bhargava): アクションを設計の起点にする UX
 - **モデルベース UI デザイン**: ユースケース中心設計と Entity-Intent 構造の対応
 
-そして、これは [Liquid Glass と App Intents 中心設計](https://goodpatch-tech.hatenablog.com/entry/liquid_glass_and_app_intents) で語られていた、Liquid Glass 時代に「コンテンツとアクションが本質となる」という主張とも噛み合います。
+そして、これは自分が以前 [Liquid Glass と App Intents 中心設計](https://goodpatch-tech.hatenablog.com/entry/liquid_glass_and_app_intents) でも書いた、Liquid Glass 時代に「コンテンツとアクションが本質となる」という話とも噛み合っていると思っています。
 UI クローム (装飾) が透明化していくと、相対的に「ユーザーは何ができるか」 = アクションが目立つ存在になります。
 
 ## 核となる原則
@@ -100,20 +100,20 @@ IntentTodo で参考にしている指針は以下です。
 
 本編 (1〜5) は、IntentTodo で実際に踏んだ落とし穴とその設計判断を 1 トピックずつ取り上げます。
 
-- (2) TodoService と @Dependency: ビジネスロジックの一元化
-- (3) マルチプラットフォーム Extension の構成 — SPM 化と Delegate 分離
-- (4) SwiftData + CloudKit 同期 — 互換 schema と落とし穴
-- (5) App Intents 運用の罠 — Primary/FromExtension / Control Widget / Spotlight
+- [(2) TodoService と @Dependency: ビジネスロジックの一元化](https://zenn.dev/touyou/articles/intenttodo_02_todoservice_dependency)
+- [(3) マルチプラットフォーム Extension の構成 — SPM 化と Delegate 分離](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
+- [(4) SwiftData + CloudKit 同期 — 互換 schema と落とし穴](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit)
+- [(5) App Intents 運用の罠 — Primary/FromExtension / Control Widget / Spotlight](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 
 WWDC 2026 編 (6〜10) は、`xcode27` ブランチで新 API を試してみて分かった設計判断をまとめます。
 こちらは本編と違って実機まで通せていないものが多いので、「採用していいか / 設計にどう効くか」を軸に、検証の深さ (ビルド / 単体 / 実機) を各記事に明記して書きます。
 
-- (6) Todo を「システムが理解できる名詞」にする — ネイティブ型とプロパティマクロ
-- (7) App Schema と system intents — ドメイン意味適合の効きどころと「保留」の判断
-- (8) 対話的な Intent — requestConfirmation / requestChoice / IntentDialog
-- (9) 大量処理・実行制御と「適合しない API」の見極め
-- (10) Visual Intelligence 連携と AppIntentsTesting
+- [(6) Todo を「システムが理解できる名詞」にする — ネイティブ型とプロパティマクロ](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
+- [(7) App Schema と system intents — ドメイン意味適合の効きどころと「保留」の判断](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents)
+- [(8) 対話的な Intent — requestConfirmation / requestChoice / IntentDialog](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)
+- [(9) 大量処理・実行制御と「適合しない API」の見極め](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
+- [(10) Visual Intelligence 連携と AppIntentsTesting](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)
 
-そして (99) は、検証待ち・将来書く予定のトピックを並べておく番外編です。
+そして [(99) 検証待ち・将来書く予定のトピック](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) は、棚卸しの番外編です。
 
 引き続きどうぞよろしくお願いします。

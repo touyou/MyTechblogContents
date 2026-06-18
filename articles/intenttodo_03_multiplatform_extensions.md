@@ -11,7 +11,7 @@ published: true
 :::
 
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 3 回目です。
-前回は TodoService の話をしましたが、今回は Extension target やマルチプラットフォームをまたいだコード共有の話です。
+前回は [TodoService の話 (2/N)](https://zenn.dev/touyou/articles/intenttodo_02_todoservice_dependency) をしましたが、今回は Extension target やマルチプラットフォームをまたいだコード共有の話です。
 
 IntentTodo は最終的に以下の構成に落ち着いています。
 
@@ -194,4 +194,4 @@ struct IntentTodoWatchApp: App {
 - pbxproj の `platformFilter = ios;` を見落とすと macOS ビルドで Embed エラーが出る
 - ターゲット依存をなるべく minimum に保つため、`TodoService.swiftDataBacked(container:)` のような薄いファクトリを TodoAppIntents 側に置く
 
-次回は SwiftData + CloudKit 同期で踏んだスキーマ要件と落とし穴の話を書きます。
+次回は [SwiftData + CloudKit 同期で踏んだスキーマ要件と落とし穴の話 (4/N)](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) を書きます。

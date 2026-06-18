@@ -236,4 +236,4 @@ do {
 - production の fallback は silently 壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく
 - ModelContainer の失敗ログは `String(reflecting:)` + `NSError.userInfo` まで吐く
 
-次回は App Intents 運用で踏んだ落とし穴 3 つ (Primary/FromExtension 分離 / Control Widget の Dialog 非表示 / Spotlight 統合の実装漏れ) をまとめて書きます。
+次回は [App Intents 運用で踏んだ落とし穴 3 つ (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Primary/FromExtension 分離 / Control Widget の Dialog 非表示 / Spotlight 統合の実装漏れ) をまとめて書きます。

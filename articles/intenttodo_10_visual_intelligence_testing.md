@@ -13,7 +13,7 @@ published: true
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 10 回目です。
 WWDC 2026 編 (6〜10) の最後で、`xcode27` ブランチでの検証です (前提は 6/N 冒頭)。
 
-最後は外向きのサーフェスとして Visual Intelligence 連携 (#297) と、Intent を実際の経路で動かすテスト基盤 (AppIntentsTesting / #295) を試した話です。
+最後は外向きのサーフェスとして Visual Intelligence 連携 (セッション 297) と、Intent を実際の経路で動かすテスト基盤 (AppIntentsTesting / #295) を試した話です。
 
 ## カメラ/スクショから自分のアプリのコンテンツを返す: IntentValueQuery
 
@@ -91,7 +91,7 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 
 ## AppIntentsTesting で Intent を実経路テストする
 
-WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテスト** (#295) を試しました。
+WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテスト** (セッション 295) を試しました。
 これまで Intent のテストは「perform の中のロジックを純関数に切り出して SPM テストする」くらいしかできていなかったんですが、AppIntentsTesting を使うと **Siri / Shortcuts が通るのと同じ経路** で intent を実行して検証できます。
 
 ### UI テストバンドル必須 (unit test では動かない)

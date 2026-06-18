@@ -272,7 +272,7 @@ public struct CategoryAppEntity: Hashable {
 
 ## ついでに足せた SyncableEntity
 
-WWDC 2026 の `SyncableEntity` (#345) も、Phase 1 のついでに適合できました。
+WWDC 2026 の `SyncableEntity` (セッション 345) も、Phase 1 のついでに適合できました。
 これは「デバイスをまたいで同じ Entity を一貫して参照できる」ためのプロトコルですが、`TodoAppEntity` の `id` が SwiftData + CloudKit のレコード id をそのまま文字列化したもので、もともとデバイス間で一致しているので、**プロトコル適合を書き足すだけ** で済みました。
 
 ```swift

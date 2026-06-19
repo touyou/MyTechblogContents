@@ -1,5 +1,5 @@
 ---
-title: "WWDC 2026: 対話的な Intent — requestConfirmation / requestChoice / Snippet / 寄付 (8/N)"
+title: "WWDC 2026: 対話的な Intent — 確認 / 選択 / Snippet / 寄付 (8/N)"
 emoji: "💬"
 type: "tech"
 topics: ["AppIntents", "Siri", "iOS", "WWDC2026"]

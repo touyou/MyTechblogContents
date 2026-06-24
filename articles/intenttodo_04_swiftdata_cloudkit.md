@@ -166,6 +166,8 @@ find ~/Library/Developer/CoreSimulator/Devices -name "IntentTodo.store*" -delete
 
 production でユーザーに同じ問題を起こしたくない場合は、本来は migration プランを書く必要がありますが、IntentTodo は個人プロジェクトなのでこの問題は今のところ無視しています。
 
+(2026-06-24 追記) この「将来 migration プランを書くとき」について、WWDC 2026 の "SwiftData Group Lab" (セッション 8017) で 1 つ指針が示されていました。複数プロセス (アプリ本体 / Widget / Live Activity) が同じ App Group のストアを共有する構成では、**マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。理由は、アプリ更新直後は **アプリ本体より先に Widget / Extension プロセスが起動し得る** ため。両方がマイグレーションプランを持っていると、Extension が先に移行を試みて本体の移行と競合する危険があります。なので将来 `SchemaMigrationPlan` を導入するときは、**プランを渡すのはアプリ本体の `ModelContainer` だけ** にして、Widget / Live Activity 側はプラン無し (= 移行済みファイルを読むだけ) で構成する方針にしました。この別プロセス前提の話は [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) 側にも要点を書いています。なお Group Lab はベータ時点の文字起こし要約ベースなので、実際に導入する段になったら API 名と挙動は公式ドキュメントで確認し直すつもりです。
+
 ## ハマりどころ 4: フォールバックが silently データを分裂させる
 
 最初は `SharedModelContainer.configuration` を以下のように書いていました。
@@ -227,6 +229,26 @@ do {
 
 これで CoreData が出している `CloudKit integration requires that all attributes be optional, or have a default value set. ...` を Console.app に拾えるようになります。
 詰まったらまずこれを仕込むのが回り道に見えて最短ルートでした。
+
+## (2026-06-24 追記) WWDC 2026 の SwiftData レビューを受けて
+
+WWDC 2026 の SwiftData / Widget まわりのセッションと Group Lab を見直したので、この記事に効く差分を反映しておきます。マイグレーション分離は上のハマりどころ 3 に書いたとおりで、ここでは残り 2 つです。
+
+1 つ目、**CloudKit 互換の制約は 2026 でも据え置き** でした。`@Attribute(.unique)` が enforce されない・リレーションは全部 Optional・プロパティはデフォルト値か Optional 必須、というこの記事の要件はそのまま有効です。新しい回避策が増えたわけではないので、ここで書いたワークアラウンドは引き続き必要、という確認になりました。
+
+2 つ目は件数取得まわりの小さな整理です。未完了 Todo の件数を出すのに、もともと `fetchIncomplete().count` で **全 `TodoItem` をメモリに載せてから** 数えている箇所があったので、`ModelContext.fetchCount(_:)` に置き換えました。
+
+```swift
+public func incompleteCount() throws -> Int {
+    // fetchCount は TodoItem を materialize せず、ストアレベルで件数だけ数える
+    let descriptor = FetchDescriptor<TodoItem>(
+        predicate: #Predicate { !$0.isCompleted }
+    )
+    return try modelContext.fetchCount(descriptor)
+}
+```
+
+`fetchCount` はモデルを materialize せずストアレベルで件数だけ返すので、件数しか要らないところはこちらが素直です。これ自体は iOS 17 からある既存 API で WWDC 2026 の新規ではないんですが、Group Lab で「件数だけ欲しいときは件数取得 API を使う」と改めて念押しされていたので、意図を明確にするクリーンアップとして入れました。IntentTodo の場合は実データ量が小さくて体感差はほぼ無い、という正直なところも添えておきます。
 
 ## まとめ
 

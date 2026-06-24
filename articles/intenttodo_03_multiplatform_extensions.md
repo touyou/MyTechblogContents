@@ -187,6 +187,12 @@ struct IntentTodoWatchApp: App {
 
 依存グラフを minimum に保ちながら、必要なところで service が組み立てられる、というバランスを取れています。
 
+## (2026-06-24 追記) 別プロセス前提 — マイグレーションはアプリ本体に寄せる
+
+ここまで書いたように Extension target は薄いスキャフォルドに留めますが、Widget / Live Activity は **アプリ本体とは別プロセス** で動く、という前提は変わりません。WWDC 2026 の "SwiftData Group Lab" (セッション 8017) で、この「別プロセスで同じ App Group のストアを共有する」構成の SwiftData マイグレーション指針が示されていました。要は **マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。
+
+アプリ更新直後は本体より先に Widget が起動し得るので、Extension 側にマイグレーションプランを持たせると本体の移行と競合し得る、というのが理屈。Extension 構成の観点だと「View もデータ取得ロジックも SPM に寄せ、**マイグレーションの責務もアプリ本体に寄せる**」と覚えておくと収まりが良いです。SwiftData / CloudKit 側の具体的な書き方は [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) に書きました。(Group Lab はベータ時点の要約ベースなので、実際に `SchemaMigrationPlan` を入れる際は最新ドキュメントで再確認予定です)
+
 ## まとめ
 
 - Extension target は薄いスキャフォルドに留めて、View / 状態管理 / データ取得は SPM パッケージに移送する

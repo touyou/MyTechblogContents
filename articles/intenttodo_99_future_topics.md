@@ -39,6 +39,25 @@ published: true
 - **Intent Modes の `.foreground(.dynamic)`** (旧トピック G): `ShowTodosIntent` を一度 `[.background, .foreground(.dynamic)]` + `continueInForeground()` に寄せてみたんですが、これをやると `OpensIntent` (Intent 合成) を外すことになって、それは設計として手放したくなかったので revert しました。今の `ShowTodosIntent` は `.foreground` + `opensIntent:` のままです。`ForegroundContinuableIntent` が deprecated で `.foreground(.dynamic)` が後継、という対応関係は掴めたものの、自分のアプリでは Intent 合成を優先する判断になった、というのが結論でした。
 - **FoundationModels (端末内 LLM)** (旧トピック F の一部): Todo 自動生成・サマリー・Tool Calling といった端末内 LLM 連携は、検証計画の段階で **本リポジトリの主眼から意図的に外す** ことにしました。App Intents 中心設計の実証という軸からは少しずれるのと、ここに踏み込むと検証範囲が一気に広がるからです。やらない判断をした、というのも 1 つの結論として残しておきます。
 
+## (2026-06-24 追記) WWDC 2026 の SwiftData レビューで整理できたもの
+
+WWDC 2026 の SwiftData 関連セッションと Group Lab を見直したら、「これまで微妙だと思っていた / 判断を保留していた」観点のいくつかが、公式の裏付けで整理できました。本編側に反映したもの (マイグレーションをアプリ本体に一本化する話 → [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) / [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)、WidgetKit 実行モデルの明文化 → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)) とは別に、ここに棚卸しとして残しておきます。
+
+### View 外での SwiftData 監視に公式 API ができた
+
+本シリーズの裏で一度、`IntentAppState` という自前の `NotificationCenter` 購読でデータ変更を拾う仕組みを入れていたんですが、プロセスを跨いだ `NotificationCenter.post` は届かず脆かったので撤去して、今は `@Query` と `NavigationModel` への直接注入に寄せています。
+
+WWDC 2026 で `ResultsObserver` / `ModelResultsObserver` という、SwiftUI の外で SwiftData の結果変化を監視する公式 API が出てきました。今は監視を `@Query` に集約できていて即使う先は無いんですが、「非 SwiftUI レイヤで SwiftData を監視したい」が再び出てきたら、自前 `NotificationCenter` ではなく正攻法でやれる、という安心材料ができた格好です。撤去した `IntentAppState` の判断が後付けで裏付けられた、とも言えます。(API 名はベータ時点の情報なので、実際に使うときに確認し直す前提です)
+
+### 検討したが「該当なし」だった新機能
+
+記事で紹介されていた SwiftData の新機能のうち、IntentTodo の現状には噛み合わなくて見送ったものも書いておきます。「使わなかった」も判断の記録なので。
+
+- **sectioned `@Query` (`sectionBy:`)**: watch 側でやっている手動 partition は「now から 1 時間以内」という **時刻依存の動的な区切り** で、`sectionBy:` が要求する保存済みの String KeyPath では表現できない → 不適合。カテゴリ別グルーピング画面を新設するなら選択肢になります。
+- **`@Attribute(.codable)`**: 複雑な型を rawValue で逃がすようなワークアラウンドが今のモデルには無い (基本型に分解済み) → 出番なし。
+- **`HistoryObserver`**: 自前サーバー同期をしておらず CloudKit ネイティブなので → 該当なし。
+- **external storage**: バイナリ / 画像を保存していないので → 該当なし。
+
 ## まだ検証待ちのトピック
 
 ここからは、今もドラフト棚上げのままのものです。

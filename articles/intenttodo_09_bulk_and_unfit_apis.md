@@ -103,7 +103,7 @@ IntentTodo は App Intents Extension を持っていないし、バルクの Swi
 (2026-06-19 追記) この記事を最初に書いたとき、選択肢を「`.main` / `.appIntentsExtension` だけ」と書いていたんですが、WWDC 2026 のセッション 345 を見直したら **`.widgetKitExtension` もある** ことに気付いたので直しました。「widget ボタンからの更新を main app に限定してデータ競合を避ける」みたいな使い方が想定されているようです。この見落としは、下の FromExtension の結論にも効いてくるので、あわせて書き直しています。
 :::
 
-### FromExtension 分離をこれで畳めるか? (要再検証)
+### FromExtension 分離をこれで畳めるか? (要再検証 → 「畳めない」で確定)
 
 ここで自分は「もしかして `allowedExecutionTargets` を使えば、本編 5/N で書いた **Primary / FromExtension の 2 系統** を 1 つに畳めるんじゃないか?」と期待しました。
 最初は「無理」と結論づけていたんですが、その根拠の 1 つが上の見落とし (`.widgetKitExtension` が無いと思い込んでいた) だったので、いまは **保留 = 要再検証** に格下げしています。
@@ -118,6 +118,8 @@ IntentTodo は App Intents Extension を持っていないし、バルクの Swi
 新しい API が出ると「これで前の workaround を畳めるかも」とつい期待するんですが、今回は逆に **ちゃんと裏を取らずに「畳めない」と思い込む** 方向に間違えていたので、いい教訓だなと思っています。
 
 (2026-06-24 追記) この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化していました。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、今回 **公式に正しい設計だった** と裏が取れた格好です。FromExtension を残すか畳むかの結論はまだ保留のままですが、「ウィジェット側で entity 解決のような重い処理を踏ませない」という分離の動機自体は、この実行モデルとも整合しているなと思いました。
+
+(2026-07-02 追記) この宿題、あらためて検証して **「畳めない」で確定** させました。決め手は、`allowedExecutionTargets` が制御するのはあくまで **どのプロセスが `perform()` するか** で、クラッシュが起きる **パラメータ解決 (entity resolution) を経由するかどうか** は変えられない、という点です。`.widgetKitExtension` の存在を踏まえても、Live Activity Extension は依然として指定対象に入っていません。LA のボタン用には `LiveActivityIntent` (アプリプロセスでの実行が保証されるプロトコル) もあるんですが、クラッシュは perform より手前の解決段で起きるので、解決そのものを踏まない String 版が結局必要でした。というわけで FromExtension は維持です。唯一残っているのは「`[.main]` にピンしたとき解決の実行プロセスまで本体側に寄るのか」という実機確認 (R) で、もし寄るなら話が変わる可能性はありますが、現状はコードでパラメータの型を分けておく方が確実だと思っています。
 
 ## 複数の型を1つの結果で返す: @UnionValue
 
@@ -182,7 +184,7 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 - `EntityCollection<T>` は `.identifiers` で id だけ取れて entity 解決を回避できる。バルク処理で効く
 - `LongRunningIntent` は `performBackgroundTask` で時間を延ばせるが、`progress` を更新し続けないと打ち切られる
 - `CancellableIntent` は `onCancel:` + ループ内 `try Task.checkCancellation()`。perform は `@MainActor` にせず、必要なところだけ await でホップする
-- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ (当初「2 つだけ」と書いていたのを訂正)。**FromExtension 分離をこれで畳めるかは要再検証** — `.main` ピンで entity 解決まで main に寄るかが鍵で、IntentTodo の issue で追跡
+- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ (当初「2 つだけ」と書いていたのを訂正)。**FromExtension 分離をこれで畳めるかは要再検証** — `.main` ピンで entity 解決まで main に寄るかが鍵で、IntentTodo の issue で追跡 (2026-07-02 追記: 検証して「畳めない」で確定しました。本文の追記を見てください)
 - `@UnionValue` で複数 Entity 型を 1 つの結果に混ぜられる。`public enum` は `: Sendable` 明示が必要
 - `RelevantEntities` は **reminders ドメイン向けの `AppEntityContext` が存在せず適合不能**。実装ミスではなく API 設計上の壁。保留
 

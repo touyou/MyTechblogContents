@@ -60,6 +60,39 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 ポイントは、`category` のように **別の `AppEntity` を `@Property` で持てる** ことです。
 これで「あるカテゴリに属する Todo」みたいな辿り方が Shortcuts 側で組めるようになります。名詞と名詞を関連でつなぐ、というのを App Intents の語彙でやっている感じです。
 
+### (2026-07-02 追記) @Property(indexingKey:) でセマンティック検索に載せる
+
+この記事を公開したあと、`@Property` にはもう一段先があると知って (セッション 240)、`indexingKey:` も採用しました。
+`@Property(title:indexingKey:)` の `indexingKey` に `CSSearchableItemAttributeSet` の KeyPath を渡すと、そのプロパティの値が Spotlight のセマンティックインデックスへ宣言的にマップされて、意味ベースの検索や Q&A の対象になります。5/N で書いた `CSSearchableIndex` の明示登録 (キーワード検索の経路) とは併存できて、その上にセマンティックな経路が足される形です。
+
+```swift
+#if os(iOS) || os(macOS)
+/// The title of the todo item (semantically indexed via `.title`).
+@Property(title: "Title", indexingKey: \.title)
+public var title: String
+
+/// A longer free-text description of the todo, if any (semantically indexed
+/// via `.contentDescription`).
+@Property(title: "Description", indexingKey: \.contentDescription)
+public var todoDescription: String?
+#else
+/// The title of the todo item.
+@Property(title: "Title")
+public var title: String
+
+/// A longer free-text description of the todo, if any.
+@Property(title: "Description")
+public var todoDescription: String?
+#endif
+```
+
+やってみて分かったことが 2 つあります。
+
+- 自然文の本文を載せるキーとして `\.textContent` を期待していたんですが、SDK に露出していませんでした (`title` / `contentDescription` / read-only の `textContentSummary` があるのは確認)。本文は `contentDescription` に載せるのが妥当そうです。
+- `indexingKey:` 付きのオーバーロードは **iOS / macOS でしか vend されていません**。visionOS / watchOS では `extra argument 'indexingKey' in call` でビルドが落ちるので、上のコードのとおり `#if os(iOS) || os(macOS)` で素の `@Property` にフォールバックしています。しかもこれ、iOS destination のビルドでは何も起きず、**watchOS を含むフルビルドで初めて露見** します。entity まわりを触ったら複数 destination を回す、というのはこの後も何度か出てくる教訓です。なお Xcode 27 beta 2 でもガードを外して試したら同じエラーで落ちたので、この分岐は当面必要みたいです。
+
+深さは他と同じくビルド成立 (B) までで、セマンティック検索が実際に賢くなるかは実機待ちです。
+
 ## ネイティブ型で受ける: Duration / PersonNameComponents / PlaceDescriptor
 
 ここが Phase 1 でいちばん設計判断が要ったところでした。
@@ -163,6 +196,44 @@ enum TodoPlace {
 「入力と公開はシステム型、保存は primitive、境界で変換」というのは、書く前は二度手間っぽくて気が進まなかったんですが、やってみると役割がきれいに分かれて結構気持ちよかったです。
 Siri に見せる顔 (リッチな型) と、CloudKit に保存する都合 (枯れた primitive) は、そもそも要求が別物なので、無理に 1 つの表現に寄せない方が素直だなと思いました。
 
+### (2026-07-02 追記) Transferable + ValueRepresentation で外にも書き出せる名詞にする
+
+ネイティブ型の話には続きがあって、99/N の将来トピックに挙げていた `ValueRepresentation` (セッション 240 / 345) もその後採用しました。
+`TodoAppEntity` を `Transferable` に適合させて `transferRepresentation` に表現を並べると、Todo をドラッグ / コピー / 共有で **構造化された値としてアプリの外に書き出せる** ようになります。
+
+```swift
+extension TodoAppEntity: Transferable {
+    public static var transferRepresentation: some TransferRepresentation {
+        ProxyRepresentation(exporting: \.title)   // タイトルを plain text で
+
+        ValueRepresentation(exporting: { (todo: TodoAppEntity) -> IntentPerson in
+            guard let name = todo.assigneeName, !name.isEmpty else {
+                throw IntentError.notFound("Todo has no assignee to export")
+            }
+            return IntentPerson(
+                identifier: .applicationDefined(todo.id),
+                name: .displayName(name),
+                handle: nil
+            )
+        })
+
+        ValueRepresentation(exporting: { (todo: TodoAppEntity) -> PlaceDescriptor in
+            guard let location = todo.location else {
+                throw IntentError.notFound("Todo has no location to export")
+            }
+            return location
+        })
+    }
+}
+```
+
+担当者は `IntentPerson`、場所は `PlaceDescriptor` という **システムの intent value 型** へ橋渡ししています。この節で書いた「二重表現」の外向き版で、保存は primitive でも境界でネイティブ型に揃えてあったからこそ、export がすんなり書けました。
+
+細かい気付きも 2 つ書いておきます。
+
+- `IntentPerson(identifier:name:handle:)` は **全引数が必須** でした。`handle` を省くと `Missing arguments for parameters 'identifier', 'handle'` になるので、無いものは明示的に `nil` を渡します。
+- export closure は `async throws` なので、担当者や場所が無い Todo は **`throw` してその表現ごと出さない** 形にしました。空っぽの `IntentPerson` を返すより、「この Todo に人の表現は無い」とシステムに伝わる方が筋がいいと思います。
+
 ## @ComputedProperty と @DeferredProperty
 
 WWDC 2026 のプロパティマクロで、もう 1 つ試したのが `@ComputedProperty` と `@DeferredProperty` です。
@@ -252,6 +323,8 @@ public func hash(into hasher: inout Hasher) {
 ```
 
 ちなみに `location` (`PlaceDescriptor`) は `Equatable` が保証されていないので等価比較からは外しています。保存している name / 緯度経度はモデル経由で結局反映されるので、実害は無いと判断しました。
+
+(2026-07-02 追記) この `Hashable` 合成の問題、Xcode 27 beta 2 でも直っていませんでした。beta 2 対応のついでに明示実装を外してビルドし直してみたら、やっぱり `does not conform to protocol 'Hashable'` で落ちたので、当面は明示実装が必要なままです。
 
 ## 関連を Entity 化する: Category / SubTask
 

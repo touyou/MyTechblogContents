@@ -111,6 +111,8 @@ WWDC 2026 編 (7/N) で `Category` を `@AppEntity(schema: .reminders.list)` に
 reminder スキーマがマクロ生成 init で `EntityProperty<T>` 引数を取り、さらに `section` / `locationTrigger` 等の入れ子サブエンティティを再帰的に要求してくるため、モデルから組み立てる自前 init と相性が悪い、という詰まり方をしています。
 list 適合で App Schema の仕組み自体は検証できたので、本体適合は独立タスクとして切り出して、深掘りできたら追記する予定です。
 
+(2026-07-02 追記) 下の I にも書いたとおり、Group Lab の「新 Siri 連携は App Schema 採用が前提」という話を受けて一度再評価したんですが、据え置きの結論は変わりませんでした。入れ子サブエンティティの要求仕様 (`section` / `locationTrigger` / `locationTriggerEvent`) は具体的に分かった一方で、それらを揃えてもマクロ生成 init の初期化規約問題は解消しないためです。Xcode 27 beta 2 でも当時の probe コードを復元してビルドして、同じ初期化エラーが再現することを確認しました。詳しい経緯は [7/N の追記](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents) に書いています。
+
 ### G. `.foreground(.deferred)` の細部
 
 `.foreground(.dynamic)` は上に書いたとおり一度試して revert したんですが、`[.background, .foreground(.deferred)]` のような「初期バックグラウンド → 必要になったら自動 foreground 化」の挙動は、そもそもまだどういうケースで活きるのか手応えが無いです。
@@ -133,6 +135,18 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 - **`.system.searchInApp` 適合** (セッション 343): `SearchEverythingIntent` をこのスキーマに適合させ、Siri がアプリ自身の検索 UI で結果を出せるようにする。
 - **`allowedExecutionTargets` の再検証** (セッション 345): 9/N で訂正したとおり `.widgetKitExtension` も選べるので、これで Primary / FromExtension 分離を畳めないか改めて確かめる。
 - **reminder 本体スキーマ適合の優先度** (Group Lab): 「新しい Siri と連携するにはいずれかの App Schema 採用が前提」とのことなので、コアの `TodoAppEntity` を意味理解させるには上記 F の本体適合がやはり要る、という位置づけが見えてきた。
+
+(2026-07-02 追記) この候補群、その後 `xcode27` ブランチでひととおり実装・検証まで進んだので、結果をここに書いておきます (詳細はそれぞれの記事に追記済みです)。
+
+- `@Property(indexingKey:)`: 採用しました。`\.title` / `\.contentDescription` にマップ。`indexingKey:` のオーバーロードは iOS / macOS でしか vend されないので `#if` ガードが要ります → [6/N に追記](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
+- `Transferable` + `ValueRepresentation`: 採用しました。担当者を `IntentPerson`、場所を `PlaceDescriptor` へ export → 同じく [6/N に追記](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
+- `IntentParameter.valueState`: 採用しました。`UpdateTodoIntent` を新設して三値を `FieldUpdate` というサービス層の enum に写像 → [8/N に追記](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)
+- コレクション onscreen + 通知: 採用しました。一覧に `.appEntityIdentifier(forSelectionType:)` (大きなリストで id を遅延マップする版)、通知に `UNMutableNotificationContent.appEntityIdentifiers` を付与しています。通知側は **永続 AppEntity が必須** で `TransientAppEntity` は不可、というのが引っかかりどころでした。これはどの記事の主題ともずれるので、記録はここだけです。
+- `.system.searchInApp` 適合: 採用しました。実装してみたら SDK の正式名は **`.system.search`** で、`SearchEverythingIntent` への適合ではなく遷移専用の別 Intent (`ShowTodoSearchResultsIntent`) を新設する形になりました → [7/N に追記](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents)
+- `allowedExecutionTargets` の再検証: **「FromExtension は畳めない」で確定** しました。制御できるのは perform のプロセスであって entity 解決の有無ではない、が理由です → [9/N に追記](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
+- reminder 本体スキーマ適合: 再評価したうえで **据え置き継続** です → 下の F に追記しました。
+
+ついでの話として、SDK 27 の SwiftUI 新 API (ドラッグ並べ替えの `reorderable()` / `reorderContainer`) に追従したときも、並べ替えの永続化は `ReorderTodosIntent` という Intent として定義しました。ドラッグ確定は `Button(intent:)` に載せられないので View からは Intent と同じ `TodoService.reorderTodos(orderedIDs:)` を直接呼ぶんですが、ロジックの置き場を Intent 側の語彙に寄せておくことで、「アクションはまず Intent として定義する」という 1/N の原則は崩れていません。
 
 ## まとめ
 

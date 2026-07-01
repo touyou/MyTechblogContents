@@ -193,6 +193,40 @@ try? await IntentDonationManager.shared.deleteDonations(
 「追加で寄付、削除で寄付を消す」をペアで持っておくと、提案が実体とズレにくくなる、というのが設計上の肝でした。
 寄付しっぱなしだと、消したはずの Todo がいつまでも提案に出てくる、みたいな気持ち悪さが残るので、削除側の後始末まで含めて 1 セットだと思っています。
 
+## (2026-07-02 追記) 「消して」と「言ってない」を区別する: IntentParameter.valueState
+
+公開後に追加で検証した話をここに足しておきます。99/N の将来トピックに挙げていた `IntentParameter.valueState` (セッション 344) で、`UpdateTodoIntent` という部分更新の Intent を新設しました。
+
+更新系の Intent で optional なパラメータを素直に `String?` などで受けると、「新しい値を入れたい」「今の値を明示的に消したい」「触らず据え置きたい」の 3 つのうち後ろ 2 つが同じ `nil` に潰れてしまいます。`$param.valueState` を見ると、これを `.set(value)` / `.set(nil)` / `.unset` の三値で区別できます。
+
+```swift
+// UpdateTodoIntent.perform() 内
+let entity = try todoService.update(
+    todoId: todo.id,
+    title: Self.requiredUpdate($title.valueState),
+    todoDescription: Self.optionalUpdate($todoDescription.valueState),
+    dueDate: Self.optionalUpdate($dueDate.valueState),
+    isFavorite: Self.requiredUpdate($isFavorite.valueState),
+    // ...
+)
+
+/// optional なモデル列: .set(nil) は「明示クリア」としてそのまま通す
+private static func optionalUpdate<T>(_ state: IntentParameter<T?>.ValueState) -> FieldUpdate<T?> {
+    if case .set(let value) = state { return .set(value) }
+    return .unchanged
+}
+
+/// 必須のモデル列 (title など): .set(nil) も据え置き扱い (必須列は空にできない)
+private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -> FieldUpdate<T> {
+    if case .set(let value?) = state { return .set(value) }
+    return .unchanged
+}
+```
+
+受け側の `TodoService.update` は `FieldUpdate<Value>` (`.unchanged` / `.set(Value)`) という enum でフィールドごとに受けるようにして、`valueState` の三値をサービス層の語彙に写しています。title のように **モデル上は必須の列** は `.set(nil)` が来ても据え置きにする、という出し分けが必要だったので、上のとおり generic なヘルパーを optional 用と必須用の 2 種に分けました。
+
+この記事の主題 (perform() を止めて聞き返す) とは道具が違いますが、「ユーザーが『消して』と言ったのか、単に何も言わなかったのか」を区別するという意味では同じ方向の話だと思ったので、ここに追記しています。深さはビルド成立 (B) までで、Shortcuts の UI が実際に「クリア」と「未指定」を区別して渡してくるかは実機待ちです。
+
 ## 検証できた深さ
 
 今回は以下です。

@@ -191,7 +191,26 @@ struct IntentTodoWatchApp: App {
 
 ここまで書いたように Extension target は薄いスキャフォルドに留めますが、Widget / Live Activity は **アプリ本体とは別プロセス** で動く、という前提は変わりません。WWDC 2026 の "SwiftData Group Lab" (セッション 8017) で、この「別プロセスで同じ App Group のストアを共有する」構成の SwiftData マイグレーション指針が示されていました。要は **マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。
 
-アプリ更新直後は本体より先に Widget が起動し得るので、Extension 側にマイグレーションプランを持たせると本体の移行と競合し得る、というのが理屈。Extension 構成の観点だと「View もデータ取得ロジックも SPM に寄せ、**マイグレーションの責務もアプリ本体に寄せる**」と覚えておくと収まりが良いです。SwiftData / CloudKit 側の具体的な書き方は [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) に書きました。(Group Lab はベータ時点の要約ベースなので、実際に `SchemaMigrationPlan` を入れる際は最新ドキュメントで再確認予定です)
+アプリ更新直後は本体より先に Widget が起動し得るので、Extension 側にマイグレーションプランを持たせると本体の移行と競合し得る、というのが理屈です。Extension 構成の観点だと「View もデータ取得ロジックも SPM に寄せ、**マイグレーションの責務もアプリ本体に寄せる**」と覚えておくと収まりが良いです。SwiftData / CloudKit 側の具体的な書き方は [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) に書きました。(Group Lab はベータ時点の要約ベースなので、実際に `SchemaMigrationPlan` を入れる際は最新ドキュメントで再確認予定です)
+
+## (2026-07-08 追記) もう1つの例外: AppShortcutsProvider もアプリ本体に置く
+
+上の「マイグレーションはアプリ本体に寄せる」と同じ形の話がもう1つ見つかりました。**`AppShortcutsProvider`（App Shortcuts の宣言）も SPM パッケージに置いてはいけません。**
+
+`TodoAppIntents` パッケージ内に `AppShortcutsProvider` を置いても、ビルド・実行はエラーなく通ります。ところが Siri / Shortcuts アプリ / Spotlight に **App Shortcut が一切出てきません**。Intent 本体（`actions` / `entities` / `queries`）はパッケージから依存元アプリの統合メタデータへちゃんと集約されるのに、`AppShortcutsProvider.appShortcuts`（メタデータ上は `autoShortcuts`）だけは集約対象から外れる、というのが実体でした。
+
+ビルド時に生成される `Metadata.appintents`（DerivedData 配下の `extract.actionsdata`、JSON）をパッケージ側とアプリ側で見比べると差が分かります。
+
+| キー | パッケージ側 | アプリ側 |
+|------|------|------|
+| `actions` | 20 | 20 (集約される) |
+| `entities` | 3 | 3 (集約される) |
+| `queries` | 3 | 3 (集約される) |
+| `autoShortcuts` | 8 | 0 (集約されない) |
+
+`TodoAppShortcuts` をメインアプリターゲット直下へ移したところ、アプリ側の `autoShortcuts` が 0 → 8 になり、App Shortcut が実際に出るようになりました。Intent 本体は `public` のままパッケージに残し、`AppShortcutsProvider` からは `import TodoAppIntents` で参照する形にしています。
+
+この不具合は **ビルドやコード補完のどのタイミングでも露見しません**。ビルドは通り、Intent 自体は Siri への直接指示や Widget からは機能し、警告も出ないので気付きにくいです。App Shortcut のフレーズだけが黙って欠落しているので、Shortcuts アプリを開いて目視確認するか、統合メタデータの `autoShortcuts` 件数を直接見ないと気付けませんでした。
 
 ## まとめ
 

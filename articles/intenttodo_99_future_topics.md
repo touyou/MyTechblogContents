@@ -142,7 +142,7 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 - `Transferable` + `ValueRepresentation`: 採用しました。担当者を `IntentPerson`、場所を `PlaceDescriptor` へ export → 同じく [6/N に追記](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
 - `IntentParameter.valueState`: 採用しました。`UpdateTodoIntent` を新設して三値を `FieldUpdate` というサービス層の enum に写像 → [8/N に追記](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)
 - コレクション onscreen + 通知: 採用しました。一覧に `.appEntityIdentifier(forSelectionType:)` (大きなリストで id を遅延マップする版)、通知に `UNMutableNotificationContent.appEntityIdentifiers` を付与しています。通知側は **永続 AppEntity が必須** で `TransientAppEntity` は不可、というのが引っかかりどころでした。これはどの記事の主題ともずれるので、記録はここだけです。
-- `.system.searchInApp` 適合: 採用しました。実装してみたら SDK の正式名は **`.system.search`** で、`SearchEverythingIntent` への適合ではなく遷移専用の別 Intent (`ShowTodoSearchResultsIntent`) を新設する形になりました → [7/N に追記](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents)
+- `.system.searchInApp` 適合: 採用しました。実装してみたら SDK の正式名は **`.system.search`** で、`SearchEverythingIntent` への適合ではなく遷移専用の別 Intent (`ShowTodoSearchResultsIntent`) を新設する形になりました → [7/N に追記](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents) (2026-07-08 追記: その後 Xcode 27 beta 3 で `.system.search` は deprecated になり `.system.searchInApp` にリネームされたので、最初にここで挙げていた表記のほうが結果的に正しくなりました)
 - `allowedExecutionTargets` の再検証: **「FromExtension は畳めない」で確定** しました。制御できるのは perform のプロセスであって entity 解決の有無ではない、が理由です → [9/N に追記](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 - reminder 本体スキーマ適合: 再評価したうえで **据え置き継続** です → 下の F に追記しました。
 

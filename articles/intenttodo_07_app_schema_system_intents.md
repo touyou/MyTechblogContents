@@ -206,6 +206,18 @@ struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 
 なおこのスキーマも beta 2 で watchOS では unavailable になった (`'system' is unavailable in watchOS`) んですが、watch アプリにはそもそも遷移先になる検索 UI が無いので、こちらは list のようなフォールバックではなく `#if !os(watchOS)` で丸ごと除外しました。深さはここもビルド成立 (B) までで、Siri が実際に検索語を流してくれるかは実機待ちです。
 
+### (2026-07-08 追記) beta 3 で `.system.search` が `.system.searchInApp` にリネームされた
+
+上で「SDK での正式名は `.system.search` でした」と書きましたが、**Xcode 27 beta 3 でこの名前が `.system.searchInApp` にリネームされ、`.system.search` は deprecated になりました** (`'search' is deprecated: Use .system.searchInApp instead` という警告が出るようになります)。回り回って、99/N で最初に候補として挙げていた `.system.searchInApp` という表記のほうが結果的に正しい名前だった、というオチです。
+
+```diff
+- @AppIntent(schema: .system.search)
++ @AppIntent(schema: .system.searchInApp)
+struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
+```
+
+ベータの間はこうやって途中で名前が変わることもあるんだな、というのを地で行く話でした。あわせて、watchOS で `.system` ドメインが unavailable な制約 (上の `#if !os(watchOS)` 除外) も beta 3 で実ビルドして再確認しましたが、変わらず続いています。
+
 ## 検証できた深さ
 
 今回は以下です。

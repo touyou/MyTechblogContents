@@ -234,6 +234,27 @@ extension TodoAppEntity: Transferable {
 - `IntentPerson(identifier:name:handle:)` は **全引数が必須** でした。`handle` を省くと `Missing arguments for parameters 'identifier', 'handle'` になるので、無いものは明示的に `nil` を渡します。
 - export closure は `async throws` なので、担当者や場所が無い Todo は **`throw` してその表現ごと出さない** 形にしました。空っぽの `IntentPerson` を返すより、「この Todo に人の表現は無い」とシステムに伝わる方が筋がいいと思います。
 
+### (2026-07-28 追記) beta 3 で `PlaceDescriptor` を `@Parameter` から一時退避した
+
+ここまでさんざん「ネイティブ型で受ける」と書いておいて何なんですが、**Xcode 27 beta 3 で `PlaceDescriptor` を `@Parameter` / `@Property` から外して、いったん場所名の `String` に退避しました**。
+
+きっかけは Xcode Cloud が赤くなったことで、ログを追うと `AppIntentsSSUTraining` (Generate SSU asset files) のフェーズが `PlaceDescriptor` のパラメータを SSU の variable に変換するときに、裏側のシステム Entity 型名 `GeoToolbox.PlaceDescriptorEntity` をそのまま variable 名として使っていて、ドットが入っているせいで `^[a-zA-Z_][a-zA-Z_$0-9]*$` の正規表現に落ちてエラーを emit していました。厄介なのは手元の `xcodebuild` が最終的に exit 0 (build succeeded) で返ってくるところで、ローカルだけ見ていると気付きません。Xcode Cloud は emitted error があると失敗扱いにするので、そこで初めて表に出てきました。
+
+```swift
+// 本当はこう書きたい (SDK が直ったら戻す)
+// @Parameter(title: "Location", description: "Place associated with the todo")
+// public var location: PlaceDescriptor?
+
+@Parameter(title: "Location", description: "Place associated with the todo")
+public var location: String?
+```
+
+自分の書き方が悪いというより SDK 側のバグくさいので、退避はあくまで暫定です。beta 4 でも DerivedData を消してクリーンビルドし直してみましたが同じエラーが再現したので、まだ戻せていません。
+
+不幸中の幸いだったのが、この節で書いた「入力と公開はシステム型、保存は primitive、境界で変換」の二重表現にしていたおかげで、**触ったのが境界だけで済んだ** ことでした。モデル (`TodoItem`) は最初から `locationName` + 緯度経度の primitive なので、`@Model` もマイグレーションも一切触っていません。ネイティブ型を保存層まで通す設計にしていたら、SDK バグひとつで永続化スキーマまで巻き添えになっていたはずで、そこは分けておいてよかったなと思いました。
+
+もう 1 つ、上に書いた `Transferable` の `ValueRepresentation` は **そのまま残せています**。SSU の variable になるのは `@Parameter` / `@Property` の型であって、export 表現は対象外だからです。なので「入力は String に退避しているけれど、書き出しは今も `PlaceDescriptor`」という状態で、`TodoPlace.descriptor(name:latitude:longitude:)` で場所名から descriptor を組み直して export しています。緯度経度を Intent から受け取る口だけが一時的に閉じている形です。
+
 ## @ComputedProperty と @DeferredProperty
 
 WWDC 2026 のプロパティマクロで、もう 1 つ試したのが `@ComputedProperty` と `@DeferredProperty` です。
@@ -358,6 +379,88 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 ローカル id と安定 id が別々のアプリだと `id` を `SyncableEntityIdentifier<Local, Stable>` 型にする必要があるみたいですが、IntentTodo はそもそも別 id を持っていないので、`String` id のまま適合できました。
 「すでに正しく設計されていると、新 API への適合がタダで済む」のは結構気持ちのいい瞬間で、CloudKit の id 設計をサボらずにやっておいてよかったなと思いました。
 
+## (2026-07-28 追記) TransientAppEntity で集計値も名詞にする
+
+Phase 1 で 1 つだけ手を付けられずに残していた `TransientAppEntity` (セッション 344) を、Xcode 27 beta 4 のタイミングで試しました。
+
+これは名前のとおり **永続化されないエンティティ** で、`AppEntity` との違いはだいたいこのあたりです。
+
+| | `AppEntity` | `TransientAppEntity` |
+|---|---|---|
+| `defaultQuery` | 必須 | 不要 |
+| 実体 | SwiftData 等の永続データに対応 | 計算済みのスナップショット |
+| 参照 | id で Siri / Shortcuts が後から引ける | Intent の戻り値としてだけ使う |
+| `@Property` | 使える | 使える |
+
+IntentTodo では「今の Todo リストの集計」を返す `TodoListSummaryEntity` を作りました。
+
+```swift
+public struct TodoListSummaryEntity: TransientAppEntity {
+    public static let typeDisplayRepresentation: TypeDisplayRepresentation = "Todo List Summary"
+
+    @Property(title: "Total Todos")
+    public var totalCount: Int
+
+    @Property(title: "Pending Todos")
+    public var pendingCount: Int
+
+    @Property(title: "Overdue Todos")
+    public var overdueCount: Int
+
+    // ... completedCount / favoriteCount も同じ形
+
+    public var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(
+            title: "\(pendingCount) pending, \(overdueCount) overdue",
+            subtitle: "\(totalCount) total (\(completedCount) completed, \(favoriteCount) favorited)"
+        )
+    }
+
+    public init() {}
+
+    // 値を渡す方の init も別に用意しておく
+    public init(totalCount: Int, completedCount: Int, pendingCount: Int, overdueCount: Int, favoriteCount: Int) {
+        self.totalCount = totalCount
+        // ...
+    }
+}
+```
+
+書いてみて気付いたところをいくつか。
+
+- `defaultQuery` が要らないので `EntityQuery` を 1 つも書かなくていいです。クエリできない型なので `IndexedEntity` も載せません (Spotlight に出しても引く手段が無い)。
+- `@Property` は `AppEntity` と同じマクロがそのまま使えて、`Int` みたいな非 Optional もそのまま持てます。
+- `init()` と値を渡す `init(...)` の 2 つを用意しておくのが安全でした。プロパティマクロが `EntityProperty` の backing storage を生やす都合で、システム側が引数なし `init()` を要求してくる場面があります。
+- `typeDisplayRepresentation` は `static let` で書けます。
+
+返す側の Intent はこんな感じで、`.background` で集計だけして値と dialog を返します。
+
+```swift
+public struct GetTodoSummaryIntent: AppIntent {
+    public static var supportedModes: IntentModes { .background }
+
+    @Dependency
+    var todoService: TodoService
+
+    @MainActor
+    public func perform() async throws
+        -> some IntentResult & ReturnsValue<TodoListSummaryEntity> & ProvidesDialog {
+        let summary = try todoService.summarize()
+        return .result(
+            value: summary,
+            dialog: IntentDialog(
+                full: "You have \(summary.pendingCount) pending todos, \(summary.overdueCount) of which are overdue.",
+                supporting: "\(summary.pendingCount) pending, \(summary.overdueCount) overdue."
+            )
+        )
+    }
+}
+```
+
+嬉しいのは Shortcuts 側で、「Get Todo Summary → Overdue Todos が 0 より大きければ通知する」みたいな条件分岐が、`@Property` 1 つずつを変数として組めることでした。既存の `ShowTodosIntent` で Todo を全件返してもらって数を数える、みたいな遠回りをしなくて済みます。サービス層は `fetchAll()` 1 回で全部の件数を作る `summarize()` を足しただけです。
+
+棲み分けとしては、99/N に書いた「通知の `appEntityIdentifiers` は永続 `AppEntity` 必須で `TransientAppEntity` は不可」という制約と表裏だと思っていて、**後から id で名指しされる名詞は `AppEntity`、その場で計算して返すだけの値は `TransientAppEntity`** と分かれている感じです。集計値に無理やり id を付けて永続 Entity に見せかけなくてよくなった、というのが実際に使ってみての感想でした。深さはビルド成立 (B) までで、Shortcuts で実際に条件分岐を組んで走らせるところは実機待ちです。
+
 ## 検証できた深さ
 
 正直に書いておくと、この回の内容は以下の深さです。
@@ -365,6 +468,7 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 - **ビルド成立 (型レベル)**: 全部 OK。`Duration` / `PersonNameComponents` / `PlaceDescriptor` / 各プロパティマクロ / `SyncableEntity` はコンパイルが通り、API 採用としては妥当だと判断しています。
 - **単体 (SPM / テスト)**: Entity 変換まわりは確認済み。
 - **実機 (Siri が実際にネイティブ型ピッカーを出すか、deferred property がいつ呼ばれるか)**: 未確認です。ここは端末での手動確認が要るので、できたら追記します。
+- (2026-07-28 追記) 後から足した `TransientAppEntity` / `GetTodoSummaryIntent` も同じくビルド成立 (B) までです。あと `PlaceDescriptor` は上の追記のとおり、今は SSU のバグ回避で `String` に退避しているので、ネイティブ型としての検証は beta 2 時点のものになります。
 
 なので本記事は「これらの API を採用して設計に組み込むと、こういう構造になる」という設計判断の記録として読んでもらえればと思います。
 
@@ -372,10 +476,11 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 
 - WWDC 2026 編は `xcode27` ブランチでの検証で、本編より浅い (主に型レベル + 単体)。実機可否より「採用していいか / 設計にどう効くか」を書く
 - `@Property` でモデル属性をシステムに公開し、関連 (`category`) も Entity として持てる
-- `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する
+- `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する (2026-07-28 追記: `PlaceDescriptor` は beta 3 の SSU バグ回避で `String` に一時退避中。境界だけ直せば済んだのは二重表現のおかげでした)
 - `@ComputedProperty` (同期・軽い導出) と `@DeferredProperty` (非同期・要求時フェッチ、Spotlight 非 index) を使い分ける
 - Entity は `@Dependency` を使えないので、共有コンテナは `TodoEntityStore` に置いて参照する
 - プロパティマクロは `Hashable` 自動合成を壊すので `==` / `hash(into:)` を明示実装する
 - `SyncableEntity` は CloudKit id をそのまま使っていれば適合を書き足すだけで済む
+- (2026-07-28 追記) 集計値のように後から id で引かれないものは `TransientAppEntity` にすると、`EntityQuery` も永続化も無しで Shortcuts の条件分岐に載せられる
 
 次回は、[ここで Entity 化した `Category` を `@AppEntity(schema: .reminders.list)` に適合させた話と、Todo 本体を reminder スキーマに適合させようとして保留した話 (7/N)](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents) を書きます。

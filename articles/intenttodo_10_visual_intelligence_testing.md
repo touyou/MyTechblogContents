@@ -97,6 +97,29 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 
 ちなみに「期限 → カレンダー」「担当者 → 連絡先」みたいな EventKit / Contacts 連携は、別フレームワークの話で App Intents 中心設計の検証主眼からは外れるので、今回は記録だけして未実装にしています。
 
+### (2026-07-28 追記) `canImport` だけだと visionOS の実機ビルドで落ちた
+
+すぐ上で「ガードを `canImport` にしておいたおかげで」と自慢げに書いたんですが、その後 **visionOS の実機ビルドだけが落ちる** という形でしっぺ返しを食らいました。
+
+`canImport(VisualIntelligence)` が見ているのは「そのフレームワークを import できるか」だけで、「その中の API がそのプラットフォームで available か」までは面倒を見てくれません。しかも `canImport` の結果は **同じ visionOS でもシミュレータ SDK と実機 SDK で違って**、こういうことになっていました。
+
+- visionOS シミュレータ: `canImport(VisualIntelligence)` が false → コードごと除外されてビルド成功
+- visionOS 実機 (Any visionOS Device) SDK: `canImport` が true になり、`.visualIntelligence.semanticContentSearch` スキーマ (visionOS 非対応) までコンパイルされて `'visualIntelligence' is unavailable in visionOS` で失敗
+
+なので、非対応プラットフォームは明示的に外すしかありませんでした。
+
+```swift
+// import できるか、しか見ていない
+#if canImport(VisualIntelligence)
+
+// 非対応プラットフォームは明示的に外す
+#if canImport(VisualIntelligence) && !os(visionOS)
+```
+
+教訓としては 3 つで、まず `canImport` はあくまで存在チェックなので、API の対応プラットフォームが限られている機能では `&& !os(...)` を併用すること。次に **シミュレータのビルドが通ったことを「その OS で通る」根拠にしない** こと (Xcode Cloud やアーカイブは実機 SDK でビルドするので、手元でも `Any <OS> Device` を回しておくのが確実でした)。最後に、今回みたいに Intent と Query が対になっている機能では **ガードを全ファイルで揃える** こと。片方だけ外すと相互参照が dangling して別のエラーになります。
+
+本編 5/N で `CSSearchableIndex` と `IndexedEntity` の gate を揃える話を書きましたが、あれの「揃える相手が `#if os(...)` とは限らない」版だなと思いました。
+
 ## AppIntentsTesting で Intent を実経路テストする
 
 WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテスト** (セッション 295) を試しました。
@@ -197,7 +220,7 @@ UI テストターゲットは synchronized folder ではないので、**ファ
 
 - `IntentValueQuery` はカメラ / スクショの visual search にアプリのコンテンツを返す入口。`AppEntity` と違い `@Dependency` が使え、`@UnionValue` で複数型を返せる
 - `SemanticContentDescriptor` の `labels` は一般英語ラベル。`values(for:)` は nonisolated なので MainActor へホップして fetch する
-- `@AppIntent(schema: .visualIntelligence.semanticContentSearch)` は entity プロパティを持たないので reminder スキーマの init 地雷を踏まない。`VisualIntelligence` は iOS 専用なので `#if canImport` でガード (2026-07-02 追記: beta 2 で Mac にも import 可能になりました。Mac は返す entity 全部に `OpenIntent` を要求してくるので、本文の追記を見てください)
+- `@AppIntent(schema: .visualIntelligence.semanticContentSearch)` は entity プロパティを持たないので reminder スキーマの init 地雷を踏まない。`VisualIntelligence` は iOS 専用なので `#if canImport` でガード (2026-07-02 追記: beta 2 で Mac にも import 可能になりました。Mac は返す entity 全部に `OpenIntent` を要求してくるので、本文の追記を見てください / 2026-07-28 追記: `canImport` だけだと visionOS 実機ビルドが落ちたので `&& !os(visionOS)` を足しています)
 - 結果タップ (`OpenTodoIntent`) / 複数結果型 (`@UnionValue`) は既存部品を再利用できた
 - AppIntentsTesting は実経路で intent を動かせるが **UI テストバンドル必須**。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
 - WWDC 2026 編全体を通して、Entity / Intent を丁寧に設計しておくほど新サーフェスへの適合が安くなる、というのが一番の実感だった

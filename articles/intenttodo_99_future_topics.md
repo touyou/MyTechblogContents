@@ -81,6 +81,7 @@ WWDC 2026 で `ResultsObserver` / `ModelResultsObserver` という、SwiftUI の
 - `Button(intent:)` 経由の各アクション (`role:` が引数の先頭に来るシグネチャで動くか)
 
 Vision Pro 持ってないので、シミュレータで動いた範囲だけしか言及できない状態。
+(2026-07-28 追記) 実機は相変わらず無いままなんですが、**実機 SDK 向けのビルドだけが落ちる** という別種の問題は 1 つ潰しました。`#if canImport(VisualIntelligence)` がシミュレータでは false、実機 SDK では true になってビルドが割れる話で、詳しくは [10/N の追記](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) に書いています。シミュレータで動いた範囲しか言えない、の前に「実機向けにビルドは通るのか」という段があったんだなと反省しました。
 visionOS でハマった「`NavigationSplitView.selection` の更新を NavigationModel に統合した」話 (本シリーズ 2/N で軽く触れた話) の続きは、実機検証ができたら書きたいです。
 
 ### C. Spotlight の iOS 反映ラグ
@@ -146,13 +147,22 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 - `allowedExecutionTargets` の再検証: **「FromExtension は畳めない」で確定** しました。制御できるのは perform のプロセスであって entity 解決の有無ではない、が理由です → [9/N に追記](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 - reminder 本体スキーマ適合: 再評価したうえで **据え置き継続** です → 下の F に追記しました。
 
+(2026-07-28 追記) さらにその後、WWDC 2026 編で唯一手付かずだった `TransientAppEntity` (セッション 344) も採用しました。集計値を返す `TodoListSummaryEntity` + `GetTodoSummaryIntent` を新設して、Shortcuts で「未完了が N 件以上なら通知」のような条件分岐を組めるようにしています → [6/N に追記](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)。上に書いた「通知の entity アノテーションは永続 `AppEntity` 必須で `TransientAppEntity` は不可」という制約とちょうど裏表で、id で名指しされる名詞と、その場で計算して返すだけの値が型で分かれている、という整理に落ち着きました。あわせて `EntityPropertyQuery` も候補として見ていたんですが、既存の `TodoEntityQuery` (`EntityStringQuery`) で足りていて入れる理由が無かったので、こちらは不採用にしています。
+
 ついでの話として、SDK 27 の SwiftUI 新 API (ドラッグ並べ替えの `reorderable()` / `reorderContainer`) に追従したときも、並べ替えの永続化は `ReorderTodosIntent` という Intent として定義しました。ドラッグ確定は `Button(intent:)` に載せられないので View からは Intent と同じ `TodoService.reorderTodos(orderedIDs:)` を直接呼ぶんですが、ロジックの置き場を Intent 側の語彙に寄せておくことで、「アクションはまず Intent として定義する」という 1/N の原則は崩れていません。
+
+### (2026-07-28 追記) J. `PlaceDescriptor` をネイティブ型に戻す
+
+これは自分の検証待ちというより SDK 待ちのタスクです。
+6/N で「`PlaceDescriptor` をネイティブ型のまま `@Parameter` / `@Property` で受ける」と書いた部分、Xcode 27 beta 3 から `AppIntentsSSUTraining` が `GeoToolbox.PlaceDescriptorEntity` という型名をそのまま SSU の variable 名に使ってしまい、ドット入りの名前が正規表現に落ちてビルドエラーを emit するようになったので、暫定で場所名の `String` に退避しています (beta 4 でも未修正)。
+ローカルの `xcodebuild` は exit 0 で返ってくるのに Xcode Cloud だけ失敗する、という気付きにくい壊れ方をするのも含めて、経緯は [6/N の追記](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) に書きました。
+SDK が更新されたら退避コミットを revert してクリーンビルドし直す、というのを毎回の beta 追従のチェック項目にしています。緯度経度を Intent 経由で受け取る口が閉じたままなので、ここは早く戻したいところです。
 
 ## まとめ
 
 - 本編は「実機で詰まった話」、WWDC 2026 編は「採用していいか / 設計判断」と、軸を分けて書いている
 - 最初に並べた将来トピックのうち、Visual Intelligence / Interactive Snippets / Intent Modes の一部は WWDC 2026 編で片付いた
 - FoundationModels (端末内 LLM) は「やらないと決めた」もの。主眼から意図的に外している
-- 残りの検証待ち (watchOS / visionOS / Spotlight ラグ / macOS 細部 / LA crash 再現 / reminder 本体適合 / `.foreground(.deferred)` / `LoadResult<T>`) は、手元の機材と検証コストで順番が決まる予定
+- 残りの検証待ち (watchOS / visionOS / Spotlight ラグ / macOS 細部 / LA crash 再現 / reminder 本体適合 / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の復帰) は、手元の機材と検証コストで順番が決まる予定
 
 書ける段階になり次第、ここから本編へ昇格させていきます。

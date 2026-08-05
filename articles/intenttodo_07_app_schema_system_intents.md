@@ -180,7 +180,7 @@ IntentTodo にはもともと UI の `Button(intent:)` から 1 件ずつ消す 
 
 ### (2026-07-02 追記) 検索もシステムの語彙に乗せる: .system.search
 
-「開く」「削除する」に続けて、**検索** もシステムの語彙に乗せました。99/N の将来トピックに「`.system.searchInApp` 適合 (セッション 343)」として挙げていたやつで、実装してみたら SDK での正式名は **`.system.search`** でした (`ShowInAppSearchResultsIntent` 自体は iOS 16 からある型で、スキーママクロで適合させる形が新しい部分のようです)。適合すると、Siri / Apple Intelligence が検索語をアプリ自身の検索 UI に流して、結果をアプリ側で見せられるようになります。
+「開く」「削除する」に続けて、**検索** もシステムの語彙に乗せました。99/N の将来トピックに「`.system.searchInApp` 適合 (セッション 344)」として挙げていたやつで、実装してみたら SDK での正式名は **`.system.search`** でした (`ShowInAppSearchResultsIntent` 自体は iOS 16 からある型で、スキーママクロで適合させる形が新しい部分のようです)。適合すると、Siri / Apple Intelligence が検索語をアプリ自身の検索 UI に流して、結果をアプリ側で見せられるようになります。
 
 ```swift
 @AppIntent(schema: .system.search)

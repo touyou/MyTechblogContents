@@ -13,7 +13,7 @@ published: true
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 10 回目です。
 WWDC 2026 編 (6〜10) の最後で、`xcode27` ブランチでの検証です (前提は 6/N 冒頭)。
 
-最後は外向きのサーフェスとして Visual Intelligence 連携 (セッション 297) と、Intent を実際の経路で動かすテスト基盤 (AppIntentsTesting / #295) を試した話です。
+最後は外向きのサーフェスとして Visual Intelligence 連携 (セッション 297) と、Intent を実際の経路で動かすテスト基盤 (AppIntentsTesting / セッション 295) を試した話です。
 
 ## カメラ/スクショから自分のアプリのコンテンツを返す: IntentValueQuery
 
@@ -42,6 +42,8 @@ public struct TodoVisualIntelligenceQuery: IntentValueQuery {
 }
 #endif
 ```
+
+(2026-08-05 追記) セッションを 2022 まで遡って洗い直したので、ここも出自を補足しておきます。入口の `IntentValueQuery` と `SemanticContentDescriptor` は iOS 26 (WWDC 2025 セッション 275) からある API で、Visual Intelligence 連携そのものはその年に始まっていました。この記事が参照しているセッション 297 は WWDC 2026 で Visual Intelligence 統合を単独セッションとしてまとめ直した回で、下の追記に書いた **macOS 対応と「返す entity は全部 openable でないといけない」という要求** がそこで増えた分にあたります。一方 AppIntentsTesting (セッション 295) の方は 2026 の新顔で間違いないです。
 
 ここがおもしろかった点をいくつか。
 

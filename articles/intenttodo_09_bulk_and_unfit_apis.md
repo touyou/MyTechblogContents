@@ -151,6 +151,8 @@ public func perform() async throws -> some IntentResult & ReturnsValue<[TodoOrCa
 
 `EntityQuery` は単一の Entity 型に縛られますが、`@UnionValue` を返り値に使うと **複数種類を 1 つの結果リストに混ぜられる** のが利点です。これは次回 (10/N) の Visual Intelligence でもそのまま再利用できました。
 
+(2026-08-05 追記) セッションを洗い直したら、`@UnionValue` マクロ自体は WWDC 2024 (iOS 18、セッション 10134) からあるものでした。この記事が扱っている 345 は、`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件や、上に書いた `public enum` の `: Sendable` 明示といった **詳細仕様を提示した回** です。実際ハマったのが全部その細目の方だったので、体感として新機能に見えていたんだと思います。
+
 ## 検証してみたら「使えなかった」API: RelevantEntities
 
 ここからが今回いちばん書きたかった話です。
@@ -169,6 +171,8 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 
 これは「実装をミスった」のではなく「**API の設計上、自分のドメインには口が用意されていない**」という種類の壁で、ドキュメントを上から読んでいるだけだと「使えそう」に見えてしまうやつでした。
 実際に適合させようと手を動かして初めて、context の選択肢が音楽再生などに限定されていると分かったので、こういうのこそ記録に残す価値があるなと思っています。
+
+(2026-08-05 追記) セッション 345 を洗い直したときに、iOS 27 で `RelevantEntities.shared.removeAllEntities(for:)` / `removeEntities(_:from:)` / `removeAllEntities()` という **寄付を取り消す側** の API が増えているのを見つけました。ただ、上に書いたとおり寄付する側の context が無い以上、消す側だけ増えても出番はやっぱり無いので、結論は据え置きのままです。`AppEntityContext` の方も 345 で `.audio(.workout(activityType:))` のような拡張が入ったんですが、増えたのは audio ドメインの中身で、reminders / todo 向けの口が開いたわけではありませんでした。
 
 ## 検証できた深さ
 

@@ -19,7 +19,7 @@ WWDC 2026 編の 3 本目で、`xcode27` ブランチでの検証です (この�
 ## perform() を止めてユーザーに聞く
 
 これまでの自分の Intent は、`perform()` が走り出したら最後まで一気に実行する、というものばかりでした。
-WWDC 2026 (セッション 343) で、`perform()` の **途中でユーザーに確認や選択を求めて、答えを待ってから続きを実行する** API が整理されました。
+`perform()` の **途中でユーザーに確認や選択を求めて、答えを待ってから続きを実行する** API は、iOS 26 から iOS 27 にかけて一通り揃っています (セッション 275 / 343)。
 
 ### requestConfirmation で破壊的操作を確認する
 
@@ -226,6 +226,18 @@ private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -
 受け側の `TodoService.update` は `FieldUpdate<Value>` (`.unchanged` / `.set(Value)`) という enum でフィールドごとに受けるようにして、`valueState` の三値をサービス層の語彙に写しています。title のように **モデル上は必須の列** は `.set(nil)` が来ても据え置きにする、という出し分けが必要だったので、上のとおり generic なヘルパーを optional 用と必須用の 2 種に分けました。
 
 この記事の主題 (perform() を止めて聞き返す) とは道具が違いますが、「ユーザーが『消して』と言ったのか、単に何も言わなかったのか」を区別するという意味では同じ方向の話だと思ったので、ここに追記しています。深さはビルド成立 (B) までで、Shortcuts の UI が実際に「クリア」と「未指定」を区別して渡してくるかは実機待ちです。
+
+## (2026-08-05 追記) この回で使った API がいつ入ったものか
+
+WWDC 2022 から 2026 までのセッションを網羅的に洗い直したので、この記事で扱った道具の出自を整理しておきます。WWDC 2026 編の中に置いたせいで、全部が iOS 27 の新 API のように読めてしまう書き方になっていました。
+
+- `requestConfirmation(for:dialog:)` は WWDC 2022 (セッション 10032) からある基本 API で、当時の `confirmBeforeRunning` を置き換える形で入ったものでした。セッション 343 が iOS 27 で足したのは `requestConfirmation(_:confirmLabel:cancelLabel:)` という、確認とキャンセルのボタンラベルを個別に指定できるオーバーロードの方です。IntentTodo は既定のラベルのままで足りているので、こちらはまだ使っていません。
+- `requestChoice` と `IntentChoiceOption` は iOS 26 (WWDC 2025 セッション 275) が初出でした。343 は SwiftUI View を添える `requestChoice(between:dialog:view:)` を詳解した回です。なので本文の「選ばれたオプションに安定 id が無い」という制約も、iOS 26 の時点からあった話ということになります。
+- `IntentDialog(full:supporting:)` に至っては WWDC 2022 (セッション 10032) からある形でした。343 は「音声だけの文脈と視覚併用の文脈で出し分ける」という使いどころを改めて示した回で、API 自体が新しいわけではないです。
+- Interactive Snippet (`SnippetIntent`) も iOS 26 (セッション 275) の機能で、`SnippetIntent.reload()` まで含めてこの年に入っています。
+- `IntentDonationManager` は WWDC 2023 (セッション 10103) からある寄付の口です。iOS 27 で増えたのは削除条件を絞る `IntentDonationMatchingPredicate` で、本文で `deleteDonations(matching:)` に渡している `.entityIdentifiers([...])` がまさにそれでした。
+
+自分のアプリに入れる分には「今の SDK で使えるか」しか見ていなかったので気にしていなかったんですが、記事として読むと「WWDC 2026 で何が増えたのか」の情報として不正確なので直しておきます。ベースラインが iOS 26 のプロジェクトに iOS 27 の新要素を足していく作り方をしていると、この 2 世代の境目は自分でも結構あいまいになるなと思いました。
 
 ## 検証できた深さ
 

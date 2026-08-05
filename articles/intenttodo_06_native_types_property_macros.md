@@ -257,8 +257,10 @@ public var location: String?
 
 ## @ComputedProperty と @DeferredProperty
 
-WWDC 2026 のプロパティマクロで、もう 1 つ試したのが `@ComputedProperty` と `@DeferredProperty` です。
+Entity のプロパティマクロで、もう 1 つ試したのが `@ComputedProperty` と `@DeferredProperty` です。
 どちらも「スナップショットに持っていない値を、導出 / 取得してシステムに公開する」ためのものですが、性格が違います。
+
+(2026-08-05 追記) この 2 つ、最初は両方 WWDC 2026 の新要素のつもりで書いていたんですが、セッションを 2022 から順に洗い直したら出自が違っていました。`@DeferredProperty` は iOS 26 世代 (WWDC 2025 セッション 275) の "Deferred Properties" が本体で、WWDC 2026 (セッション 345) はその詳細仕様をあらためて示した回でした。`@ComputedProperty` の方が 345 の新顔です。使い分けの話は変わらないんですが、「どちらも 2026 の新 API」と読めてしまう書き方だったので直しておきます。
 
 `@ComputedProperty` は同期 getter で、スナップショットが持っている値から軽く導出できるもの向け。
 IntentTodo では「期限切れかどうか」を `dueDate` と `isCompleted` から計算しています。

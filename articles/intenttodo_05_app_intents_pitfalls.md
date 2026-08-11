@@ -71,6 +71,22 @@ Apple のバグが直ったら 2 系統に分ける必要はなくなるので�
 
 「コードコメントに残す」「Issue で追跡する」「`docs/insights` に記述する」の 3 点で削除タイミングを忘れないようにしています。
 
+### (2026-08-11 追記) 「Extension プロセスで解決されるから」という因果は取り下げた
+
+この節の冒頭で「entity 解決が Live Activity Extension プロセスで走ると SwiftData が trap する」と原因まで言い切っていたんですが、そこまで断定できる根拠が無かったので取り下げます。IntentTodo のドキュメントに書いた制約を WWDC のセッションと突き合わせていて、自分の記述が Apple の説明とぶつかっているのに気付いたのがきっかけでした。
+
+ぶつかっていたのは、Apple のドキュメントが `LiveActivityIntent` について "the system runs the app intent in the app's process" と明言している点です。Primary 版の Intent が `LiveActivityIntent` に準拠している以上 `perform()` はアプリプロセスで走るはずで、「Extension プロセスで解決された」という自分の前提と噛み合いません。
+
+分かる範囲で切り分けるとこうなります。
+
+- クラッシュ自体は実在します。2026-04-14 に `TodoEntityQuery.entities(for:) → SwiftDataTodoRepository.fetch → ModelContext.fetch` の経路で `EXC_BREAKPOINT`、スタックトレースも当時のコミットに残っています。
+- 公式が保証しているのは **`perform()` の実行プロセス** だけで、その手前にある **`@Parameter` の entity 事前解決フェーズがどこで走るか** はどこにも書かれていません。セッション 345 (7:37) も「Intent 実行の前に entity 解決が走る」とフェーズが分かれていることは言っていますが、どのプロセスかまでは言っていないです。
+- Live Activity Extension 側は `AppDependencyManager` に何も登録していないので、解決フェーズが Extension で走ったなら `TodoEntityQuery` の `@Dependency var modelContainer` が解決できないはずなんですが、実際のスタックトレースは `ModelContext.fetch` の中まで進んでいて、未登録 dependency のときに出る文言とも違います。
+
+なので今は「**事前解決フェーズのプロセスが未文書化で、そこで実際にクラッシュした実績がある**」までを書ける事実として、原因の特定はしないことにしました。String ID に逃がす FromExtension 分離は、真因が何であれ解決フェーズそのものを踏まないので有効なままです。コードは変えていません。
+
+ワークアラウンドを書くときに「なぜ効くのか」を無理に 1 文で言い切ろうとすると、こういう筋の悪い断定が混ざるんだなというのは、ちょっと覚えておきたいところでした。
+
 ## 落とし穴 2: Control Widget では `.result(dialog:)` が表示されない
 
 iOS 18 で追加された Control Widget (Control Center に置けるカスタムボタン) ですが、ここから発火させた Intent では **`.result(dialog:)` が表示されません**。
@@ -113,6 +129,29 @@ public struct ToggleUrgentTodoIntent: AppIntent {
 
 これは「by-design 寄り」と判断していて、Control Widget のグラス風ミニマム UI には dialog という重い表示は合わない、という Apple 側の意図を尊重した運用としています。
 
+### (2026-08-11 追記) Control 専用のフィードバック機構があった: .controlWidgetStatus
+
+「dialog が出ないからローカル通知」でずっと片付けていたんですが、Control には Control 用のフィードバック機構がちゃんと用意されていました。セッション 10157 (16:08) の `.controlWidgetStatus(_:)` で、Control のラベルに付けると Control Center 側に一時的なステータス文字列を出せます。
+
+```swift
+ControlWidgetButton(action: ToggleUrgentTodoIntent()) {
+    Label {
+        Text(snapshot.title ?? "No urgent todo")
+    } icon: {
+        Image(systemName: snapshot.isCompleted
+            ? "checkmark.circle.fill"
+            : "clock.badge.exclamationmark")
+    }
+    .controlWidgetStatus(snapshot.isCompleted ? "Completed" : "Due soon")
+}
+```
+
+`ToggleUrgentTodoControl` に入れて、シミュレータ向けビルドまでは確認しました。ただ通知の置き換えにはしていなくて、併用にしています。通知はシステムの通知センターに残るので後から辿れる一方、`.controlWidgetStatus` は Control の上に一瞬出て消えるだけなので、そもそも性格が違うと思ったからです。タップした瞬間のフィードバックは status、後から「何をやったか」を辿る記録は通知、という分け方に落ち着きました。
+
+`TodoCountControl` の方は見送っています。こっちは値を持たない fire-and-forget なボタンで、タップしても表示している未完了件数自体が変わらないので、status を足しても言うことが無いためです。
+
+実機の Control Center で実際どう見えるか (どのくらいの時間出るのか、通知と二重で鬱陶しくないか) はまだ見られていないので、確認できたら追記します。
+
 ### おまけ: Control Widget の本体実装
 
 Control Widget は値を表示するタイプ (カウント表示・次の期限など) では `StaticControlConfiguration(kind:provider:)` に `ControlValueProvider` を渡し、body は受け取った値を表示するだけにする、という構造が安全です。
@@ -142,6 +181,8 @@ extension TodoCountControl {
 
 body の中で SwiftData fetch を直接呼ぶと、WidgetKit 側の更新タイミング制御と噛み合わずに body が過剰に評価されることがあります。
 ControlValueProvider 経由で snapshot を渡す方が、body は単純なレンダリングだけになって安定します。
+
+(2026-08-11 追記) この「body が過剰に評価される」という理由付け、セッションを読み直したらちょっとずれていました。セッション 10157 (9:51 / 11:22) が言っているのは評価回数の話ではなくて、**非同期のデータ取得は `ControlValueProvider` の役目で、リロード時にシステムが `ControlValueProvider` → `body` の順で実行する** という分担そのものです。body は受け取った値を同期的に描くだけの場所として設計されていて、そこで SwiftData を直接引くとこの分担から外れる、というのが正確なところでした。書くコードは変わりませんが、理由は差し替えておきます。
 
 ## 落とし穴 3: `IndexedEntity` 準拠だけでは Spotlight に検索されない
 
@@ -237,7 +278,7 @@ canImport に変えると visionOS で `CSSearchableIndex` は import できて�
 ## まとめ
 
 - **Live Activity からの AppEntity 解決でクラッシュする** → Primary / FromExtension Intent 分離で回避。コードコメントと issue で削除タイミングを追跡
-- **Control Widget では `.result(dialog:)` が出ない** → ローカル通知で代替。`StaticControlConfiguration(kind:provider:)` + `ControlValueProvider` パターンで body を薄く保つ
+- **Control Widget では `.result(dialog:)` が出ない** → ローカル通知で代替。`StaticControlConfiguration(kind:provider:)` + `ControlValueProvider` パターンで body を薄く保つ (2026-08-11 追記: Control 用のフィードバック機構 `.controlWidgetStatus(_:)` があったので、一瞬のフィードバックは status、後から辿る記録は通知、と併用にしました)
 - **Spotlight は IndexedEntity だけでは index されない** → `CSSearchableIndex.default().indexAppEntities(...)` の明示登録が必要。TodoService の mutation hook と起動時の全件投入で組む
 
 これで本編 (1〜5) は一区切りです。ここから先は [WWDC 2026 編 (6/N)](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) で、`xcode27` ブランチで新しい App Intents の API を試してみて分かった設計判断をまとめていきます。検証待ち・将来書く予定のトピックは [番外編 (99/N)](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) に並べてあります。

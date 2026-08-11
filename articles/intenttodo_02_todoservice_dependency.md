@@ -143,6 +143,8 @@ struct IntentTodoApp: App {
 | Live Activity ボタン | `LiveActivityIntent` | **Live Activity Extension** | Extension 側 |
 | watchOS の Button(intent:) | 全モード | **watchOS App** | watchApp の `App.init()` |
 
+(この表の `.background` の行と Live Activity の行は、あとで断定しすぎだったと分かったので下の 2026-08-11 追記で直しています)
+
 なので、IntentTodo では `IntentTodoApp.init()` / `IntentTodoWidgetBundle.init()` / `IntentTodoWatchApp.init()` の 3 箇所で同じ TodoService を作って登録しています。
 
 ```swift
@@ -161,6 +163,24 @@ struct IntentTodoWidgetBundle: WidgetBundle {
 ```
 
 `MainActor.assumeIsolated` は WidgetBundle.init が non-isolated context として評価されることがあるための保険です。
+
+### (2026-08-11 追記) 実行プロセスは固定ではなくヒューリスティクスで決まる
+
+上の表、`.background` の行を「Widget から呼んだら必ず Widget Extension で実行される」という固定のものとして書いていたんですが、これは断定しすぎでした。IntentTodo のドキュメントに書き溜めた「プラットフォームの制約」を WWDC のセッション書き起こしと片っ端から突き合わせてみる、というのを 2026-08-11 にやったときに出てきた差分です。
+
+セッション 345 (15:59〜16:55) によると、共有パッケージに置いた Intent がどのプロセスで実行されるかは **システムのヒューリスティクスで決まります**。アプリが既に起動していればアプリ側を優先する、そうでなければ Extension を起こす、という具合です。固定したいなら 9/N で書く `allowedExecutionTargets` (`.main` / `.appIntentsExtension` / `.widgetKitExtension`) を明示するしかありません。SDK 側を見ても `IntentExecutionTargets` は `.default` を独立したケースとして持つ `OptionSet` になっていて、「既定はシステムに委ねる」というのが型の上でもそう表現されていました。
+
+`supportedModes` が決めているのは「フォアグラウンドに遷移するかどうか」であって、実行プロセスそのものではなかった、というのが訂正の中身です。
+
+| 呼出元 | モード | 実行プロセス | 登録場所 |
+|---|---|---|---|
+| Widget `Button` / Control Widget | `.background` (`allowedExecutionTargets` 未指定) | **ヒューリスティクスで決定** (アプリ起動中はアプリ優先、未起動なら Widget Extension) | **両方** (保険として) |
+| 同上 | `.background` (`allowedExecutionTargets` を明示、例 `[.main]`) | 指定したプロセスに固定 | 指定先だけ |
+| Live Activity ボタン | `LiveActivityIntent` | `perform()` は**アプリプロセス** (Apple 公式が明言) | `App.init()` |
+
+Live Activity の行も直しています。Apple のドキュメント ([Adding interactivity to widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities)) は "the system runs the app intent in the app's process" と明言していて、`LiveActivityIntent` の `perform()` はアプリプロセスでの実行が保証されている、が正しい記述でした。ただしこれには続きがあって、`@Parameter` の entity を **`perform()` の前に解決するフェーズ** がどのプロセスで走るかは公式にどこにも書かれていなくて、5/N で書いたクラッシュはそっち側で起きています。そのあたりは [5/N の追記](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書きました。
+
+で、実務的な結論なんですが、**二重登録 (`App.init()` と `WidgetBundle.init()` の両方) は結局そのまま** です。`allowedExecutionTargets` を指定していない Intent が 1 つでも残っている限り、どちらのプロセスで起こされても解決できるようにしておく必要があるので、保険としての二重登録は畳めませんでした。表の前提が変わったのに書くコードは変わらない、というのはちょっと拍子抜けでしたが、逆に言うと「よく分からないから両方に登録しておく」という当時の判断が結果的に正解だったことになります。
 
 ## defer 集約の効果
 

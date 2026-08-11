@@ -113,6 +113,8 @@ reminder 本体スキーマは、要求してくるプロパティがとにか�
 
 (2026-07-02 追記) その後、WWDC 2026 の App Intents Group Lab で「新しい Siri との連携はいずれかの App Schema 採用が前提」という話が出ていたので、この保留を一度再評価しました。ドキュメントを掘ると、reminder 本体は入れ子のサブエンティティとして `@AppEntity(schema: .reminders.section)` と `@AppEntity(schema: .reminders.locationTrigger)` (さらにその中の `@AppEnum(schema: .reminders.locationTriggerEvent)`) を要求していることが分かって、`locationTrigger` の `place` が `PlaceDescriptor` なあたりは 6/N の橋渡しと相性が良さそうなんですが、**サブエンティティを揃えても上のマクロ生成 init の問題は解消しない** ので、結論は据え置きのままにしました。Xcode 27 beta 2 でも当時の probe コードを復元してビルドし直してみたところ、初期化エラー (`'self' used before all stored properties are initialized`) は同じように再現しています。一方で、カテゴリの list 適合 + discoverable な自前 Intent 群 + 後述の system intent だけでも意味理解・検索・遷移は成立していて、本体適合が無いと新しい Siri と何も連携できないわけではない、というのが今の見立てです。スキーママクロの init 規約が扱いやすくなるのを待つ独立タスクとして置いています。
 
+(2026-08-11 追記) この保留、再挑戦するときの取っ掛かりが 1 つ見つかりました。セッション 344 の Code-along は、`calendar_event` という reminder に負けないくらいリッチなスキーマ (出席者は `TransientAppEntity` の入れ子、場所は union) に **手書きの init 無しで** 適合させています。Xcode のスキーマ・コードスニペットで型の骨格を出して、モデル → エンティティの詰め替えは Query 側に持たせる、という流儀です。自分がやっていた「自前の `init(from: TodoItem)` で順番に代入していく」書き方が、マクロ生成の backing storage と単に衝突していただけかもしれません。まだ試せていないので結論は据え置きのままですが、次に手を付けるならここから、という当たりは付きました。
+
 ## system intents: OpenIntent / DeleteIntent
 
 もう 1 つの「意味で適合させる」軸が system intent です。
@@ -180,7 +182,7 @@ IntentTodo にはもともと UI の `Button(intent:)` から 1 件ずつ消す 
 
 ### (2026-07-02 追記) 検索もシステムの語彙に乗せる: .system.search
 
-「開く」「削除する」に続けて、**検索** もシステムの語彙に乗せました。99/N の将来トピックに「`.system.searchInApp` 適合 (セッション 344)」として挙げていたやつで、実装してみたら SDK での正式名は **`.system.search`** でした (`ShowInAppSearchResultsIntent` 自体は iOS 16 からある型で、スキーママクロで適合させる形が新しい部分のようです)。適合すると、Siri / Apple Intelligence が検索語をアプリ自身の検索 UI に流して、結果をアプリ側で見せられるようになります。
+「開く」「削除する」に続けて、**検索** もシステムの語彙に乗せました。99/N の将来トピックに「`.system.searchInApp` 適合 (セッション 343)」として挙げていたやつで、実装してみたら SDK での正式名は **`.system.search`** でした (`ShowInAppSearchResultsIntent` 自体は iOS 16 からある型で、スキーママクロで適合させる形が新しい部分のようです)。適合すると、Siri / Apple Intelligence が検索語をアプリ自身の検索 UI に流して、結果をアプリ側で見せられるようになります。
 
 ```swift
 @AppIntent(schema: .system.search)
@@ -217,6 +219,16 @@ struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 ```
 
 ベータの間はこうやって途中で名前が変わることもあるんだな、というのを地で行く話でした。あわせて、watchOS で `.system` ドメインが unavailable な制約 (上の `#if !os(watchOS)` 除外) も beta 3 で実ビルドして再確認しましたが、変わらず続いています。
+
+### (2026-08-11 追記) beta 5 での再確認と、セッション番号の再訂正
+
+Xcode 27 beta 5 (27A5237l) が出たので、この記事で制約として書いたものを実ビルドで確かめ直しました。**watchOS で `reminders` / `system` ドメインの assistant schema が unavailable なのは変わらず継続** です。`.reminders.list` / `.reminders.listType` / `.system.searchInApp` のガードをそれぞれ外して watch 向けにビルドし直したら、`'reminders' is unavailable in watchOS` などが同じように出ました。上に書いた `#if os(watchOS)` のフォールバックと `#if !os(watchOS)` の除外は、どちらも必要なままです。
+
+そしてもう 1 つ、**セッション番号を直します**。99/N で「`.system.searchInApp` は 343 ではなく 344 (Code-along) だった」と一度訂正したんですが、書き起こしを全部読み直したら **343 の方が正しかった** です。`.system.searchInApp` も、それが要求する `StringSearchCriteria` / `searchScopes` も、出てくるのは 343 でした。344 で実際に手を動かしているのは `EnumerableEntityQuery` と、スキーマ版の削除 Intent (`DeleteEventIntent`) の方です。二転三転してしまいましたが、最初に 99/N へ書いていた 343 が合っていました。
+
+同じ流れで、上の system intents の節に付けた「(セッション 344)」も厳密には合っていません。344 に出てくるのは `@AppIntent(schema: .system.open)` とスキーマ版の `DeleteEventIntent` で、この記事が使っている **素の `OpenIntent` / `DeleteIntent` プロトコルへの直接適合** そのものを実演しているわけではないです。プロトコル自体はもっと前からある API なので、「344 で紹介された API」ではなく「344 で扱われているのは同じ系統のスキーマ版」くらいに読んでもらえればと思います。
+
+セッション番号は記事の中で一番「後から間違いが分かる」情報だなというのを、今回でだいぶ実感しました。API 名やビルドエラーは手元で再現できるけれど、出典の方は書き起こしを全部持ってきて突き合わせないと確かめようがないので、ここだけ検証の手触りが違います。
 
 ## 検証できた深さ
 

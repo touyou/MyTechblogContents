@@ -121,6 +121,10 @@ IntentTodo は App Intents Extension を持っていないし、バルクの Swi
 
 (2026-07-02 追記) この宿題、あらためて検証して **「畳めない」で確定** させました。決め手は、`allowedExecutionTargets` が制御するのはあくまで **どのプロセスが `perform()` するか** で、クラッシュが起きる **パラメータ解決 (entity resolution) を経由するかどうか** は変えられない、という点です。`.widgetKitExtension` の存在を踏まえても、Live Activity Extension は依然として指定対象に入っていません。LA のボタン用には `LiveActivityIntent` (アプリプロセスでの実行が保証されるプロトコル) もあるんですが、クラッシュは perform より手前の解決段で起きるので、解決そのものを踏まない String 版が結局必要でした。というわけで FromExtension は維持です。唯一残っているのは「`[.main]` にピンしたとき解決の実行プロセスまで本体側に寄るのか」という実機確認 (R) で、もし寄るなら話が変わる可能性はありますが、現状はコードでパラメータの型を分けておく方が確実だと思っています。
 
+(2026-08-11 追記) この節、`allowedExecutionTargets` を「実行プロセスを固定する」道具として書いたんですが、**指定しなかったときに何が起きるか** を書いていませんでした。セッション 345 (15:59〜16:55) を読み直すと、未指定の Intent は **システムのヒューリスティクス** でプロセスが選ばれます (アプリが起動中ならアプリを優先、そうでなければ Extension を起こす)。SDK 側を見ても `IntentExecutionTargets` は `.default` を独立したケースに持つ `OptionSet` になっていて、「既定はシステムに委ねる」が型としてそう表現されていました。2/N に書いていた「Widget の `.background` Intent は必ず Widget Extension で実行される」という表は、これを踏まえて直しています。
+
+あわせて、上の「Live Activity Extension プロセスでの entity 解決クラッシュ」という言い方も、そこまで断定できる根拠が無かったので取り下げました。クラッシュが事前解決フェーズで起きたことは確かなんですが、そのフェーズがどのプロセスで走るかは公式にどこにも書かれていないです。詳しくは [5/N の追記](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書きました。ただ **FromExtension は畳めない** という結論の方は変わりません。`allowedExecutionTargets` が動かせるのは perform のプロセスであって、entity 解決を踏むかどうかではないからです。
+
 ## 複数の型を1つの結果で返す: @UnionValue
 
 `@UnionValue` を enum に付けると、`@Parameter` や `ReturnsValue` で **複数の Entity 型を 1 つの値として扱える** ようになります。
@@ -152,6 +156,8 @@ public func perform() async throws -> some IntentResult & ReturnsValue<[TodoOrCa
 `EntityQuery` は単一の Entity 型に縛られますが、`@UnionValue` を返り値に使うと **複数種類を 1 つの結果リストに混ぜられる** のが利点です。これは次回 (10/N) の Visual Intelligence でもそのまま再利用できました。
 
 (2026-08-05 追記) セッションを洗い直したら、`@UnionValue` マクロ自体は WWDC 2024 (iOS 18、セッション 10134) からあるものでした。この記事が扱っている 345 は、`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件や、上に書いた `public enum` の `: Sendable` 明示といった **詳細仕様を提示した回** です。実際ハマったのが全部その細目の方だったので、体感として新機能に見えていたんだと思います。
+
+(2026-08-11 追記) この「345 が詳細仕様を提示した回」も、半分だけ訂正が要りました。`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件は確かに 345 の話なんですが、**`public enum` に `: Sendable` を明示する必要がある** というのは 345 で言われていることではなくて、自分がビルドを通そうとして踏んだだけの話でした。セッションの内容と手元のビルド観測を混ぜて「345 が示した詳細仕様」とひとまとめにしてしまっていたので、分けておきます。
 
 ## 検証してみたら「使えなかった」API: RelevantEntities
 
@@ -188,7 +194,7 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 - `EntityCollection<T>` は `.identifiers` で id だけ取れて entity 解決を回避できる。バルク処理で効く
 - `LongRunningIntent` は `performBackgroundTask` で時間を延ばせるが、`progress` を更新し続けないと打ち切られる
 - `CancellableIntent` は `onCancel:` + ループ内 `try Task.checkCancellation()`。perform は `@MainActor` にせず、必要なところだけ await でホップする
-- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ (当初「2 つだけ」と書いていたのを訂正)。**FromExtension 分離をこれで畳めるかは要再検証** — `.main` ピンで entity 解決まで main に寄るかが鍵で、IntentTodo の issue で追跡 (2026-07-02 追記: 検証して「畳めない」で確定しました。本文の追記を見てください)
+- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ (当初「2 つだけ」と書いていたのを訂正)。**FromExtension 分離をこれで畳めるかは要再検証** — `.main` ピンで entity 解決まで main に寄るかが鍵で、IntentTodo の issue で追跡 (2026-07-02 追記: 検証して「畳めない」で確定しました。本文の追記を見てください / 2026-08-11 追記: 未指定のときはヒューリスティクスでプロセスが選ばれる、という前提も本文に足しました)
 - `@UnionValue` で複数 Entity 型を 1 つの結果に混ぜられる。`public enum` は `: Sendable` 明示が必要
 - `RelevantEntities` は **reminders ドメイン向けの `AppEntityContext` が存在せず適合不能**。実装ミスではなく API 設計上の壁。保留
 

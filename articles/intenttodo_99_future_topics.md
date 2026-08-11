@@ -133,7 +133,7 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 - **`Transferable` + `ValueRepresentation` で構造化値エクスポート** (セッション 345): Todo の場所を `PlaceDescriptor` として書き出すなど、cross-app の口を作る。
 - **`IntentParameter.valueState` で UpdateTodoIntent** (セッション 344): optional パラメータの「新しい値 / 明示クリア / 据え置き」を `.set(value)` / `.set(nil)` / `.unset` で区別する更新 Intent。
 - **コレクション onscreen + 通知 / AlarmKit への entity アノテーション** (セッション 343): 一覧の行に `.appEntityIdentifier(forSelectionType:)`、通知やアラームにも entity-identifier を付けて「3 番目のやつ」のような参照に対応する。
-- **`.system.searchInApp` 適合** (セッション 344): `SearchEverythingIntent` をこのスキーマに適合させ、Siri がアプリ自身の検索 UI で結果を出せるようにする。
+- **`.system.searchInApp` 適合** (セッション 343): `SearchEverythingIntent` をこのスキーマに適合させ、Siri がアプリ自身の検索 UI で結果を出せるようにする。
 - **`allowedExecutionTargets` の再検証** (セッション 345): 9/N で訂正したとおり `.widgetKitExtension` も選べるので、これで Primary / FromExtension 分離を畳めないか改めて確かめる。
 - **reminder 本体スキーマ適合の優先度** (Group Lab): 「新しい Siri と連携するにはいずれかの App Schema 採用が前提」とのことなので、コアの `TodoAppEntity` を意味理解させるには上記 F の本体適合がやはり要る、という位置づけが見えてきた。
 
@@ -153,16 +153,16 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 
 (2026-08-05 追記) ここまでは「WWDC 2026 のセッションを読み直して」の話でしたが、今回は App Intents が登場した **WWDC 2022 まで遡って全セッションを洗い直し** ました。IntentTodo 側に年ごとの API 一覧と非推奨タイムラインを作ったので、そのついでに記事の記述も突き合わせています。出てきた差分は 2 種類でした。
 
-1 つは **セッション番号の間違い** で、上に書いていた `.system.searchInApp` は 343 ではなく **セッション 344 (Code-along)** で紹介されていたものでした。7/N の該当箇所とあわせて直しています。
+1 つは **セッション番号の間違い** で、上に書いていた `.system.searchInApp` は 343 ではなく **セッション 344 (Code-along)** で紹介されていたものでした。7/N の該当箇所とあわせて直しています。(2026-08-11 追記: この訂正の方が間違いでした。書き起こしを全文検索し直したら 343 が正しかったので、下の「(2026-08-11 追記) 制約を全部洗い直した」に書いたとおり元に戻しています)
 
-もう 1 つが **年代の帰属** で、こっちの方が数がありました。WWDC 2026 編にまとめて書いたせいで、実際には iOS 26 以前からある API まで 2026 の新要素のように読める書き方になっていたやつです。`@DeferredProperty` は iOS 26 (セッション 275) 初出で `@ComputedProperty` の方が 2026 の新顔 → [6/N に追記](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)、`requestChoice` / `SnippetIntent` は iOS 26、`requestConfirmation` / `IntentDialog(full:supporting:)` に至っては WWDC 2022 から → [8/N に追記](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)、`@UnionValue` は WWDC 2024 で 345 は詳細仕様の回 → [9/N に追記](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)、Visual Intelligence の `IntentValueQuery` / `SemanticContentDescriptor` も iOS 26 からで 297 は macOS 対応が増えた回 → [10/N に追記](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)。ベースラインが iOS 26 のプロジェクトに iOS 27 の新要素を足していく作り方だと、手元では「今の SDK で使えるか」しか見ないので、この 2 世代の境目が自分の中でもあいまいになっていました。
+もう 1 つが **年代の帰属** で、こっちの方が数がありました。WWDC 2026 編にまとめて書いたせいで、実際には iOS 26 以前からある API まで 2026 の新要素のように読める書き方になっていたやつです。`@DeferredProperty` は iOS 26 (セッション 275) 初出で `@ComputedProperty` の方が 2026 の新顔 (2026-08-11 追記: これも間違いで、`@ComputedProperty` も 275 でした) → [6/N に追記](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)、`requestChoice` / `SnippetIntent` は iOS 26、`requestConfirmation` / `IntentDialog(full:supporting:)` に至っては WWDC 2022 から → [8/N に追記](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)、`@UnionValue` は WWDC 2024 で 345 は詳細仕様の回 → [9/N に追記](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)、Visual Intelligence の `IntentValueQuery` / `SemanticContentDescriptor` も iOS 26 からで 297 は macOS 対応が増えた回 → [10/N に追記](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)。ベースラインが iOS 26 のプロジェクトに iOS 27 の新要素を足していく作り方だと、手元では「今の SDK で使えるか」しか見ないので、この 2 世代の境目が自分の中でもあいまいになっていました。
 
 あわせて、**API は把握したうえでこのアプリには入れないと決めたもの** も記録しておきます。`DynamicOptionsProvider` と `IntentParameterDependency` (WWDC 2022 / 2023) は、パラメータの選択肢を動的に出したり、別パラメータの現在値に依存させたりするための道具ですが、IntentTodo にはそもそも **パラメータ間の動的依存が発生するユースケースが無い** です。フィルタや並び順は `AppEnum` の静的リストで足りていて、Todo やカテゴリの選択は `EntityQuery` が引き受けています。「使える API だけど要らない」というのも判断の記録なので、ここに残しておきます。
 
 ### (2026-07-28 追記) J. `PlaceDescriptor` をネイティブ型に戻す
 
 これは自分の検証待ちというより SDK 待ちのタスクです。
-6/N で「`PlaceDescriptor` をネイティブ型のまま `@Parameter` / `@Property` で受ける」と書いた部分、Xcode 27 beta 3 から `AppIntentsSSUTraining` が `GeoToolbox.PlaceDescriptorEntity` という型名をそのまま SSU の variable 名に使ってしまい、ドット入りの名前が正規表現に落ちてビルドエラーを emit するようになったので、暫定で場所名の `String` に退避しています (beta 4 でも未修正)。
+6/N で「`PlaceDescriptor` をネイティブ型のまま `@Parameter` / `@Property` で受ける」と書いた部分、Xcode 27 beta 3 から `AppIntentsSSUTraining` が `GeoToolbox.PlaceDescriptorEntity` という型名をそのまま SSU の variable 名に使ってしまい、ドット入りの名前が正規表現に落ちてビルドエラーを emit するようになったので、暫定で場所名の `String` に退避しています (beta 4 でも未修正、**beta 5 でも未修正**)。
 ローカルの `xcodebuild` は exit 0 で返ってくるのに Xcode Cloud だけ失敗する、という気付きにくい壊れ方をするのも含めて、経緯は [6/N の追記](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) に書きました。
 SDK が更新されたら退避コミットを revert してクリーンビルドし直す、というのを毎回の beta 追従のチェック項目にしています。緯度経度を Intent 経由で受け取る口が閉じたままなので、ここは早く戻したいところです。
 
@@ -172,11 +172,52 @@ SDK が更新されたら退避コミットを revert してクリーンビル�
 
 IntentTodo には削除・バルク完了・スヌーズと、取り消したくなりそうな破壊的アクションが一通り揃っているので、相性は悪くないはずです。ただ 8/N で書いたとおり削除には `requestConfirmation` を先に入れていて、「実行前に止める」で今のところ足りている感覚もあります。実行前の確認と実行後の取り消しをどう住み分けるか (両方あると鬱陶しいのか、それとも Siri から実行したときは取り消しの方が効くのか) は、実際に入れてみないと分からないところなので、検証候補として置いておきます。
 
+## (2026-08-11 追記) 制約を全部洗い直した
+
+Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛色の違う作業をしました。IntentTodo のドキュメントに「プラットフォームの制約」として書き溜めてきた項目を、WWDC 2022〜2026 のセッション書き起こし 25 本と **全数突き合わせて、セッションの説明と食い違うものを片っ端から洗い出す** というやつです。
+
+やってみて分かったのは、**自分が「制約」として記録していたもののうち、いくつかは実装の都合だったり、単なる断定しすぎだったりした** ということでした。壊れた記憶が「〜してはいけない」という強いルールとしてドキュメントに固定されて、その後は疑われないまま残り続ける、という形になっていたものが結構あります。出てきた差分は大きく 3 種類でした。
+
+**1. 断定を取り下げたもの** (再検証したら根拠が足りなかった)
+
+- 「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を重複宣言してはいけない」→ ビルドとメタデータのレベルでは重複が起きず、むしろセッション 244 / 275 は逆にそのパターンを標準手順として紹介していました → [3/N に追記](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
+- 「Widget の `.background` Intent は必ず Widget Extension プロセスで実行される」→ 実際は未指定ならヒューリスティクスで、固定したいなら `allowedExecutionTargets` を明示する → [2/N に追記](https://zenn.dev/touyou/articles/intenttodo_02_todoservice_dependency) / [9/N に追記](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
+- 「Live Activity Extension プロセスで entity 解決が走ると SwiftData が trap する」→ クラッシュは実在するけれど、事前解決フェーズがどのプロセスで走るかは公式に明記が無いので原因の特定を取り下げ → [5/N に追記](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
+- 「`\.textContent` は SDK に露出していない」→ 普通にありました。`contentDescription` を使う結論は変わらないものの、理由が型の制約ではなく意味の制約だった → [6/N に追記](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
+- 「Mac だけ visual search の entity 全部に `OpenIntent` を要求する」→ 要求は全プラットフォーム共通で、Mac だけがコンパイル時に弾いてくる → [10/N に追記](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)
+
+**2. 理由付けだけ差し替えたもの** (ルールは正しいが説明が違った)
+
+- Control Widget の `ControlValueProvider`: 「body が過剰評価される」ではなく、非同期取得は Provider の役目でリロード時に Provider → body の順に走る、という分担モデルの話 → [5/N に追記](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
+- Widget Extension 内の `ControlConfigurationIntent` をアプリから参照できない理由: 「Name Mangling」ではなく単にターゲット/モジュール境界でした。共有したいなら SPM に出すのが公式の方法です
+- 全 Intent で `WidgetReloader.reloadAllWidgets()` を呼ぶルール: Widget 内の `Button(intent:)` 起点なら **システムが自動でリロードを保証している** (セッション 10028) ので、手動が本当に要るのは Siri / Shortcuts / アプリ UI 側から変えたときだけでした。無条件に呼ぶ運用は安全側なので変えていませんが、理由は「Widget 起点は自動、それ以外の経路のために必要」が正確です
+- watchOS の `Button(intent:)`: プラットフォーム別のメモに「watchOS は `role:` 付きのシグネチャが使えないから手動で `Task { try? await intent.perform() }` する」と書いてあったんですが、これは別のメモにある「手動 `perform()` は `@Dependency` がゼロ初期化のままになるのでクラッシュする、必ず `Button(intent:)` を使う」という指針と真逆でした。実際の `WatchUI` のコードを見に行ったら全部 `role:` 無しの `Button(intent:)` で書いてあって、手動 perform を勧めていた方が誤記です。使えないのは `role:` 付きのシグネチャだけでした。同じリポジトリのドキュメント同士が正反対のことを言っているのに、突き合わせるまで誰も (自分も) 気付いていなかった、というのはちょっと怖かったです
+- `#Predicate` の Optional 直接比較: 「visionOS 等で」とプラットフォーム限定で書いていましたが、マクロの型推論の話なので基本は全プラットフォーム共通のはずで、当時の再現/非再現は toolchain のバージョン差だった可能性が高いです
+
+**3. セッション番号・年代の帰属間違い**
+
+2026-08-05 の追記でも同じことをやったんですが、今回は「その API 名が本当にそのセッションの書き起こしに出てくるか」を全文検索で機械的に確かめたので、前回の訂正そのものが間違っていた、というのが何件か出てきました。いちばん大きいのが `.system.searchInApp` で、**343 → 344 に直したのが間違いで、最初の 343 が正しかった** です (→ [7/N に追記](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents))。他にも `AppEntityContext` / `RelevantEntities` は 10133 ではなく 345、`ControlWidgetButton` / `ControlConfigurationIntent` は 10157 ではなく 10210、`@ComputedProperty` / `@DeferredProperty` は 345 ではなく 275、といった具合に、隣接するセッションや API ドキュメントと混ざっているものがまとめて出てきました。8/N の出典訂正 (`requestConfirmation` のラベル指定オーバーロードや `IntentDonationManager` は、セッションではなく API ドキュメント由来だった) も同じ流れです。
+
+一連の作業でいちばん効いたのは、**「セッションで説明されていたこと」「API ドキュメントを読んで知ったこと」「自分がビルドして観測したこと」を、後から見分けられる形で書いていなかった** という反省でした。3 つとも自分の中では同じ「知っていること」なんですが、確度も、後から確かめる手段も全然違います。特に 3 番目の観測は SDK が更新されるたびに賞味期限が来るので、そこを混ぜて書くと、直せるはずのものが直せないまま残ります。
+
+### 実機検証待ちに積み増しになったもの
+
+洗い直した結果、「机上では確からしいけれど実機で確かめないと確定しない」という宿題がむしろ増えました。ここに並べておきます。
+
+- **`AppIntentsPackage` の重複宣言**: メタデータ上の重複は無いことまで確認済み。Siri / Shortcuts の実機ルーティング (`LNContextErrorDomain` 系) が本当に壊れないかは未確認なので、現状は重複させない運用のまま
+- **Live Activity の entity 事前解決**: Primary 版の Intent を LA のボタンに直結して実機で叩き、今の SDK でも trap するのかを見たい。再現しないなら FromExtension 分離を簡素化できる (上の E とつながる話)
+- **`allowedExecutionTargets` 未指定の Widget / Control Intent**: 実際どちらのプロセスで perform され、entity 解決がどこで走るのかを実機ログで見たい。`CompleteTodosIntent` だけは `[.main]` に固定済み
+- **`.controlWidgetStatus(_:)` の見え方**: シミュレータビルドまで。実機の Control Center でどのくらい出るのか、ローカル通知と併用して鬱陶しくないかは未確認 (→ [5/N の追記](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls))
+- **`UISceneAppIntent` の `canImport` ガード**: `_AppIntents_UIKit` という独立フレームワークに属していて、iOS / watchOS / visionOS にはあるがネイティブ macOS には無い、というところまで確認済み。iOS 側で `#if canImport(_AppIntents_UIKit)` が通ることも実際に走らせて確かめました。ただマルチウィンドウの具体的な機能要求が無いので実装自体は保留
+- **reminder 本体スキーマ適合の再挑戦** (上の F): セッション 344 の CometCal パターンという取っ掛かりが見つかったので、そこから試す (→ [7/N に追記](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents))
+- **`.onAppIntentExecution` の cold start 問題**: そもそも今のコードベースでは `.onAppIntentExecution` をどこでも使っていない (`@Dependency` + `perform()` に完全移行済み) ので、現時点では検証対象が無い状態です。再導入するときに「`@State` の path が未構築」「シーンの activation conditions 未設定」「`supportedModes` に foreground が無い」の 3 仮説を潰す、というメモだけ残しました
+
 ## まとめ
 
 - 本編は「実機で詰まった話」、WWDC 2026 編は「採用していいか / 設計判断」と、軸を分けて書いている
 - 最初に並べた将来トピックのうち、Visual Intelligence / Interactive Snippets / Intent Modes の一部は WWDC 2026 編で片付いた
 - FoundationModels (端末内 LLM) は「やらないと決めた」もの。主眼から意図的に外している
 - 残りの検証待ち (watchOS / visionOS / Spotlight ラグ / macOS 細部 / LA crash 再現 / reminder 本体適合 / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の復帰 / `UndoableIntent`) は、手元の機材と検証コストで順番が決まる予定
+- (2026-08-11 追記) 書き溜めた「制約」をセッション書き起こしと全数突き合わせたら、断定しすぎ・理由付けの誤り・出典の取り違えがまとめて出てきた。「セッションで説明されていたこと / API ドキュメントで知ったこと / 自分がビルドして観測したこと」は、後から見分けられる形で分けて書いておかないと直せなくなる
 
 書ける段階になり次第、ここから本編へ昇格させていきます。

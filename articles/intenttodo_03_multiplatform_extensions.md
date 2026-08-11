@@ -193,6 +193,8 @@ struct IntentTodoWatchApp: App {
 
 アプリ更新直後は本体より先に Widget が起動し得るので、Extension 側にマイグレーションプランを持たせると本体の移行と競合し得る、というのが理屈です。Extension 構成の観点だと「View もデータ取得ロジックも SPM に寄せ、**マイグレーションの責務もアプリ本体に寄せる**」と覚えておくと収まりが良いです。SwiftData / CloudKit 側の具体的な書き方は [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) に書きました。(Group Lab はベータ時点の要約ベースなので、実際に `SchemaMigrationPlan` を入れる際は最新ドキュメントで再確認予定です)
 
+(2026-08-11 追記) この「セッション 8017」という番号、手元に貯めたセッションのアーカイブを漁り直したら書き起こしが見つかりませんでした (出てくるのは別テーマの 8011 だけです)。Group Lab はライブ Q&A なので公式の書き起こしが出ないことも多く、ここは **一次資料で裏を取れていない伝聞** として扱うことにしました。指針そのものは SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので運用は変えていませんが、出典の確度だけ下げておきます。
+
 ## (2026-07-08 追記) もう1つの例外: AppShortcutsProvider もアプリ本体に置く
 
 上の「マイグレーションはアプリ本体に寄せる」と同じ形の話がもう1つ見つかりました。**`AppShortcutsProvider`（App Shortcuts の宣言）も SPM パッケージに置いてはいけません。**
@@ -212,11 +214,26 @@ struct IntentTodoWatchApp: App {
 
 この不具合は **ビルドやコード補完のどのタイミングでも露見しません**。ビルドは通り、Intent 自体は Siri への直接指示や Widget からは機能し、警告も出ないので気付きにくいです。App Shortcut のフレーズだけが黙って欠落しているので、Shortcuts アプリを開いて目視確認するか、統合メタデータの `autoShortcuts` 件数を直接見ないと気付けませんでした。
 
+## (2026-08-11 追記) 「アプリ側に AppIntentsPackage を書いてはいけない」は言い過ぎだった
+
+上の `AppShortcutsProvider` の話と隣り合わせで、IntentTodo のドキュメントにはもう 1 つ「**メインアプリターゲットに `includedPackages` 付きの `AppIntentsPackage` を重複宣言してはいけない**」という強めのルールを書いていました。2026-04 に Shortcuts のルーティングが壊れた (`LNContextErrorDomain Code=2001`) ときに、それが原因だと判断したものです。今回、書き溜めた制約を WWDC のセッション書き起こしと全部突き合わせる作業をしていて、これがセッションの説明と真っ向からぶつかっていることに気付いたので、Xcode 27 beta 5 で再検証しました。
+
+やったこと自体は単純で、アプリターゲットと Widget / Live Activity / watchOS の全 Extension ターゲットに、公式ドキュメントどおりの形 (`includedPackages` にパッケージ側の `TodoIntentsPackage` を並べた `AppIntentsPackage`) を足してビルドし直すだけです。結果、統合メタデータ (`extract.actionsdata`) の `actions` / `entities` / `queries` の件数は、宣言が無かったときと 1 件も違いませんでした。重複は起きていません。
+
+そもそもセッション 244 (23:29〜24:00) やセッション 275 (25:50)、それに `AppIntentsPackage` の公式ドキュメントを読むと、**この「利用側にも `includedPackages` 付きで宣言する」形のほうが標準手順** として紹介されています。当時のコミットを読み返してみても、Intent routing の修正・`@Dependency` パターンへの統一・重複 Intent の削除をまとめてやった大きな PR の中の出来事で、`AppIntentsPackage` の重複宣言だけを切り出して再現させた記録は残っていませんでした。当時のデバッグログで疑っていたのも「Widget Extension が `TodoAppIntents` を import しているせいで Shortcuts が Widget Extension を intent の提供元として選んでしまった」の方で、これは 2/N の追記で書いた実行プロセス選択の話であって、宣言の書き方とは別軸です。
+
+ただ今回確認できたのはビルドとメタデータのレベルまでで、Siri / Shortcuts の実機ルーティングまでは追えていません。なので運用としては重複宣言しないまま (壊れないと分かっている側) にしておいて、複数ターゲットで型を共有する必要が本当に出てきたら実機で Siri から呼んでみてから採用する、という位置づけに改めました。「壊れた記憶」をそのまま制約として書き残すと、何と何を切り分けたのかが後から辿れなくなるんだな、というのが反省点です。
+
+一方で、上の `AppShortcutsProvider` の制約の方は **この話とは独立していて、そのまま生きています**。アプリと Extension に `AppIntentsPackage` を足した状態でも、`AppShortcutsProvider` がパッケージ内にある限り `autoShortcuts` は 0 のままで、アプリターゲットへ移した瞬間だけ 0 → 8 になりました。2 つが絡んでいる可能性も疑っていたんですが、別々の話でした。
+
+ついでに年代の整理も 1 つ。「Intent や Entity を Swift Package に置ける」ようになった時期を、自分はなんとなく WWDC 2024 (セッション 10134) 頃だと思っていたんですが、10134 が言っているのはむしろ逆で "Only frameworks are supported at this time. Libraries outside of a framework are not." でした。あの時点で対応していたのは Framework 形態だけで、SPM パッケージや static library に広がったのは 2025 のセッション 244 / 275 です。この記事で書いている「Intent をパッケージに置く」構成は、そんなに昔から成立していたわけではなかったんだなというのは、ちょっと意外でした。
+
 ## まとめ
 
 - Extension target は薄いスキャフォルドに留めて、View / 状態管理 / データ取得は SPM パッケージに移送する
 - macOS native 対応は `#if` で Delegate 分岐 + 共通実体クラスへ委譲
 - pbxproj の `platformFilter = ios;` を見落とすと macOS ビルドで Embed エラーが出る
 - ターゲット依存をなるべく minimum に保つため、`TodoService.swiftDataBacked(container:)` のような薄いファクトリを TodoAppIntents 側に置く
+- (2026-08-11 追記) `AppShortcutsProvider` をアプリ本体に置く制約は健在。一方「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を書いてはいけない」の方は再検証で断定を取り下げた (実機ルーティングは未確認なので運用は据え置き)
 
 次回は [SwiftData + CloudKit 同期で踏んだスキーマ要件と落とし穴の話 (4/N)](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) を書きます。

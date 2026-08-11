@@ -122,6 +122,16 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 
 本編 5/N で `CSSearchableIndex` と `IndexedEntity` の gate を揃える話を書きましたが、あれの「揃える相手が `#if os(...)` とは限らない」版だなと思いました。
 
+### (2026-08-11 追記) 「Mac 固有の追加バリデーション」ではなかった / query はアプリに 1 つだけ
+
+IntentTodo のドキュメントに書いた制約をセッションの書き起こしと全部突き合わせる、というのをやったら、この記事にも直すところが出てきました。
+
+まず、上の「Mac には追加のバリデーションがあって、返す entity は全部 openable である必要がある」という書き方。**openable 要件そのものは全プラットフォーム共通** でした。セッション 275 (9:19) が "This `OpenIntent` must exist, otherwise your app won't show up" と言っていて、`OpenIntent` の無い entity はそもそも Visual Intelligence の結果に出てこない、という仕様です。Mac 固有なのはルールの方ではなくて、**macOS 向けのビルドだけがそれをコンパイル時エラーとして弾いてくる** という enforce のされ方の違いでした。iOS ではビルドが通ってしまうぶん、実機で「なぜか候補に出てこない」という形で気付くことになります。`OpenCategoryIntent` を足した対処自体は変わりません。
+
+もう 1 つ、記事に書いていなかった制約が見つかりました。セッション 297 (11:39) いわく、**`SemanticContentDescriptor` を受ける `IntentValueQuery` はアプリに 1 つだけ** しか置けません。IntentTodo は `TodoVisualIntelligenceQuery` の 1 つきりなので今は問題ないんですが、あとから「Todo 用と Category 用で分けよう」と思い付いていたら通らなかったことになります。複数の型を返したいときの正解は、9/N の `@UnionValue` で戻り値の型を混ぜて 1 つの query に集約する方、という設計でした。結果的に最初からその形にしていたのは、9/N の union が先にあったからで、これも部品の再利用が効いた側面だと思います。
+
+ついでに、このセッションを検索する人向けに正式タイトルも置いておきます。297 は [Best practices for integrating visual intelligence in your app](https://developer.apple.com/videos/play/wwdc2026/297/) です (自分の手元のメモは別のタイトルで持っていて、そのままだと辿れませんでした)。
+
 ## AppIntentsTesting で Intent を実経路テストする
 
 WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテスト** (セッション 295) を試しました。
@@ -132,6 +142,8 @@ WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテス
 最初に大事な制約があります。
 [Apple のドキュメント](https://developer.apple.com/documentation/AppIntentsTesting/testing-your-app-intents-code) が明記していて、AppIntentsTesting は intent を **ライブのアプリプロセスで実行** するので、テストは unit test ではなく **UI テスティングバンドル** に置く必要があります。
 アプリプロセスと、登録済みの `AppDependencyManager` が要るからで、SPM の Testing パッケージでは動きません。IntentTodo は既存の `IntentTodoUITest` (UI テストターゲット) に追加しました。
+
+(2026-08-11 追記) もう 1 つ、セッション 295 (2:54) が明言している要件を書き落としていました。**AppIntentsTesting はテストランナーとアプリ本体が同じ development team で code signing されている必要があります**。自分は同一 Apple ID でしか触っていないので踏んでいないんですが、CI や複数アカウントを切り替える環境でここがずれると、原因の見当がつきにくい失敗になりそうです。テストを足すときは最初に署名チームを揃えておくのが良さそう、というのを記録しておきます。
 
 ```swift
 import AppIntents
@@ -220,7 +232,7 @@ UI テストターゲットは synchronized folder ではないので、**ファ
 
 ## まとめ
 
-- `IntentValueQuery` はカメラ / スクショの visual search にアプリのコンテンツを返す入口。`AppEntity` と違い `@Dependency` が使え、`@UnionValue` で複数型を返せる
+- `IntentValueQuery` はカメラ / スクショの visual search にアプリのコンテンツを返す入口。`AppEntity` と違い `@Dependency` が使え、`@UnionValue` で複数型を返せる (2026-08-11 追記: `SemanticContentDescriptor` を受ける query は **アプリに 1 つだけ** なので、複数型を返したいなら `@UnionValue` に寄せるのが正解でした)
 - `SemanticContentDescriptor` の `labels` は一般英語ラベル。`values(for:)` は nonisolated なので MainActor へホップして fetch する
 - `@AppIntent(schema: .visualIntelligence.semanticContentSearch)` は entity プロパティを持たないので reminder スキーマの init 地雷を踏まない。`VisualIntelligence` は iOS 専用なので `#if canImport` でガード (2026-07-02 追記: beta 2 で Mac にも import 可能になりました。Mac は返す entity 全部に `OpenIntent` を要求してくるので、本文の追記を見てください / 2026-07-28 追記: `canImport` だけだと visionOS 実機ビルドが落ちたので `&& !os(visionOS)` を足しています)
 - 結果タップ (`OpenTodoIntent`) / 複数結果型 (`@UnionValue`) は既存部品を再利用できた

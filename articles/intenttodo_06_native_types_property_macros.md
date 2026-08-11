@@ -93,6 +93,14 @@ public var todoDescription: String?
 
 深さは他と同じくビルド成立 (B) までで、セマンティック検索が実際に賢くなるかは実機待ちです。
 
+#### (2026-08-11 追記) `\.textContent` はちゃんと存在した
+
+上の 1 つ目、「`\.textContent` は SDK に露出していない」は **間違いでした**。ちゃんとあります。`CSSearchableItemAttributeSet_Messaging.h` に `NSString *textContent` として macOS 10.11 / iOS 9 の頃から入っていて (tvOS・watchOS は対象外)、セッション 240 のコード例やセッション 10131 (2:41) の「title と textContent は必ず設定して」という話も、これを指していました。当時は補完に出てこなかったのを「無い」と読んでしまったんだと思います。
+
+ついでに「`AttributedString?` 専用のキーなんじゃないか」という仮説も持っていたんですが、これも違いました。`EntityProperty.init(indexingKey:)` が取るのは `PartialKeyPath<CSSearchableItemAttributeSet>` だけで、ローカルのプロパティの型とキーパスの値型を静的に対応付けてはいません。SDK の `swiftinterface` を見ると `String` 版と `AttributedString` 版の両方に同じシグネチャの `indexingKey:` init が並んでいて、どちらからでも同じオーバーロードが使えます。
+
+ただ、**`todoDescription` を `\.contentDescription` に載せるという結論自体は変えていません**。理由が変わっただけです。`contentDescription` は `CSDocuments` の「アイテムの説明文」、`textContent` は `CSMessaging` の「メールやメッセージの本文全文」という意味付けなので、Todo の詳細説明は前者の方が意味的に近いと思っています。型の制約で選べなかったのではなく、意味で選んでいた、というのが正しい説明でした。
+
 ## ネイティブ型で受ける: Duration / PersonNameComponents / PlaceDescriptor
 
 ここが Phase 1 でいちばん設計判断が要ったところでした。
@@ -255,12 +263,20 @@ public var location: String?
 
 もう 1 つ、上に書いた `Transferable` の `ValueRepresentation` は **そのまま残せています**。SSU の variable になるのは `@Parameter` / `@Property` の型であって、export 表現は対象外だからです。なので「入力は String に退避しているけれど、書き出しは今も `PlaceDescriptor`」という状態で、`TodoPlace.descriptor(name:latitude:longitude:)` で場所名から descriptor を組み直して export しています。緯度経度を Intent から受け取る口だけが一時的に閉じている形です。
 
+#### (2026-08-11 追記) beta 5 でも未修正 / SSU の判定は必ずクリーンビルドで
+
+**Xcode 27 beta 5 (27A5237l) でも直っていませんでした。** 退避コミットを revert して、DerivedData を消してクリーンビルドし直したら同じエラーが再現したので、revert は取り消して退避継続です。
+
+このとき 1 つ引っかかったのが、**SSU のタスクは incremental ビルドだと前回失敗したときのエラーをそのままログに再表示してくる** ことでした。beta 5 の検証中、これで一瞬「まだ落ちてる」と誤読しかけています。直ったかどうかの判定は必ず DerivedData を消してからやる、というのを beta 追従のチェック項目に足しました。ビルドログを再現性の判定に使うなら、そのログがいつ生成されたものかまで気にしないといけないんだなというのは、地味に効く教訓でした。
+
 ## @ComputedProperty と @DeferredProperty
 
 Entity のプロパティマクロで、もう 1 つ試したのが `@ComputedProperty` と `@DeferredProperty` です。
 どちらも「スナップショットに持っていない値を、導出 / 取得してシステムに公開する」ためのものですが、性格が違います。
 
 (2026-08-05 追記) この 2 つ、最初は両方 WWDC 2026 の新要素のつもりで書いていたんですが、セッションを 2022 から順に洗い直したら出自が違っていました。`@DeferredProperty` は iOS 26 世代 (WWDC 2025 セッション 275) の "Deferred Properties" が本体で、WWDC 2026 (セッション 345) はその詳細仕様をあらためて示した回でした。`@ComputedProperty` の方が 345 の新顔です。使い分けの話は変わらないんですが、「どちらも 2026 の新 API」と読めてしまう書き方だったので直しておきます。
+
+(2026-08-11 追記) 上の訂正、まだ半分間違っていました。今度は「その API 名が本当にそのセッションの書き起こしに出てくるか」を全文検索で確かめたんですが、**`@ComputedProperty` も `@DeferredProperty` も 345 には出てきません**。どちらも出典は 275 で、`@ComputedProperty` を「345 の新顔」と書いたのは誤りです。345 で増えているのは `RelevantEntities` まわりや `EntityCollection` などの方でした。前の追記のときは「345 のセッションページを見て、そこにありそうなものを 345 に寄せる」という詰めの甘い直し方をしていたんだと思います。使い分けの話 (同期の軽い導出は `@ComputedProperty`、非同期の要求時フェッチは `@DeferredProperty`) はどちらの世代の API でも変わりません。
 
 `@ComputedProperty` は同期 getter で、スナップショットが持っている値から軽く導出できるもの向け。
 IntentTodo では「期限切れかどうか」を `dueDate` と `isCompleted` から計算しています。
@@ -478,7 +494,7 @@ public struct GetTodoSummaryIntent: AppIntent {
 
 - WWDC 2026 編は `xcode27` ブランチでの検証で、本編より浅い (主に型レベル + 単体)。実機可否より「採用していいか / 設計にどう効くか」を書く
 - `@Property` でモデル属性をシステムに公開し、関連 (`category`) も Entity として持てる
-- `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する (2026-07-28 追記: `PlaceDescriptor` は beta 3 の SSU バグ回避で `String` に一時退避中。境界だけ直せば済んだのは二重表現のおかげでした)
+- `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する (2026-07-28 追記: `PlaceDescriptor` は beta 3 の SSU バグ回避で `String` に一時退避中。境界だけ直せば済んだのは二重表現のおかげでした / 2026-08-11 追記: beta 5 でも未修正で退避継続です)
 - `@ComputedProperty` (同期・軽い導出) と `@DeferredProperty` (非同期・要求時フェッチ、Spotlight 非 index) を使い分ける
 - Entity は `@Dependency` を使えないので、共有コンテナは `TodoEntityStore` に置いて参照する
 - プロパティマクロは `Hashable` 自動合成を壊すので `==` / `hash(into:)` を明示実装する

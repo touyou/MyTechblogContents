@@ -83,6 +83,8 @@ public struct CategoryAppEntity: Hashable {
 
 幸い watchOS では Siri / Apple Intelligence のスキーマルーティング自体を使っていないので、機能的には何も失っていません。これも iOS destination だけビルドしていると露見せず、watchOS を含むフルビルドで初めて出るやつでした (ガードを外して watchOS 向けにビルドし直し、上のエラーがそのまま再現することも確認済みです)。ベータの間はこういう「後から対象プラットフォームが狭まる」変更も来るんだな、というのは学びでした。
 
+なおこの制約、**beta 3 でも beta 5 (27A5237l) でも継続** しています。SDK が上がるたびにガードを外してビルドし直していますが、そのたびに `'reminders' is unavailable in watchOS` が同じように出るので、フォールバックは当面必要なままです。後述の `.system` ドメイン側も同様でした。
+
 ## 大きいスキーマで詰まる: Todo 本体を reminder にできなかった話
 
 ここからが、やってみて分かった「保留」の話です。
@@ -118,7 +120,7 @@ reminder 本体スキーマは、要求してくるプロパティがとにか�
 ## system intents: OpenIntent / DeleteIntent
 
 もう 1 つの「意味で適合させる」軸が system intent です。
-App Intents には「開く」「削除する」みたいな共通アクション用に、**専用のプロトコル** が用意されています (セッション 344)。
+App Intents には「開く」「削除する」みたいな共通アクション用に、**専用のプロトコル** が用意されています。プロトコル自体は前から存在するもので、セッション 344 (Code-along) で扱われているのは同じ系統のスキーマ版 (`@AppIntent(schema: .system.open)` や `DeleteEventIntent`) の方です。
 これに適合すると、システムがそのアクションを意味的に理解してくれます (たとえば Spotlight の検索結果をタップ → 開く、という経路)。
 おもしろいのは、スキーママクロ (`@AppIntent(schema: .system.open)` みたいなの) を使わず、**プロトコルに直接適合するだけ** でいいところです。
 
@@ -180,12 +182,12 @@ IntentTodo にはもともと UI の `Button(intent:)` から 1 件ずつ消す 
 この 2 つの system intent はどちらも **AppShortcuts には登録していません**。
 本編 5/N で書いたとおり AppShortcuts は 10 件上限なので枠を温存したいのと、system intent は AppShortcut が無くてもシステム側が意味解釈してくれるので、登録しなくても効くからです。
 
-### (2026-07-02 追記) 検索もシステムの語彙に乗せる: .system.search
+### (2026-07-02 追記) 検索もシステムの語彙に乗せる: .system.searchInApp
 
-「開く」「削除する」に続けて、**検索** もシステムの語彙に乗せました。99/N の将来トピックに「`.system.searchInApp` 適合 (セッション 343)」として挙げていたやつで、実装してみたら SDK での正式名は **`.system.search`** でした (`ShowInAppSearchResultsIntent` 自体は iOS 16 からある型で、スキーママクロで適合させる形が新しい部分のようです)。適合すると、Siri / Apple Intelligence が検索語をアプリ自身の検索 UI に流して、結果をアプリ側で見せられるようになります。
+「開く」「削除する」に続けて、**検索** もシステムの語彙に乗せました (セッション 343)。適合すると、Siri / Apple Intelligence が検索語をアプリ自身の検索 UI に流して、結果をアプリ側で見せられるようになります。`ShowInAppSearchResultsIntent` 自体は iOS 16 からある型で、スキーママクロで適合させる形が新しい部分のようです。
 
 ```swift
-@AppIntent(schema: .system.search)
+@AppIntent(schema: .system.searchInApp)
 struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
     static let searchScopes: [StringSearchScope] = [.general]
 
@@ -208,9 +210,7 @@ struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 
 なおこのスキーマも beta 2 で watchOS では unavailable になった (`'system' is unavailable in watchOS`) んですが、watch アプリにはそもそも遷移先になる検索 UI が無いので、こちらは list のようなフォールバックではなく `#if !os(watchOS)` で丸ごと除外しました。深さはここもビルド成立 (B) までで、Siri が実際に検索語を流してくれるかは実機待ちです。
 
-### (2026-07-08 追記) beta 3 で `.system.search` が `.system.searchInApp` にリネームされた
-
-上で「SDK での正式名は `.system.search` でした」と書きましたが、**Xcode 27 beta 3 でこの名前が `.system.searchInApp` にリネームされ、`.system.search` は deprecated になりました** (`'search' is deprecated: Use .system.searchInApp instead` という警告が出るようになります)。回り回って、99/N で最初に候補として挙げていた `.system.searchInApp` という表記のほうが結果的に正しい名前だった、というオチです。
+1 つ、ベータ中に名前が変わった経緯も書いておきます。**最初に実装したときの SDK 上の名前は `.system.search` で、Xcode 27 beta 3 で `.system.searchInApp` にリネームされました** (`'search' is deprecated: Use .system.searchInApp instead` という警告が出るようになります)。上のコードはリネーム後の名前です。
 
 ```diff
 - @AppIntent(schema: .system.search)
@@ -218,17 +218,7 @@ struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 ```
 
-ベータの間はこうやって途中で名前が変わることもあるんだな、というのを地で行く話でした。あわせて、watchOS で `.system` ドメインが unavailable な制約 (上の `#if !os(watchOS)` 除外) も beta 3 で実ビルドして再確認しましたが、変わらず続いています。
-
-### (2026-08-11 追記) beta 5 での再確認と、セッション番号の再訂正
-
-Xcode 27 beta 5 (27A5237l) が出たので、この記事で制約として書いたものを実ビルドで確かめ直しました。**watchOS で `reminders` / `system` ドメインの assistant schema が unavailable なのは変わらず継続** です。`.reminders.list` / `.reminders.listType` / `.system.searchInApp` のガードをそれぞれ外して watch 向けにビルドし直したら、`'reminders' is unavailable in watchOS` などが同じように出ました。上に書いた `#if os(watchOS)` のフォールバックと `#if !os(watchOS)` の除外は、どちらも必要なままです。
-
-そしてもう 1 つ、**セッション番号を直します**。99/N で「`.system.searchInApp` は 343 ではなく 344 (Code-along) だった」と一度訂正したんですが、書き起こしを全部読み直したら **343 の方が正しかった** です。`.system.searchInApp` も、それが要求する `StringSearchCriteria` / `searchScopes` も、出てくるのは 343 でした。344 で実際に手を動かしているのは `EnumerableEntityQuery` と、スキーマ版の削除 Intent (`DeleteEventIntent`) の方です。二転三転してしまいましたが、最初に 99/N へ書いていた 343 が合っていました。
-
-同じ流れで、上の system intents の節に付けた「(セッション 344)」も厳密には合っていません。344 に出てくるのは `@AppIntent(schema: .system.open)` とスキーマ版の `DeleteEventIntent` で、この記事が使っている **素の `OpenIntent` / `DeleteIntent` プロトコルへの直接適合** そのものを実演しているわけではないです。プロトコル自体はもっと前からある API なので、「344 で紹介された API」ではなく「344 で扱われているのは同じ系統のスキーマ版」くらいに読んでもらえればと思います。
-
-セッション番号は記事の中で一番「後から間違いが分かる」情報だなというのを、今回でだいぶ実感しました。API 名やビルドエラーは手元で再現できるけれど、出典の方は書き起こしを全部持ってきて突き合わせないと確かめようがないので、ここだけ検証の手触りが違います。
+ベータの間はこうやって途中で名前が変わることもあるんだな、というのを地で行く話でした。
 
 ## 検証できた深さ
 
@@ -249,3 +239,12 @@ Xcode 27 beta 5 (27A5237l) が出たので、この記事で制約として書�
 - system intent は AppShortcuts 無しでも意味解釈されるので、10 件枠を温存できる
 
 次回は、[Siri 応答を賢くする対話的な Intent (`requestConfirmation` / `requestChoice` / `IntentDialog(full:supporting:)`) と、Interactive Snippet、寄付 (`IntentDonationManager`) の話 (8/N)](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents) を書きます。
+
+## 更新履歴
+
+本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
+
+- **2026-08-11**: `.system.searchInApp` の出典を **343** に再訂正 (2026-08-05 に 343 → 344 と直したのが誤りだった)。`OpenIntent` / `DeleteIntent` の「(セッション 344)」という帰属も、344 で扱われているのはスキーマ版の方だと注記。watchOS の schema unavailable が beta 5 でも継続することを確認。reminder 本体スキーマ再挑戦のリード (セッション 344 の CometCal パターン) を追加
+- **2026-08-05**: `.system.searchInApp` の出典を 343 → 344 に訂正 (この訂正自体が誤りだった)
+- **2026-07-08**: beta 3 で `.system.search` が `.system.searchInApp` にリネームされたのを反映
+- **2026-07-02**: `.system.searchInApp` 適合の節を追加。beta 2 で watchOS が対象から外れた話と、reminder 本体スキーマ保留の再評価を追加

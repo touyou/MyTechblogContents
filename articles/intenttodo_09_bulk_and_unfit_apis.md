@@ -99,31 +99,19 @@ public static var allowedExecutionTargets: IntentExecutionTargets { [.main] }
 選べるのは **`.main` (アプリ本体) / `.appIntentsExtension` (App Intents Extension) / `.widgetKitExtension` (WidgetKit Extension)** です。
 IntentTodo は App Intents Extension を持っていないし、バルクの SwiftData 変更はアプリ本体でやるのが一番確実なので、新設のバルク Intent は `[.main]` に固定しました。
 
-:::message
-(2026-06-19 追記) この記事を最初に書いたとき、選択肢を「`.main` / `.appIntentsExtension` だけ」と書いていたんですが、WWDC 2026 のセッション 345 を見直したら **`.widgetKitExtension` もある** ことに気付いたので直しました。「widget ボタンからの更新を main app に限定してデータ競合を避ける」みたいな使い方が想定されているようです。この見落としは、下の FromExtension の結論にも効いてくるので、あわせて書き直しています。
-:::
+では **指定しなかったとき** はどうなるかというと、これが「呼出元に応じて固定的に決まる」ではありませんでした。セッション 345 (15:59〜16:55) によると、未指定の Intent は **システムのヒューリスティクス** でプロセスが選ばれます (アプリが起動中ならアプリを優先、そうでなければ Extension を起こす)。SDK 側でも `IntentExecutionTargets` は `.default` を独立したケースに持つ `OptionSet` になっていて、「既定はシステムに委ねる」が型としてそう表現されていました。2/N の実行プロセスの表もこれを前提に書いています。
 
-### FromExtension 分離をこれで畳めるか? (要再検証 → 「畳めない」で確定)
+### FromExtension 分離をこれで畳めるか? → 「畳めない」で確定
 
-ここで自分は「もしかして `allowedExecutionTargets` を使えば、本編 5/N で書いた **Primary / FromExtension の 2 系統** を 1 つに畳めるんじゃないか?」と期待しました。
-最初は「無理」と結論づけていたんですが、その根拠の 1 つが上の見落とし (`.widgetKitExtension` が無いと思い込んでいた) だったので、いまは **保留 = 要再検証** に格下げしています。
+ここで自分は「もしかして `allowedExecutionTargets` を使えば、本編 5/N で書いた **Primary / FromExtension の 2 系統** を 1 つに畳めるんじゃないか?」と期待しました。結論から言うと **畳めません**でした。
 
-効くかどうかは、結局この 1 点にかかっていると思っています。
+決め手は、`allowedExecutionTargets` が制御するのはあくまで **どのプロセスが `perform()` するか** で、クラッシュが起きる **パラメータ解決 (entity resolution) を経由するかどうか** は変えられない、という点です。FromExtension (`todoId: String`) と Primary (`todo: TodoAppEntity`) を分けているのは、パラメータの「型」を変えて解決そのものを踏まないようにするためなので、実行先を動かしても解決は解決として走ります。`.widgetKitExtension` の存在を踏まえても、Live Activity Extension はそもそも指定対象に入っていません。LA のボタン用には `LiveActivityIntent` (アプリプロセスでの実行が保証されるプロトコル) もあるんですが、クラッシュは perform より手前の解決段で起きるので、解決そのものを踏まない String 版が結局必要でした。というわけで FromExtension は維持です。
 
-- FromExtension (`todoId: String`) と Primary (`todo: TodoAppEntity`) を分けているのは、**Live Activity Extension プロセスでの entity 解決クラッシュを避ける** ためでした。パラメータの「型」を変えて、解決そのものを踏まないようにしている。
-- 一方 `allowedExecutionTargets` が制御するのは **どのプロセスが `perform()` するか**。問題は、これがパラメータ解決 (entity resolution) の実行先まで動かすのかどうか、です。
-- もし `.main` に固定したときに **解決まで main 側で走る** なら、Widget / LA から起動しても解決クラッシュを踏まずに済むので、FromExtension を畳める可能性があります。逆に解決は呼出元プロセスのままなら、従来どおり String 版が必要です。
+唯一残っているのは「`[.main]` にピンしたとき解決の実行プロセスまで本体側に寄るのか」という実機確認 (R) で、もし寄るなら話が変わる可能性はありますが、現状はコードでパラメータの型を分けておく方が確実だと思っています。
 
-ここは手元でちゃんと検証しきれていないので、**現時点では FromExtension は維持** しつつ、`.widgetKitExtension` / `.main` ピンで解決ごと main に寄せられるかを IntentTodo 側の issue で追跡することにしました。
-新しい API が出ると「これで前の workaround を畳めるかも」とつい期待するんですが、今回は逆に **ちゃんと裏を取らずに「畳めない」と思い込む** 方向に間違えていたので、いい教訓だなと思っています。
+新しい API が出ると「これで前の workaround を畳めるかも」とつい期待するんですが、この宿題については逆に **ちゃんと裏を取らずに一度「畳めない」と思い込んでいた** 時期もあって (`.widgetKitExtension` の存在を見落としていました)、期待する方向にも決めつける方向にも転びうるんだなというのは教訓でした。
 
-(2026-06-24 追記) この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化していました。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、今回 **公式に正しい設計だった** と裏が取れた格好です。FromExtension を残すか畳むかの結論はまだ保留のままですが、「ウィジェット側で entity 解決のような重い処理を踏ませない」という分離の動機自体は、この実行モデルとも整合しているなと思いました。
-
-(2026-07-02 追記) この宿題、あらためて検証して **「畳めない」で確定** させました。決め手は、`allowedExecutionTargets` が制御するのはあくまで **どのプロセスが `perform()` するか** で、クラッシュが起きる **パラメータ解決 (entity resolution) を経由するかどうか** は変えられない、という点です。`.widgetKitExtension` の存在を踏まえても、Live Activity Extension は依然として指定対象に入っていません。LA のボタン用には `LiveActivityIntent` (アプリプロセスでの実行が保証されるプロトコル) もあるんですが、クラッシュは perform より手前の解決段で起きるので、解決そのものを踏まない String 版が結局必要でした。というわけで FromExtension は維持です。唯一残っているのは「`[.main]` にピンしたとき解決の実行プロセスまで本体側に寄るのか」という実機確認 (R) で、もし寄るなら話が変わる可能性はありますが、現状はコードでパラメータの型を分けておく方が確実だと思っています。
-
-(2026-08-11 追記) この節、`allowedExecutionTargets` を「実行プロセスを固定する」道具として書いたんですが、**指定しなかったときに何が起きるか** を書いていませんでした。セッション 345 (15:59〜16:55) を読み直すと、未指定の Intent は **システムのヒューリスティクス** でプロセスが選ばれます (アプリが起動中ならアプリを優先、そうでなければ Extension を起こす)。SDK 側を見ても `IntentExecutionTargets` は `.default` を独立したケースに持つ `OptionSet` になっていて、「既定はシステムに委ねる」が型としてそう表現されていました。2/N に書いていた「Widget の `.background` Intent は必ず Widget Extension で実行される」という表は、これを踏まえて直しています。
-
-あわせて、上の「Live Activity Extension プロセスでの entity 解決クラッシュ」という言い方も、そこまで断定できる根拠が無かったので取り下げました。クラッシュが事前解決フェーズで起きたことは確かなんですが、そのフェーズがどのプロセスで走るかは公式にどこにも書かれていないです。詳しくは [5/N の追記](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書きました。ただ **FromExtension は畳めない** という結論の方は変わりません。`allowedExecutionTargets` が動かせるのは perform のプロセスであって、entity 解決を踏むかどうかではないからです。
+(2026-06-24 追記) この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化していました。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、今回 **公式に正しい設計だった** と裏が取れた格好です。「ウィジェット側で entity 解決のような重い処理を踏ませない」という分離の動機自体も、この実行モデルと整合しているなと思いました。
 
 ## 複数の型を1つの結果で返す: @UnionValue
 
@@ -155,9 +143,7 @@ public func perform() async throws -> some IntentResult & ReturnsValue<[TodoOrCa
 
 `EntityQuery` は単一の Entity 型に縛られますが、`@UnionValue` を返り値に使うと **複数種類を 1 つの結果リストに混ぜられる** のが利点です。これは次回 (10/N) の Visual Intelligence でもそのまま再利用できました。
 
-(2026-08-05 追記) セッションを洗い直したら、`@UnionValue` マクロ自体は WWDC 2024 (iOS 18、セッション 10134) からあるものでした。この記事が扱っている 345 は、`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件や、上に書いた `public enum` の `: Sendable` 明示といった **詳細仕様を提示した回** です。実際ハマったのが全部その細目の方だったので、体感として新機能に見えていたんだと思います。
-
-(2026-08-11 追記) この「345 が詳細仕様を提示した回」も、半分だけ訂正が要りました。`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件は確かに 345 の話なんですが、**`public enum` に `: Sendable` を明示する必要がある** というのは 345 で言われていることではなくて、自分がビルドを通そうとして踏んだだけの話でした。セッションの内容と手元のビルド観測を混ぜて「345 が示した詳細仕様」とひとまとめにしてしまっていたので、分けておきます。
+(2026-08-05 追記) セッションを洗い直したら、`@UnionValue` マクロ自体は WWDC 2024 (iOS 18、セッション 10134) からあるものでした。この記事が扱っている 345 は、`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件を提示した回です。実際ハマったのがその細目の方だったので、体感として新機能に見えていたんだと思います。なお上に書いた `public enum` の `: Sendable` 明示は 345 で言われていることではなくて、**自分がビルドを通そうとして踏んだだけ** の話なので、そこは分けて読んでもらえればと思います。
 
 ## 検証してみたら「使えなかった」API: RelevantEntities
 
@@ -194,8 +180,18 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 - `EntityCollection<T>` は `.identifiers` で id だけ取れて entity 解決を回避できる。バルク処理で効く
 - `LongRunningIntent` は `performBackgroundTask` で時間を延ばせるが、`progress` を更新し続けないと打ち切られる
 - `CancellableIntent` は `onCancel:` + ループ内 `try Task.checkCancellation()`。perform は `@MainActor` にせず、必要なところだけ await でホップする
-- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ (当初「2 つだけ」と書いていたのを訂正)。**FromExtension 分離をこれで畳めるかは要再検証** — `.main` ピンで entity 解決まで main に寄るかが鍵で、IntentTodo の issue で追跡 (2026-07-02 追記: 検証して「畳めない」で確定しました。本文の追記を見てください / 2026-08-11 追記: 未指定のときはヒューリスティクスでプロセスが選ばれる、という前提も本文に足しました)
+- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ。未指定なら実行プロセスはヒューリスティクスで決まる。**FromExtension 分離はこれでは畳めない** — 制御できるのは perform のプロセスであって entity 解決を踏むかどうかではないため
 - `@UnionValue` で複数 Entity 型を 1 つの結果に混ぜられる。`public enum` は `: Sendable` 明示が必要
 - `RelevantEntities` は **reminders ドメイン向けの `AppEntityContext` が存在せず適合不能**。実装ミスではなく API 設計上の壁。保留
 
 次回は WWDC 2026 編の最後として、[Visual Intelligence 連携 (`IntentValueQuery` / `SemanticContentDescriptor`) と、AppIntentsTesting で Intent を実経路テストした話 (10/N)](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) を書きます。
+
+## 更新履歴
+
+本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
+
+- **2026-08-11**: `allowedExecutionTargets` を未指定にしたときの挙動 (ヒューリスティクス) を追記。「Live Activity Extension プロセスでの entity 解決クラッシュ」という原因断定を取り下げ (結論の「畳めない」は不変)。`public enum` の `: Sendable` 明示をセッション 345 の内容として書いていたのを、手元のビルド観測だと明記
+- **2026-08-05**: `@UnionValue` の出自を WWDC 2024 (セッション 10134) と訂正。`RelevantEntities` の取り消し系 API と `AppEntityContext` の拡張を確認 (結論は据え置き)
+- **2026-07-02**: FromExtension 分離を `allowedExecutionTargets` で畳めるかの宿題を「畳めない」で確定
+- **2026-06-24**: WidgetKit の実行モデル (セッション 277) との整合を追記
+- **2026-06-19**: `allowedExecutionTargets` の選択肢を「`.main` / `.appIntentsExtension` の 2 つ」と書いていたのを、`.widgetKitExtension` を含む 3 つに訂正

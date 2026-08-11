@@ -166,9 +166,9 @@ find ~/Library/Developer/CoreSimulator/Devices -name "IntentTodo.store*" -delete
 
 production でユーザーに同じ問題を起こしたくない場合は、本来は migration プランを書く必要がありますが、IntentTodo は個人プロジェクトなのでこの問題は今のところ無視しています。
 
-(2026-06-24 追記) この「将来 migration プランを書くとき」について、WWDC 2026 の "SwiftData Group Lab" (セッション 8017) で 1 つ指針が示されていました。複数プロセス (アプリ本体 / Widget / Live Activity) が同じ App Group のストアを共有する構成では、**マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。理由は、アプリ更新直後は **アプリ本体より先に Widget / Extension プロセスが起動し得る** ため。両方がマイグレーションプランを持っていると、Extension が先に移行を試みて本体の移行と競合する危険があります。なので将来 `SchemaMigrationPlan` を導入するときは、**プランを渡すのはアプリ本体の `ModelContainer` だけ** にして、Widget / Live Activity 側はプラン無し (= 移行済みファイルを読むだけ) で構成する方針にしました。この別プロセス前提の話は [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) 側にも要点を書いています。なお Group Lab はベータ時点の文字起こし要約ベースなので、実際に導入する段になったら API 名と挙動は公式ドキュメントで確認し直すつもりです。
+(2026-06-24 追記) この「将来 migration プランを書くとき」について、WWDC 2026 の SwiftData Group Lab で 1 つ指針が示されていた、という話を見かけました。複数プロセス (アプリ本体 / Widget / Live Activity) が同じ App Group のストアを共有する構成では、**マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。理由は、アプリ更新直後は **アプリ本体より先に Widget / Extension プロセスが起動し得る** ため。両方がマイグレーションプランを持っていると、Extension が先に移行を試みて本体の移行と競合する危険があります。なので将来 `SchemaMigrationPlan` を導入するときは、**プランを渡すのはアプリ本体の `ModelContainer` だけ** にして、Widget / Live Activity 側はプラン無し (= 移行済みファイルを読むだけ) で構成する方針にしました。この別プロセス前提の話は [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) 側にも要点を書いています。
 
-(2026-08-11 追記) この「セッション 8017」の書き起こし、あとで手元のアーカイブを漁り直したら見つかりませんでした (出てくるのは別テーマの 8011 だけです)。Group Lab はライブ Q&A なので公式の書き起こしが出ないことも多く、上の指針は **一次資料で裏を取れていない伝聞** として扱うことにしました。内容自体は SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので方針は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。
+ただしこの指針、**一次資料で裏を取れていません**。当初はセッション 8017 として書いていたんですが、あとで手元のアーカイブを漁り直したら書き起こしが見つかりませんでした (出てくるのは別テーマの 8011 だけです)。Group Lab はライブ Q&A なので公式の書き起こしが出ないことも多いみたいです。内容自体は SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので方針は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。実際に導入する段になったら API 名と挙動は公式ドキュメントで確認し直すつもりです。
 
 ## ハマりどころ 4: フォールバックが silently データを分裂させる
 
@@ -261,3 +261,10 @@ public func incompleteCount() throws -> Int {
 - ModelContainer の失敗ログは `String(reflecting:)` + `NSError.userInfo` まで吐く
 
 次回は [App Intents 運用で踏んだ落とし穴 3 つ (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Primary/FromExtension 分離 / Control Widget の Dialog 非表示 / Spotlight 統合の実装漏れ) をまとめて書きます。
+
+## 更新履歴
+
+本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
+
+- **2026-08-11**: SwiftData Group Lab のマイグレーション指針について、出典 (セッション 8017) が一次資料で確認できなかったため、伝聞である旨に書き換え
+- **2026-06-24**: マイグレーション担当プロセスをアプリ本体に固定する方針と、WWDC 2026 の SwiftData レビューを受けた節を追加

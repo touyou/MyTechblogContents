@@ -139,11 +139,16 @@ struct IntentTodoApp: App {
 |---|---|---|---|
 | Siri / Shortcuts / UI | 全モード | メインアプリ | `App.init()` |
 | Widget `Button(intent:)` | `.foreground(.immediate)` | メインアプリ | `App.init()` |
-| Widget `Button` / Control Widget | `.background` | **Widget Extension** | `WidgetBundle.init()` |
-| Live Activity ボタン | `LiveActivityIntent` | **Live Activity Extension** | Extension 側 |
+| Widget `Button` / Control Widget | `.background` | **ヒューリスティクスで決定** (アプリ起動中はアプリ優先、未起動なら Widget Extension) | **両方** (`App.init()` と `WidgetBundle.init()`) |
+| 同上 | `.background` + `allowedExecutionTargets` を明示 | 指定したプロセスに固定 | 指定先だけ |
+| Live Activity ボタン | `LiveActivityIntent` | `perform()` は**メインアプリ** (Apple 公式が明言) | `App.init()` |
 | watchOS の Button(intent:) | 全モード | **watchOS App** | watchApp の `App.init()` |
 
-(この表の `.background` の行と Live Activity の行は、あとで断定しすぎだったと分かったので下の 2026-08-11 追記で直しています)
+`.background` の行は、自分は最初「Widget から呼んだら必ず Widget Extension で実行される」という固定のものだと思っていたんですが、そうではありませんでした。セッション 345 (15:59〜16:55) によると、共有パッケージに置いた Intent がどのプロセスで実行されるかは **システムのヒューリスティクスで決まります**。アプリが既に起動していればアプリ側を優先する、そうでなければ Extension を起こす、という具合です。固定したいなら 9/N で書く `allowedExecutionTargets` (`.main` / `.appIntentsExtension` / `.widgetKitExtension`) を明示するしかありません。SDK 側を見ても `IntentExecutionTargets` は `.default` を独立したケースとして持つ `OptionSet` になっていて、「既定はシステムに委ねる」というのが型の上でもそう表現されていました。
+
+`supportedModes` が決めているのは「フォアグラウンドに遷移するかどうか」であって、実行プロセスそのものではない、というのが正確なところです。
+
+Live Activity の行も注釈が要ります。Apple のドキュメント ([Adding interactivity to widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities)) は "the system runs the app intent in the app's process" と明言していて、`LiveActivityIntent` の `perform()` はアプリプロセスでの実行が保証されています。ただしこれには続きがあって、`@Parameter` の entity を **`perform()` の前に解決するフェーズ** がどのプロセスで走るかは公式にどこにも書かれていません。5/N で書くクラッシュはそっち側で起きています。
 
 なので、IntentTodo では `IntentTodoApp.init()` / `IntentTodoWidgetBundle.init()` / `IntentTodoWatchApp.init()` の 3 箇所で同じ TodoService を作って登録しています。
 
@@ -164,23 +169,7 @@ struct IntentTodoWidgetBundle: WidgetBundle {
 
 `MainActor.assumeIsolated` は WidgetBundle.init が non-isolated context として評価されることがあるための保険です。
 
-### (2026-08-11 追記) 実行プロセスは固定ではなくヒューリスティクスで決まる
-
-上の表、`.background` の行を「Widget から呼んだら必ず Widget Extension で実行される」という固定のものとして書いていたんですが、これは断定しすぎでした。IntentTodo のドキュメントに書き溜めた「プラットフォームの制約」を WWDC のセッション書き起こしと片っ端から突き合わせてみる、というのを 2026-08-11 にやったときに出てきた差分です。
-
-セッション 345 (15:59〜16:55) によると、共有パッケージに置いた Intent がどのプロセスで実行されるかは **システムのヒューリスティクスで決まります**。アプリが既に起動していればアプリ側を優先する、そうでなければ Extension を起こす、という具合です。固定したいなら 9/N で書く `allowedExecutionTargets` (`.main` / `.appIntentsExtension` / `.widgetKitExtension`) を明示するしかありません。SDK 側を見ても `IntentExecutionTargets` は `.default` を独立したケースとして持つ `OptionSet` になっていて、「既定はシステムに委ねる」というのが型の上でもそう表現されていました。
-
-`supportedModes` が決めているのは「フォアグラウンドに遷移するかどうか」であって、実行プロセスそのものではなかった、というのが訂正の中身です。
-
-| 呼出元 | モード | 実行プロセス | 登録場所 |
-|---|---|---|---|
-| Widget `Button` / Control Widget | `.background` (`allowedExecutionTargets` 未指定) | **ヒューリスティクスで決定** (アプリ起動中はアプリ優先、未起動なら Widget Extension) | **両方** (保険として) |
-| 同上 | `.background` (`allowedExecutionTargets` を明示、例 `[.main]`) | 指定したプロセスに固定 | 指定先だけ |
-| Live Activity ボタン | `LiveActivityIntent` | `perform()` は**アプリプロセス** (Apple 公式が明言) | `App.init()` |
-
-Live Activity の行も直しています。Apple のドキュメント ([Adding interactivity to widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities)) は "the system runs the app intent in the app's process" と明言していて、`LiveActivityIntent` の `perform()` はアプリプロセスでの実行が保証されている、が正しい記述でした。ただしこれには続きがあって、`@Parameter` の entity を **`perform()` の前に解決するフェーズ** がどのプロセスで走るかは公式にどこにも書かれていなくて、5/N で書いたクラッシュはそっち側で起きています。そのあたりは [5/N の追記](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書きました。
-
-で、実務的な結論なんですが、**二重登録 (`App.init()` と `WidgetBundle.init()` の両方) は結局そのまま** です。`allowedExecutionTargets` を指定していない Intent が 1 つでも残っている限り、どちらのプロセスで起こされても解決できるようにしておく必要があるので、保険としての二重登録は畳めませんでした。表の前提が変わったのに書くコードは変わらない、というのはちょっと拍子抜けでしたが、逆に言うと「よく分からないから両方に登録しておく」という当時の判断が結果的に正解だったことになります。
+実行プロセスがヒューリスティクスで決まるということは、**二重登録 (`App.init()` と `WidgetBundle.init()` の両方) は畳めない** ということでもあります。`allowedExecutionTargets` を指定していない Intent が 1 つでも残っている限り、どちらのプロセスで起こされても解決できるようにしておく必要があるからです。「よく分からないから両方に登録しておく」という素朴な判断が、結果的にちょうど正しい形でした。
 
 ## defer 集約の効果
 
@@ -228,8 +217,14 @@ public extension TodoService {
 ## まとめ
 
 - `TodoActions` enum + static func から `TodoService` クラスへ昇格させると、Repository の都度生成 / Widget reload の呼び忘れリスク / View からの利用経路の 3 つを同時に解消できる
-- `@Dependency` で Intent に注入する。`AppDependencyManager` への登録は **プロセスごと** に必要
+- `@Dependency` で Intent に注入する。`AppDependencyManager` への登録は **プロセスごと** に必要。`.background` の実行プロセスはヒューリスティクスで決まるので、`allowedExecutionTargets` で固定しない限り両方に登録しておく
 - mutation には `defer { WidgetReloader.reloadAllWidgets() }` で副作用を集約すると、呼び忘れバグがコンパイル時に消せる
 - `swiftDataBacked(container:)` のような薄いファクトリを置くと、consumer 側のターゲット依存を最小化できる
 
 次回は、[Extension target を SPM パッケージ化してマルチプラットフォーム対応を進めた話 (3/N)](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) を書きます。
+
+## 更新履歴
+
+本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
+
+- **2026-08-11**: 実行プロセスの表を訂正。`.background` を「必ず Widget Extension で実行」と固定的に書いていたが、実際は未指定ならヒューリスティクスで決まり、固定するには `allowedExecutionTargets` が要る。Live Activity の行も「Live Activity Extension で実行」から「`perform()` はメインアプリ (公式保証)」に訂正

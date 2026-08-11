@@ -43,7 +43,7 @@ public struct TodoVisualIntelligenceQuery: IntentValueQuery {
 #endif
 ```
 
-(2026-08-05 追記) セッションを 2022 まで遡って洗い直したので、ここも出自を補足しておきます。入口の `IntentValueQuery` と `SemanticContentDescriptor` は iOS 26 (WWDC 2025 セッション 275) からある API で、Visual Intelligence 連携そのものはその年に始まっていました。この記事が参照しているセッション 297 は WWDC 2026 で Visual Intelligence 統合を単独セッションとしてまとめ直した回で、下の追記に書いた **macOS 対応と「返す entity は全部 openable でないといけない」という要求** がそこで増えた分にあたります。一方 AppIntentsTesting (セッション 295) の方は 2026 の新顔で間違いないです。
+(2026-08-05 追記) セッションを 2022 まで遡って洗い直したので、ここも出自を補足しておきます。入口の `IntentValueQuery` と `SemanticContentDescriptor` は iOS 26 (WWDC 2025 セッション 275) からある API で、Visual Intelligence 連携そのものはその年に始まっていました。この記事が参照しているセッション 297 ([Best practices for integrating visual intelligence in your app](https://developer.apple.com/videos/play/wwdc2026/297/)) は WWDC 2026 で Visual Intelligence 統合を単独セッションとしてまとめ直した回で、下の追記に書いた **macOS 対応** がそこで増えた分にあたります。一方 AppIntentsTesting (セッション 295) の方は 2026 の新顔で間違いないです。
 
 ここがおもしろかった点をいくつか。
 
@@ -52,6 +52,7 @@ public struct TodoVisualIntelligenceQuery: IntentValueQuery {
 - `SemanticContentDescriptor` は `labels: [String]` と `pixelBuffer: CVReadOnlyPixelBuffer?` を持っています。`labels` は一般的な英語ラベル (建物の固有名みたいなのは来ない、`en_US`、同義語や翻訳なし) です。本アプリは labels を Todo タイトル / カテゴリ名に部分一致させました。`pixelBuffer` で画像一致もできますが、それは ML モデルが要るので今回は見送りました。
 - **並行性**: `values(for:)` は nonisolated なので、MainActor の `TodoService` は `MainActor.run { ... }` でホップして取得して、その後は Sendable な `TodoAppEntity` 値で off-actor にフィルタする、という形にしています。
 - 他の query と同じで **登録は不要** で、システムが自動発見します (AppShortcut も要りません)。
+- 数の制限があって、**`SemanticContentDescriptor` を受ける `IntentValueQuery` はアプリに 1 つだけ** です (セッション 297 の 11:39)。IntentTodo は `TodoVisualIntelligenceQuery` の 1 つきりなので問題になっていませんが、あとから「Todo 用と Category 用で分けよう」と思い付いていたら通らなかったことになります。複数の型を返したいときは、次の項目の `@UnionValue` で戻り値の型を混ぜて 1 つの query に集約するのが正解でした。
 
 そして、結果まわりは **これまでに作った部品をそのまま再利用** できました。
 
@@ -93,9 +94,11 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 
 この「iOS 専用」、**Xcode 27 beta 2 で `VisualIntelligence` が Mac にも import 可能になって、恒久的な制約ではなくなりました**。ガードを `canImport` にしておいたおかげで、フレームワークが存在するプラットフォームでは自動的にビルド対象へ入ります (プラットフォーム名を列挙する `#if os(...)` にしていたら、ここで書き直しになっていたところでした)。
 
-ただし Mac には追加のバリデーションがあって、visual search の `IntentValueQuery` が返す entity は **すべて openable (対応する `OpenIntent` を持つ) である必要** があります。`TodoVisualIntelligenceQuery` は `TodoOrCategory` の union を返すので、`TodoAppEntity` (7/N の `OpenTodoIntent`) に加えて **`CategoryAppEntity` にも `OpenIntent` が必要** になり、`OpenCategoryIntent` を新設しました。カテゴリ専用の画面はまだ無いので perform はアプリを開くだけ、openable にすること自体が目的の Intent です (AppShortcuts には登録しないので 10 件枠にも響きません)。
+ただし Mac 対応にしたことで、1 つ見えていなかった要求が表に出てきました。visual search の `IntentValueQuery` が返す entity は **すべて openable (対応する `OpenIntent` を持つ) である必要** があります。`TodoVisualIntelligenceQuery` は `TodoOrCategory` の union を返すので、`TodoAppEntity` (7/N の `OpenTodoIntent`) に加えて **`CategoryAppEntity` にも `OpenIntent` が必要** になり、`OpenCategoryIntent` を新設しました。カテゴリ専用の画面はまだ無いので perform はアプリを開くだけ、openable にすること自体が目的の Intent です (AppShortcuts には登録しないので 10 件枠にも響きません)。
 
-おもしろいのはこのエラーの出方で、`OpenCategoryIntent` を外しても **iOS ビルドは普通に通り**、macOS 向けビルドでだけ appintentsmetadataprocessor が `result type 'CategoryAppEntity' that is not openable ... must be associated with an OpenIntent` で止まります (手元の beta 2 で両方確認しました)。「プラットフォーム限定」が当時の SDK の都合に過ぎないこともあれば、逆にプラットフォーム固有の要求が後から増えることもあるので、SDK 更新のたびに複数 destination でフルビルドして確かめるのが結局いちばん確実だなと思います。深さはビルド成立 (B) までで、Mac の visual search で実際に Todo が出てくるかは実機待ちです。
+この要求、最初は「Mac 固有の追加バリデーション」だと思っていたんですが、そうではありませんでした。**ルール自体は全プラットフォーム共通** です。セッション 275 (9:19) が "This `OpenIntent` must exist, otherwise your app won't show up" と言っているとおりで、`OpenIntent` の無い entity はそもそも Visual Intelligence の結果に出てきません。Mac 固有なのは **macOS 向けのビルドだけがそれをコンパイル時エラーとして弾いてくる** という enforce のされ方の方でした。
+
+なのでこのエラーの出方がおもしろくて、`OpenCategoryIntent` を外しても **iOS ビルドは普通に通り**、macOS 向けビルドでだけ appintentsmetadataprocessor が `result type 'CategoryAppEntity' that is not openable ... must be associated with an OpenIntent` で止まります (手元の beta 2 で両方確認しました)。iOS だけ見ていると、ビルドは通るのに実機で「なぜか候補に出てこない」という形でしか気付けないことになります。SDK 更新のたびに複数 destination でフルビルドして確かめるのが結局いちばん確実だなと思うのは、こういうところです。深さはビルド成立 (B) までで、Mac の visual search で実際に Todo が出てくるかは実機待ちです。
 
 ちなみに「期限 → カレンダー」「担当者 → 連絡先」みたいな EventKit / Contacts 連携は、別フレームワークの話で App Intents 中心設計の検証主眼からは外れるので、今回は記録だけして未実装にしています。
 
@@ -122,16 +125,6 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 
 本編 5/N で `CSSearchableIndex` と `IndexedEntity` の gate を揃える話を書きましたが、あれの「揃える相手が `#if os(...)` とは限らない」版だなと思いました。
 
-### (2026-08-11 追記) 「Mac 固有の追加バリデーション」ではなかった / query はアプリに 1 つだけ
-
-IntentTodo のドキュメントに書いた制約をセッションの書き起こしと全部突き合わせる、というのをやったら、この記事にも直すところが出てきました。
-
-まず、上の「Mac には追加のバリデーションがあって、返す entity は全部 openable である必要がある」という書き方。**openable 要件そのものは全プラットフォーム共通** でした。セッション 275 (9:19) が "This `OpenIntent` must exist, otherwise your app won't show up" と言っていて、`OpenIntent` の無い entity はそもそも Visual Intelligence の結果に出てこない、という仕様です。Mac 固有なのはルールの方ではなくて、**macOS 向けのビルドだけがそれをコンパイル時エラーとして弾いてくる** という enforce のされ方の違いでした。iOS ではビルドが通ってしまうぶん、実機で「なぜか候補に出てこない」という形で気付くことになります。`OpenCategoryIntent` を足した対処自体は変わりません。
-
-もう 1 つ、記事に書いていなかった制約が見つかりました。セッション 297 (11:39) いわく、**`SemanticContentDescriptor` を受ける `IntentValueQuery` はアプリに 1 つだけ** しか置けません。IntentTodo は `TodoVisualIntelligenceQuery` の 1 つきりなので今は問題ないんですが、あとから「Todo 用と Category 用で分けよう」と思い付いていたら通らなかったことになります。複数の型を返したいときの正解は、9/N の `@UnionValue` で戻り値の型を混ぜて 1 つの query に集約する方、という設計でした。結果的に最初からその形にしていたのは、9/N の union が先にあったからで、これも部品の再利用が効いた側面だと思います。
-
-ついでに、このセッションを検索する人向けに正式タイトルも置いておきます。297 は [Best practices for integrating visual intelligence in your app](https://developer.apple.com/videos/play/wwdc2026/297/) です (自分の手元のメモは別のタイトルで持っていて、そのままだと辿れませんでした)。
-
 ## AppIntentsTesting で Intent を実経路テストする
 
 WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテスト** (セッション 295) を試しました。
@@ -143,7 +136,7 @@ WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテス
 [Apple のドキュメント](https://developer.apple.com/documentation/AppIntentsTesting/testing-your-app-intents-code) が明記していて、AppIntentsTesting は intent を **ライブのアプリプロセスで実行** するので、テストは unit test ではなく **UI テスティングバンドル** に置く必要があります。
 アプリプロセスと、登録済みの `AppDependencyManager` が要るからで、SPM の Testing パッケージでは動きません。IntentTodo は既存の `IntentTodoUITest` (UI テストターゲット) に追加しました。
 
-(2026-08-11 追記) もう 1 つ、セッション 295 (2:54) が明言している要件を書き落としていました。**AppIntentsTesting はテストランナーとアプリ本体が同じ development team で code signing されている必要があります**。自分は同一 Apple ID でしか触っていないので踏んでいないんですが、CI や複数アカウントを切り替える環境でここがずれると、原因の見当がつきにくい失敗になりそうです。テストを足すときは最初に署名チームを揃えておくのが良さそう、というのを記録しておきます。
+もう 1 つ、セッション 295 (2:54) が明言している要件があって、**テストランナーとアプリ本体が同じ development team で code signing されている必要があります**。自分は同一 Apple ID でしか触っていないので踏んでいないんですが、CI や複数アカウントを切り替える環境でここがずれると、原因の見当がつきにくい失敗になりそうです。テストを足すときは最初に署名チームを揃えておくのが良さそうだなと思っています。
 
 ```swift
 import AppIntents
@@ -230,11 +223,21 @@ UI テストターゲットは synchronized folder ではないので、**ファ
 この編は実機 (R) まで通せていないものが多いので、Siri / Visual Intelligence を実際に喋らせて確認できたぶんは、おいおい各記事に追記していく予定です。
 残っている検証待ち・将来トピックは [99/N](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) にまとめてあります。
 
+## 更新履歴
+
+本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
+
+- **2026-08-11**: openable 要件を「Mac 固有の追加バリデーション」と書いていたのを、ルールは全プラットフォーム共通で macOS ビルドだけがコンパイル時に enforce する、と訂正。`SemanticContentDescriptor` を受ける `IntentValueQuery` はアプリに 1 つだけという制約と、AppIntentsTesting の署名チーム要件を追加。セッション 297 の正式タイトルを訂正
+- **2026-08-05**: `IntentValueQuery` / `SemanticContentDescriptor` の出自 (iOS 26 / セッション 275) を補足
+- **2026-07-28**: `canImport` だけだと visionOS 実機ビルドが落ちる話を追加
+- **2026-07-02**: beta 2 で `VisualIntelligence` が Mac にも import 可能になった話を追加
+
 ## まとめ
 
-- `IntentValueQuery` はカメラ / スクショの visual search にアプリのコンテンツを返す入口。`AppEntity` と違い `@Dependency` が使え、`@UnionValue` で複数型を返せる (2026-08-11 追記: `SemanticContentDescriptor` を受ける query は **アプリに 1 つだけ** なので、複数型を返したいなら `@UnionValue` に寄せるのが正解でした)
+- `IntentValueQuery` はカメラ / スクショの visual search にアプリのコンテンツを返す入口。`AppEntity` と違い `@Dependency` が使え、`@UnionValue` で複数型を返せる。`SemanticContentDescriptor` を受ける query は **アプリに 1 つだけ** なので、複数型を返したいなら `@UnionValue` に寄せる
 - `SemanticContentDescriptor` の `labels` は一般英語ラベル。`values(for:)` は nonisolated なので MainActor へホップして fetch する
-- `@AppIntent(schema: .visualIntelligence.semanticContentSearch)` は entity プロパティを持たないので reminder スキーマの init 地雷を踏まない。`VisualIntelligence` は iOS 専用なので `#if canImport` でガード (2026-07-02 追記: beta 2 で Mac にも import 可能になりました。Mac は返す entity 全部に `OpenIntent` を要求してくるので、本文の追記を見てください / 2026-07-28 追記: `canImport` だけだと visionOS 実機ビルドが落ちたので `&& !os(visionOS)` を足しています)
+- `@AppIntent(schema: .visualIntelligence.semanticContentSearch)` は entity プロパティを持たないので reminder スキーマの init 地雷を踏まない。`VisualIntelligence` のガードは `#if canImport(VisualIntelligence) && !os(visionOS)` (beta 2 で Mac にも import 可能になり、`canImport` だけだと visionOS 実機ビルドが落ちたため)
+- visual search が返す entity は全部 openable でないといけない。ルールは全プラットフォーム共通で、**macOS ビルドだけがコンパイル時に弾いてくる**
 - 結果タップ (`OpenTodoIntent`) / 複数結果型 (`@UnionValue`) は既存部品を再利用できた
-- AppIntentsTesting は実経路で intent を動かせるが **UI テストバンドル必須**。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
+- AppIntentsTesting は実経路で intent を動かせるが **UI テストバンドル必須**、かつテストランナーとアプリの署名チームを揃える必要がある。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
 - WWDC 2026 編全体を通して、Entity / Intent を丁寧に設計しておくほど新サーフェスへの適合が安くなる、というのが一番の実感だった

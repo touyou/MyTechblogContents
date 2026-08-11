@@ -231,24 +231,18 @@ private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -
 
 WWDC 2022 から 2026 までのセッションを網羅的に洗い直したので、この記事で扱った道具の出自を整理しておきます。WWDC 2026 編の中に置いたせいで、全部が iOS 27 の新 API のように読めてしまう書き方になっていました。
 
-- `requestConfirmation(for:dialog:)` は WWDC 2022 (セッション 10032) からある基本 API で、当時の `confirmBeforeRunning` を置き換える形で入ったものでした。セッション 343 が iOS 27 で足したのは `requestConfirmation(_:confirmLabel:cancelLabel:)` という、確認とキャンセルのボタンラベルを個別に指定できるオーバーロードの方です。IntentTodo は既定のラベルのままで足りているので、こちらはまだ使っていません。
-- `requestChoice` と `IntentChoiceOption` は iOS 26 (WWDC 2025 セッション 275) が初出でした。343 は SwiftUI View を添える `requestChoice(between:dialog:view:)` を詳解した回です。なので本文の「選ばれたオプションに安定 id が無い」という制約も、iOS 26 の時点からあった話ということになります。
-- `IntentDialog(full:supporting:)` に至っては WWDC 2022 (セッション 10032) からある形でした。343 は「音声だけの文脈と視覚併用の文脈で出し分ける」という使いどころを改めて示した回で、API 自体が新しいわけではないです。
+セッションの書き起こしを 1 本ずつ全文検索して「その API 名が本当にそのセッションに出てくるか」を確かめたので、**セッションで説明されているもの** と **API ドキュメントで知ったもの** を分けて書いています。
+
+- `requestConfirmation(for:dialog:)` は WWDC 2022 (セッション 10032) からある基本 API で、当時の `confirmBeforeRunning` を置き換える形で入ったものでした。
+- iOS 27 では `requestConfirmation(_:confirmLabel:cancelLabel:)` という、確認とキャンセルのボタンラベルを個別に指定できるオーバーロードが増えています。ただしこれは **どのセッションの書き起こしにも出てこなくて、API ドキュメント側で見つけたもの** です。IntentTodo は既定のラベルのままで足りているので、こちらはまだ使っていません。
+- `requestChoice` と `IntentChoiceOption` は iOS 26 (WWDC 2025 セッション 275) が初出でした。SwiftUI View を添える `requestChoice(between:dialog:view:)` も同じ 275 です。なので本文の「選ばれたオプションに安定 id が無い」という制約も、iOS 26 の時点からあった話ということになります。
+- `IntentDialog(full:supporting:)` はちょっとややこしくて、**型としては WWDC 2022 (セッション 10032) に登場する** けれど、`full:` と `supporting:` を分けて出し分ける **具体例が出てくるのはセッション 343 (2:45)** でした。API 自体が新しいわけではなく、使いどころを示した実例の方が 2026 側にある、という形です。
 - Interactive Snippet (`SnippetIntent`) も iOS 26 (セッション 275) の機能で、`SnippetIntent.reload()` まで含めてこの年に入っています。
-- `IntentDonationManager` は WWDC 2023 (セッション 10103) からある寄付の口です。iOS 27 で増えたのは削除条件を絞る `IntentDonationMatchingPredicate` で、本文で `deleteDonations(matching:)` に渡している `.entityIdentifiers([...])` がまさにそれでした。
+- `IntentDonationManager` と、本文で `deleteDonations(matching:)` に渡している `IntentDonationMatchingPredicate` は、**どちらもセッションの書き起こしには出てこず、API ドキュメント由来** です。WWDC 2023 (セッション 10103) にあるのは `RelevantIntent` / `RelevantIntentManager` / `RelevantContext` の方で、自分は隣にあったこれらと混ぜて覚えていました。
 
 自分のアプリに入れる分には「今の SDK で使えるか」しか見ていなかったので気にしていなかったんですが、記事として読むと「WWDC 2026 で何が増えたのか」の情報として不正確なので直しておきます。ベースラインが iOS 26 のプロジェクトに iOS 27 の新要素を足していく作り方をしていると、この 2 世代の境目は自分でも結構あいまいになるなと思いました。
 
-### (2026-08-11 追記) さらに突き合わせたら、上の出典もいくつかずれていた
-
-この節を書いたあと、セッションの書き起こしを 1 本ずつ全文検索して「その API 名が本当にそのセッションに出てくるか」を機械的に確かめる、というのをやりました。そうしたら、上のリストにもまだ間違いが残っていました。
-
-- `requestConfirmation(_:confirmLabel:cancelLabel:)` を「343 が iOS 27 で足した」と書きましたが、**343 の書き起こしにこのオーバーロードは出てきません**。API ドキュメント側で見つけたものを、話の流れでセッションに帰属させてしまっていました。
-- `requestChoice(between:dialog:view:)` (View 付き) も同じで、**343 ではなく 275 が出典** です。343 で新しく紹介されたものではありませんでした。
-- `IntentDonationManager` を「WWDC 2023 (セッション 10103) からある」と書きましたが、これも **10103 には出てきません**。同じ回の `RelevantIntent` / `RelevantIntentManager` / `RelevantContext` の方は実際に登場するので、隣にあった API と混ざったんだと思います。`IntentDonationMatchingPredicate` と donation 削除系の API も、343 ではなく API ドキュメント由来でした。
-- `IntentDialog(full:supporting:)` はちょっとややこしくて、**型としては 10032 に登場する** けれど、`full:` と `supporting:` を分けて出し分ける **具体例が出てくるのは 343 (2:45)** でした。「10032 からある形」という書き方自体は間違いではないものの、使いどころを示した実例の方は 2026 側にある、が正確です。
-
-今回まとめて出てきた誤りの正体は、「API ドキュメントを読んで知ったこと」と「セッションで説明されていたこと」を、自分の中で一緒くたに『WWDC のあの回で見た』として覚えていたことでした。出典として書くなら、この 2 つは分けておかないといけないなと思います。
+そしてもう 1 つ、「API ドキュメントを読んで知ったこと」と「セッションで説明されていたこと」を、自分の中で一緒くたに『WWDC のあの回で見た』として覚えていたのが、出典を間違えた主な原因でした。出典として書くならこの 2 つは分けておかないといけないなと思います。
 
 ## 検証できた深さ
 
@@ -268,3 +262,11 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 - `IntentDonationManager` は「追加で `donate()`、削除で `deleteDonations(...)`」をペアにして、提案が実体とズレないようにする
 
 次回は、[大量の Todo を一括処理する `EntityCollection` / `LongRunningIntent` / `CancellableIntent` と、「検証してみたら自分のアプリには適合しなかった」`RelevantEntities` の話 (9/N)](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis) を書きます。
+
+## 更新履歴
+
+本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
+
+- **2026-08-11**: 出自の整理をさらに訂正。`requestConfirmation(_:confirmLabel:cancelLabel:)` / `IntentDonationManager` / `IntentDonationMatchingPredicate` はセッションではなく API ドキュメント由来、`requestChoice(between:dialog:view:)` は 343 ではなく 275 が出典
+- **2026-08-05**: この回で使った API の出自を整理する節を追加 (全部が iOS 27 の新 API のように読める書き方だった)
+- **2026-07-02**: `IntentParameter.valueState` を使った `UpdateTodoIntent` の節を追加

@@ -17,7 +17,7 @@ IntentTodo では当初 `TodoActions` という enum + static func の集まり�
 
 ## なぜ最初は enum + static func だったか
 
-Primary / FromExtension の 2 系統 Intent (詳細は本シリーズ 5/N) が同じビジネスロジックを呼ぶので、共通化が必要でした。
+当時は Primary / FromExtension の 2 系統 Intent (詳細は本シリーズ 5/N。この分離自体はのちに撤去しました) が同じビジネスロジックを呼んでいたので、共通化が必要でした。
 最小コストで共通化するなら enum + static func が手早いので、まずはそうしました。
 
 ```swift
@@ -227,4 +227,6 @@ public extension TodoService {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-12**: Primary / FromExtension 分離が撤去されたことに追随 (5/N 参照)
+- **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-11**: 実行プロセスの表を訂正。`.background` を「必ず Widget Extension で実行」と固定的に書いていたが、実際は未指定ならヒューリスティクスで決まり、固定するには `allowedExecutionTargets` が要る。Live Activity の行も「Live Activity Extension で実行」から「`perform()` はメインアプリ (公式保証)」に訂正

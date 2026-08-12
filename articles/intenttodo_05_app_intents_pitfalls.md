@@ -1,5 +1,5 @@
 ---
-title: "App Intents 運用の罠 — FromExtension / Control Widget / Spotlight (5/N)"
+title: "App Intents 運用の罠 — Live Activity / Control Widget / Spotlight (5/N)"
 emoji: "🪤"
 type: "tech"
 topics: ["AppIntents", "iOS", "WidgetKit", "Spotlight"]
@@ -12,8 +12,9 @@ published: true
 
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 5 回目です。
 
-本記事では、IntentTodo を作っていて実機で気付いた App Intents 運用上の落とし穴を 3 つまとめます。
+本記事では、IntentTodo を作っていて実機で気付いた App Intents 運用上の落とし穴を 4 つまとめます。
 ドキュメント上では分かりにくいけれど、実装してみてはじめて気付くタイプのものを集めました。
+1 つ目は後日の実測で解消したので、**ワークアラウンドを入れて、しばらく運用して、根拠が消えたので撤去した** という一連の流れごと残しています。
 
 ## 落とし穴 1: Live Activity からの AppEntity 解決でクラッシュする
 
@@ -22,7 +23,8 @@ App Intents は `perform()` の前に `TodoEntityQuery.entities(for:)` を呼ん
 
 原因の特定はできていません。最初は「解決が Live Activity Extension プロセスで走るからだ」と書いていたんですが、Apple のドキュメントは `LiveActivityIntent` について "the system runs the app intent in the app's process" と明言していて、Primary 版が `LiveActivityIntent` に準拠している以上 `perform()` はアプリプロセスで走るはずです。ここで噛み合いません。公式が保証しているのは `perform()` の実行プロセスだけで、**その手前の事前解決フェーズがどのプロセスで走るかはどこにも書かれていない** ので、そこを断定するのはやめました (セッション 345 の 7:37 も「Intent 実行の前に entity 解決が走る」とフェーズが分かれていることは言っていますが、プロセスの話はしていないです)。
 
-直接の修正は難しい (Apple 側のバグ寄り) ので、**Primary / FromExtension Intent 分離パターン** で回避しています。真因が何であれ、解決フェーズそのものを踏まなくなるので効きます。
+直接の修正は難しい (Apple 側のバグ寄り) ので、**Primary / FromExtension Intent 分離パターン** で回避していました。真因が何であれ、解決フェーズそのものを踏まなくなるので効きます。
+(この分離は iOS 27 で再現しないことを実測できたので、のちに撤去しました。経緯は下の「実測したら再現しなかったので分離を撤去した」に書いています)
 
 | 区分 | 呼出元 | パラメータ型 | `isDiscoverable` | AppShortcuts 登録 |
 |------|-------|------------|------------------|--------------------|
@@ -74,6 +76,39 @@ Apple のバグが直ったら 2 系統に分ける必要はなくなるので�
 「コードコメントに残す」「Issue で追跡する」「`docs/insights` に記述する」の 3 点で削除タイミングを忘れないようにしています。
 
 ワークアラウンドを書くときに「なぜ効くのか」を無理に 1 文で言い切ろうとすると、上に書いたような筋の悪い断定 (「Extension プロセスで解決されるから」) が混ざるんだな、というのはちょっと覚えておきたいところでした。分かっているのは「事前解決フェーズのプロセスが未文書化で、そこで実際にクラッシュした実績がある」までで、そこから先は書かない方が誠実だと思っています。
+
+### 実測したら再現しなかったので分離を撤去した
+
+この「削除タイミングが分からない技術的負債」、**iOS 27 では再現しませんでした**。ようやく検証できたので分離ごと撤去しています。
+
+やったのは、`@Parameter var todo: TodoAppEntity` を持つ probe Intent を作って、Live Activity のロック画面と Dynamic Island のボタンをそれに差し替える、というものです。`TodoEntityQuery.entities(for:)` と `perform()` の両方に pid とプロセス名を出すログを入れて、3 パターン回しました。
+
+| ケース | `entities(for:)` | `perform()` | crash |
+|---|---|---|---|
+| アプリ起動中 + `LiveActivityIntent` 準拠 | メインアプリ | メインアプリ | 無し |
+| アプリ kill 済み (cold start) + `LiveActivityIntent` 準拠 | メインアプリ (LA タップで起動) | メインアプリ | 無し |
+| アプリ kill 済み + `LiveActivityIntent` **非**準拠 (素の `AppIntent`) | メインアプリ | メインアプリ | 無し |
+
+効いたのが 3 ケース目で、**`LiveActivityIntent` 準拠の有無は entity 解決のプロセスに影響しませんでした**。「準拠していなかったのが原因では」という仮説を持っていたんですが、現行 SDK では成立しません。Live Activity Extension 側が `AppDependencyManager` に何も登録していないままでも動くので、そっちの仮説も無関係でした。
+
+というわけで **FromExtension 分離は撤去して、1 アクション 1 Intent に統一** しました。Live Activity のボタンも Siri も同じ `ToggleTodoCompletionIntent(todo:)` を呼びます。Live Activity 側が持っているのは id と title だけですが、`TodoAppEntity(id:title:)` で組んで渡せば足ります。システムが `perform()` の前に id から再解決してくれるので、他のフィールドは埋めなくていいわけです。
+
+副産物で 1 つ分かったことがあって、同じログを眺めていたら **Widget のタイムライン描画では `entities(for:)` が Widget Extension プロセスで走っていました**。「entity 解決は必ずアプリで走る」わけではなくて、上の結論はあくまで Live Activity ボタン経由に限った話です。2/N に書いた「Widget Extension 側にも `AppDependencyManager` の登録が要る」という運用は、これで実測の裏が取れました。
+
+### 分けるなら理由は「振る舞いの違い」で
+
+撤去したあとに残した分岐もあります。判断の軸が変わったので、そこも書いておきます。
+
+| 分けている Intent | 残した理由 |
+|---|---|
+| `SnoozeTodoIntent` / `QuickSnoozeTodoIntent` | 前者は `requestChoice` で期間を選ばせます。Live Activity のボタンは背景実行で問い合わせる面が無いので、後者が既定 30 分で即実行する |
+| `ToggleTodoCompletionIntent` / `SetTodoCompletionIntent` | 前者はトグル、後者は絶対値セット (`SetValueIntent`)。落とし穴 2 に書いたとおり `ControlWidgetToggle` は on/off を渡してくるので、トグルでは表現できない |
+
+もとの `SnoozeTodoFromExtensionIntent` は `QuickSnoozeTodoIntent` に改名して、パラメータも `todoId: String` から `todo: TodoAppEntity` に揃えました。名前に "FromExtension" と付いていると「呼出元プロセスの都合で複製したもの」に読めますが、実際に残す理由は **対話できる呼出元かどうか** という振る舞いの違いなので、名前の方を実態に寄せた形です。
+
+**呼出元プロセスの都合で Intent を複製しない、分けるなら振る舞いが違うときだけ** というのが、今の整理です。ワークアラウンドは消せるとき消さないと、いつのまにか「そういう設計」の顔をして居座るんだなと思いました。
+
+なお検証のときに 1 つ引っかかったのが **ログの取り方** でした。プロセスをまたぐ話なので Xcode の launch session のログだと足りません (アプリを kill する検証だとセッションが切れます)。`simctl spawn <udid> log config --subsystem <サブシステム> --mode "level:debug,persist:debug"` で永続化してから `log show` で読む、という形にして、ようやくアプリ再起動や Extension 側まで一続きで追えるようになりました。
 
 ## 落とし穴 2: Control Widget では dialog も snippet も表示されない
 
@@ -170,7 +205,7 @@ struct ToggleTodoControl: ControlWidget {
 実装で気を付けたのが 3 つです。
 
 - **action Intent は絶対値で受ける**。`SetValueIntent` の `value` はシステムが「トグルが移った先の状態」で埋めてくれます ("Don't set or manage the value parameter")。Toggle はその状態に収束しないといけないので、flip する `toggleCompletion` ではなく `setCompletion(todoId:isCompleted:)` のような絶対値の API を呼びます。flip だと冪等になりません。
-- **パラメータは `todoId: String`**。落とし穴 1 の FromExtension と同じ理由で、`TodoAppEntity` にすると事前の entity 解決フェーズを踏むためです。呼出元が id を知っているので解決自体が要りません。
+- **パラメータは `todoId: String`**。ここはトグルではなく絶対値のセットで、呼出元が対象の id を知っているためです (呼出元プロセスの都合ではありません)。
 - **configuration が持っている entity のスナップショットは古い**。選んだ時点の値しか持たないので、`currentValue(configuration:)` で id からストアを引き直して title / isCompleted を取り直します。
 
 ### おまけ: Control Widget の本体実装
@@ -204,6 +239,28 @@ extension TodoCountControl {
 なぜそうするかというと、セッション 10157 (9:51 / 11:22) が **非同期のデータ取得は `ControlValueProvider` の役目で、リロード時にシステムが `ControlValueProvider` → `body` の順で実行する** という分担を明確にしているからです。body は受け取った値を同期的に描くだけの場所として設計されているので、そこで SwiftData を直接引くとこの分担から外れます。
 
 `currentValue()` の中でエラーが出たときは、通知ではなく **throw する** のが正解でした ("You can also throw an error to tell the system that the state couldn't be computed"、セッション 10157 の 10:26)。`try?` で `0` や空に潰すと、「全部完了」「期限近い Todo なし」という嘘をコントロール面に表示することになります。
+
+### WidgetCenter はコントロールを更新しない
+
+実機の Control Center を触っていて見つけたバグも 1 つ書いておきます。トグルのコントロールで Todo を完了にしても、**隣に置いた件数コントロールが古い値のまま止まる** という症状でした。数秒待っても直らず、アプリを再インストールするまで残ります。
+
+原因は `WidgetReloader.reloadAllWidgets()` が `WidgetCenter.shared.reloadAllTimelines()` しか呼んでいなかったことでした。**ホームの Widget とコントロールは別 API** で、`WidgetCenter` はコントロールを更新してくれません。
+
+システムが自動でリロードしてくれるのは、その Intent を実行した **コントロール自身だけ** です。他のコントロールまで巻き込みたいなら `ControlCenter.shared.reloadAllControls()` を明示的に呼ぶ必要がありました (visionOS では unavailable なので `#if !os(visionOS)` で保護しています)。
+
+```swift
+public enum WidgetReloader {
+    public static func reloadAllWidgets() {
+        WidgetCenter.shared.reloadAllTimelines()
+        #if !os(visionOS)
+        ControlCenter.shared.reloadAllControls()   // ← コントロールはこちら
+        #endif
+    }
+}
+```
+
+2/N で「mutation の末尾で必ず `reloadAllWidgets()` が走るように `defer` で集約した」と書きましたが、集約先の中身が片肺だったという話でした。呼び忘れを構造で防ぐ仕組みを作っても、集約したメソッド自体が足りていないと結局同じところに落ちるんだなと思います。
+
 
 ### おまけ 2: 列挙が約束した遷移先は実装とセットで
 
@@ -313,15 +370,52 @@ Task { await todoService.indexAllForSpotlight() }  // 起動時に全件投入
 `CSSearchableIndex` は `#if canImport(CoreSpotlight)` で大半の Apple platform で使えますが、`TodoAppEntity: IndexedEntity` 自体が `#if os(iOS) || os(macOS)` で限定しているので、両者の gate を **同じものに揃える** のがビルドエラー回避のコツです。
 canImport に変えると visionOS で `CSSearchableIndex` は import できても `IndexedEntity` 準拠が無いのでビルドエラーになります。
 
-(2026-07-28 追記) この「gate を揃える」話には続きがあって、逆に `canImport` でガードしていた Visual Intelligence 側が、SDK 更新後の visionOS 実機ビルドでだけ落ちるということがありました。`canImport` は import 可否しか見ないうえ、同じ OS でもシミュレータと実機で結果が変わることがある、というのが原因です。詳しくは [10/N の追記](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) に書きました。
+この「gate を揃える」話には続きがあって、逆に `canImport` でガードしていた Visual Intelligence 側が、SDK 更新後の visionOS 実機ビルドでだけ落ちるということがありました。`canImport` は import 可否しか見ないうえ、同じ OS でもシミュレータと実機で結果が変わることがある、というのが原因です。詳しくは [10/N の追記](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) に書きました。
+
+## 落とし穴 4: アプリ内の `Button(intent:)` から `requestConfirmation` は失敗する
+
+上のコントロールを実機で確認している最中に、まったく別のバグを踏みました。**詳細画面の Delete Todo を押しても Todo が消えない** というものです。
+
+コンソールにはこれが出ていました。
+
+```
+DeleteTodoIntent failed to execute with error:
+LNPerformActionErrorCodeUnsupportedValueType
+```
+
+原因は `DeleteTodoIntent.perform()` の中で呼んでいた `requestConfirmation(dialog:)` でした。8/N で書いたとおり、これは `perform()` を止めてユーザーに確認を求める API なんですが、**アプリ内の `Button(intent:)` には確認を提示する面がありません**。要求した時点で失敗して、削除まで到達しない、ということになります。
+
+厄介なのが、**Siri / Shortcuts / AppIntentsTesting 経由では成功する** ところです。それらには確認を出す面があるので、テストは通ります。壊れているのは UI の削除経路だけ (一覧のスワイプ / iOS 詳細 / visionOS / watchOS の 4 箇所) でした。
+
+対処は、確認なし版の `DeleteTodoImmediatelyIntent` (`isDiscoverable = false`) を分けて、呼出元ごとに使い分ける形にしました。
+
+- 一覧のスワイプ削除は「スワイプして Delete を押す」自体が確認になっているので、確認なし版を直接実行
+- 詳細画面は SwiftUI の `.confirmationDialog` で確認してから確認なし版を実行
+- `DeleteTodoIntent` (確認付き) は Siri / Shortcuts 用としてそのまま残す
+
+落とし穴 1 で書いた「分けるなら理由は振る舞いの違いで」がここにも出ていて、**対話できる呼出元かどうか** で分ける、という同じ形です。
+
+### 見逃していた理由は条件付き assert
+
+もう 1 つ反省があって、この経路には UI テストがありました。それなのに緑のまま何年も気付かなかったのは、テストがこう書いてあったからです。
+
+```swift
+if deleteButton.waitForExistence(timeout: 3) {
+    // ... ここで削除を確認する assert
+}
+```
+
+`if` で包んであるうえ、探していたラベルが `"Delete"` (実際は `"Delete todo"`) だったので、**中身が一度も実行されないまま緑** でした。要素が見つからないときに素通りするテストは、テストが無いのと同じどころか「テストがある」という誤った安心感がある分たちが悪いなと思います。`if` を外して正しいラベルで assert し直して、詳細画面用のケースも足しました。
 
 ## まとめ
 
-- **Live Activity からの AppEntity 解決でクラッシュする** → Primary / FromExtension Intent 分離で回避。コードコメントと issue で削除タイミングを追跡。原因は特定できていない (事前解決フェーズのプロセスが未文書化)
+- **Live Activity からの AppEntity 解決でクラッシュする** → Primary / FromExtension Intent 分離で回避していたが、iOS 27 では再現しないことを実測できたので **撤去して 1 アクション 1 Intent に統一**。分けるなら理由は呼出元プロセスではなく振る舞いの違いで
+- **`WidgetCenter` はコントロールを更新しない** → 他のコントロールまで反映したいなら `ControlCenter.shared.reloadAllControls()` が要る
 - **Control Widget では dialog も snippet も出ない** → 成功は `perform()` 完了時の自動リロードによるコントロール自身の再描画で伝える。通知は失敗時だけ。読ませたい情報は Siri / Spotlight 側へ寄せる
 - **Control の Button と Toggle は「対象が固定されているか」で選ぶ** → `isOn` は provider が読み戻せる永続的な bool が要るので、対象が動くアクションは Toggle にできない。`SetValueIntent` は絶対値で受ける
 - `StaticControlConfiguration(kind:provider:)` + `ControlValueProvider` パターンで body を薄く保つ。provider のエラーは `try?` で潰さず throw する
 - **Spotlight は IndexedEntity だけでは index されない** → `CSSearchableIndex.default().indexAppEntities(...)` の明示登録が必要。TodoService の mutation hook と起動時の全件投入で組む
+- **アプリ内の `Button(intent:)` から `requestConfirmation` は失敗する** → 確認を提示する面が無いため。Siri / Shortcuts / AppIntentsTesting では通るので気付きにくい。確認なし版を分けて、UI 側は `.confirmationDialog` で確認する
 
 これで本編 (1〜5) は一区切りです。ここから先は [WWDC 2026 編 (6/N)](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) で、`xcode27` ブランチで新しい App Intents の API を試してみて分かった設計判断をまとめていきます。検証待ち・将来書く予定のトピックは [番外編 (99/N)](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) に並べてあります。
 
@@ -329,6 +423,8 @@ canImport に変えると visionOS で `CSSearchableIndex` は import できて�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
+- **2026-08-12 (2)**: Live Activity の entity 解決クラッシュが iOS 27 で **再現しない** ことを実測し、Primary / FromExtension 分離を撤去した経緯を追加 (タイトルの「FromExtension」も差し替え)。`WidgetCenter` がコントロールを更新しない件と、落とし穴 4 (アプリ内 `Button(intent:)` から `requestConfirmation` が失敗する) を追加
 - **2026-08-12**: 落とし穴 2 を全面的に書き直し。**Control では snippet も出ない** ことを実機 (呼出元だけを変えた比較) で確定し、切り分けの経緯と教訓を追加。Control を Toggle 化したのに伴い、Button / Toggle の使い分けと `SetValueIntent` を絶対値で受ける話を追加。前日に追記した `.controlWidgetStatus(_:)` は **撤去** した (公式ガイダンスに反していたうえ、当時の provider の predicate のせいで分岐が到達不能なデッドコードだった)。成功通知を全廃し失敗時のみに縮小。`LaunchAppIntent` の遷移先実装漏れの話を追加
 - **2026-08-11**: Live Activity のクラッシュについて「Extension プロセスで解決されるから」という原因断定を取り下げ (クラッシュ自体と回避策は変わらず)。`ControlValueProvider` を使う理由を「body の過剰評価を避ける」から「取得と描画の分担モデル」に訂正
 - **2026-07-28**: `canImport` だけに頼ると visionOS 実機ビルドで落ちる話への相互リンクを追加

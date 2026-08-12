@@ -41,6 +41,21 @@ public func perform() async throws -> some IntentResult {
 
 confirm が通らなければ throw で抜けるので、`if` で分岐する必要すらなくて、書き味はかなり素直でした。
 
+#### 呼出元に確認を出す面が無いと失敗する
+
+書き味は素直なんですが、**どこから呼ばれるか** を考えずに置くと事故ります。この `DeleteTodoIntent` をアプリ内の `Button(intent:)` にも繋いでいたら、押しても Todo が消えませんでした。コンソールにはこれが出ます。
+
+```
+DeleteTodoIntent failed to execute with error:
+LNPerformActionErrorCodeUnsupportedValueType
+```
+
+アプリ内の `Button(intent:)` には **確認を提示する面がありません**。なので `requestConfirmation` を要求した時点で失敗して、その先の削除まで到達しない、ということでした。5/N に書いた「Control では dialog も snippet も出ない」と同じ系統の話で、**対話 API は呼出元がその対話を提示できるかに依存する** わけです。
+
+しかも Siri / Shortcuts / AppIntentsTesting 経由では成功するので、テストは通ります。壊れていたのは UI の削除経路だけでした。対処は確認なし版の Intent を分けて、UI 側は SwiftUI の `.confirmationDialog` で確認してからそちらを呼ぶ形にしています。詳しい経緯は [5/N の落とし穴 4](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書きました。
+
+ついでに、10/N に書いた AppIntentsTesting の話とも繋がります。**`requestChoice` を使う Intent はテストから run できません**。対話版と非対話版を分けておくと、この制約を回避できてテスト可能性が上がる、という副次効果がありました。呼出元ごとに分けるのは対話のためだったんですが、結果的にテストのためにもなっていた形です。
+
 ### requestChoice で選択肢を出す
 
 `requestConfirmation` が yes/no なら、`requestChoice` はその多分岐版です。
@@ -92,7 +107,7 @@ private enum SnoozeDuration: CaseIterable {
 `IntentChoiceOption` に id が無いという地味な制約を、enum に寄せて吸収した、という感じです。
 
 ちなみに `requestChoice` も `requestConfirmation` も **`.background` モードの intent から呼べます** (Siri / Shortcuts の UI に surface される)。
-`SnoozeTodoIntent` (Primary) は UI の Button からは呼ばれず Siri / Shortcuts 専用なので、ここに対話を置くのが安全でした。Live Activity / Widget 用の `*FromExtensionIntent` 変種は、対話を求めず固定間隔のまま据え置いています。
+`SnoozeTodoIntent` は UI の Button からは呼ばれず Siri / Shortcuts 専用なので、ここに対話を置くのが安全でした。Live Activity のボタン用には、対話を求めず既定 30 分で即実行する `QuickSnoozeTodoIntent` を別に用意しています。
 
 ## 返事を出し分ける: IntentDialog(full:supporting:)
 
@@ -167,7 +182,7 @@ Button(intent: ToggleTodoCompletionIntent(todo: entity)) {
 ボタンが走ると、システムがスニペットを再 perform するので、`perform()` の中で **毎回 entity を取り直して** いれば、ラベルが「Mark Complete」⇄「Mark Incomplete」と正しく切り替わります。
 だから `TodoSnippetIntent.perform()` は `todoId` から `TodoEntityStore` 経由で最新を再フェッチする作りにしています (6/N で出てきた共有コンテナのアクセサです)。
 
-なお、このスニペットは **app プロセスで提示される** ので、本編 5/N で書いた「Live Activity Extension での entity 解決クラッシュ」は該当しません。なのでここでは Primary な entity ベースの Intent を素直に使っていて、`FromExtension` 変種は新しく足していません (FromExtension はあくまで LA / Widget 専用のワークアラウンドなので、増やさない方針です)。
+なお、このスニペットは **app プロセスで提示される** ので、本編 5/N で書いた entity 解決クラッシュは該当しません。ここでは entity ベースの Intent を素直に使っています (そのクラッシュ自体、後日 iOS 27 では再現しないと分かって回避策ごと撤去しました)。
 
 ## 予測のために寄付する: IntentDonationManager
 
@@ -193,7 +208,7 @@ try? await IntentDonationManager.shared.deleteDonations(
 「追加で寄付、削除で寄付を消す」をペアで持っておくと、提案が実体とズレにくくなる、というのが設計上の肝でした。
 寄付しっぱなしだと、消したはずの Todo がいつまでも提案に出てくる、みたいな気持ち悪さが残るので、削除側の後始末まで含めて 1 セットだと思っています。
 
-## (2026-07-02 追記) 「消して」と「言ってない」を区別する: IntentParameter.valueState
+## 「消して」と「言ってない」を区別する: IntentParameter.valueState
 
 公開後に追加で検証した話をここに足しておきます。99/N の将来トピックに挙げていた `IntentParameter.valueState` (セッション 344) で、`UpdateTodoIntent` という部分更新の Intent を新設しました。
 
@@ -227,7 +242,7 @@ private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -
 
 この記事の主題 (perform() を止めて聞き返す) とは道具が違いますが、「ユーザーが『消して』と言ったのか、単に何も言わなかったのか」を区別するという意味では同じ方向の話だと思ったので、ここに追記しています。深さはビルド成立 (B) までで、Shortcuts の UI が実際に「クリア」と「未指定」を区別して渡してくるかは実機待ちです。
 
-## (2026-08-05 追記) この回で使った API がいつ入ったものか
+## この回で使った API がいつ入ったものか
 
 WWDC 2022 から 2026 までのセッションを網羅的に洗い直したので、この記事で扱った道具の出自を整理しておきます。WWDC 2026 編の中に置いたせいで、全部が iOS 27 の新 API のように読めてしまう書き方になっていました。
 
@@ -267,6 +282,8 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-12**: 呼出元に確認を出す面が無いと `requestConfirmation` が失敗する話を追加。FromExtension 撤去に追随
+- **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-11**: 出自の整理をさらに訂正。`requestConfirmation(_:confirmLabel:cancelLabel:)` / `IntentDonationManager` / `IntentDonationMatchingPredicate` はセッションではなく API ドキュメント由来、`requestChoice(between:dialog:view:)` は 343 ではなく 275 が出典
 - **2026-08-05**: この回で使った API の出自を整理する節を追加 (全部が iOS 27 の新 API のように読める書き方だった)
 - **2026-07-02**: `IntentParameter.valueState` を使った `UpdateTodoIntent` の節を追加

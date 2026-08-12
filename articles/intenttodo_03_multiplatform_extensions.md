@@ -187,7 +187,7 @@ struct IntentTodoWatchApp: App {
 
 依存グラフを minimum に保ちながら、必要なところで service が組み立てられる、というバランスを取れています。
 
-## (2026-06-24 追記) 別プロセス前提 — マイグレーションはアプリ本体に寄せる
+## 別プロセス前提 — マイグレーションはアプリ本体に寄せる
 
 ここまで書いたように Extension target は薄いスキャフォルドに留めますが、Widget / Live Activity は **アプリ本体とは別プロセス** で動く、という前提は変わりません。WWDC 2026 の SwiftData Group Lab で、この「別プロセスで同じ App Group のストアを共有する」構成のマイグレーション指針が示された、という話を見かけました。要は **マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。
 
@@ -195,7 +195,7 @@ struct IntentTodoWatchApp: App {
 
 ただこれ、**一次資料で裏を取れていない伝聞** です。当初はセッション 8017 として書いていたんですが、あとで手元に貯めたアーカイブを漁り直したら書き起こしが見つかりませんでした (出てくるのは別テーマの 8011 だけです)。Group Lab はライブ Q&A なので公式の書き起こしが出ないことも多いみたいです。指針そのものは SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので運用は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。
 
-## (2026-07-08 追記) もう1つの例外: AppShortcutsProvider もアプリ本体に置く
+## もう1つの例外: AppShortcutsProvider もアプリ本体に置く
 
 上の「マイグレーションはアプリ本体に寄せる」と同じ形の話がもう1つ見つかりました。**`AppShortcutsProvider`（App Shortcuts の宣言）も SPM パッケージに置いてはいけません。**
 
@@ -222,7 +222,21 @@ struct IntentTodoWatchApp: App {
 
 そもそもセッション 244 (23:29〜24:00) やセッション 275 (25:50)、それに `AppIntentsPackage` の公式ドキュメントを読むと、**この「利用側にも `includedPackages` 付きで宣言する」形のほうが標準手順** として紹介されています。当時のコミットを読み返してみても、Intent routing の修正・`@Dependency` パターンへの統一・重複 Intent の削除をまとめてやった大きな PR の中の出来事で、重複宣言だけを切り出して再現させた記録は残っていませんでした。当時のデバッグログで疑っていたのも「Widget Extension が `TodoAppIntents` を import しているせいで Shortcuts が Widget Extension を intent の提供元として選んでしまった」の方で、これは 2/N で書いた実行プロセス選択の話であって、宣言の書き方とは別軸です。
 
-とはいえ確認できたのはビルドとメタデータのレベルまでで、Siri / Shortcuts の実機ルーティングまでは追えていません。なので運用としては重複宣言しないまま (壊れないと分かっている側) にしておいて、複数ターゲットで型を共有する必要が本当に出てきたら実機で Siri から呼んでみてから採用する、という位置づけにしています。「壊れた記憶」をそのまま制約として書き残すと、何と何を切り分けたのかが後から辿れなくなるんだな、というのが反省点でした。
+「壊れた記憶」をそのまま制約として書き残すと、何と何を切り分けたのかが後から辿れなくなるんだな、というのが反省点でした。
+
+### 公式手順どおりに宣言する形へ切り替えた
+
+しばらく「重複宣言しない」まま様子を見ていたんですが、追い込みきったので **公式手順の側へ切り替えました**。アプリ / Widget / Live Activity / watchOS App の 4 ターゲットそれぞれに `includedPackages` 付きの `AppIntentsPackage` を宣言しています。2026-04 に外して以来の方針転換です。
+
+判断できるところまで持っていけたのは、10/N に書いた検証の梯子 (AppIntentsTesting → Shortcuts → Spotlight → Siri) をそのまま当てたからでした。根拠は 3 つあります。
+
+1. **クリーンビルドで metadata の件数が一致**。4 バンドルすべての `Metadata.appintents` の `actions` / `entities` / `enums` / `queries` / `autoShortcuts` が、宣言前の baseline と完全一致しました。しかも `actions` の 23 件は `Intents/` に置いた intent の型数 23 とちょうど一致していて、重複していないことが二重に確かめられます
+2. **AppIntentsTesting の全 22 テストがグリーン**。Siri / Shortcuts / Spotlight と同じインフラを通る経路で、intent の実行・entity の id 解決・Spotlight クエリ・view annotation が成立しました
+3. **Shortcuts アプリでの実機確認**。アクション一覧とパラメータ表示が壊れていないことを目で見ました
+
+残った未確認は **App Shortcut の「フレーズ」ルーティングだけ** です。AppIntentsTesting は型名で intent を引くのでフレーズ経路を通りません。ここは 10/N に書いたとおり Apple も手動確認を想定している領域なので、実機の Siri で登録フレーズを 1 つ言えば済みますし、壊れていたら 4 つの宣言ファイルを消せば元に戻せます。
+
+「実機でしか確かめられないから保留」で止めていたものが、**梯子の下 3 段を全部登ってみたら判断できる材料が揃っていた**、というのがここでの学びでした。実機検証が要るからと丸ごと寝かせるのではなくて、自動で確かめられるところまで先に登っておくと、残りの手動確認の範囲がぐっと小さくなります。
 
 一方で、上の `AppShortcutsProvider` の制約の方は **この話とは独立していて、そのまま生きています**。アプリと Extension に `AppIntentsPackage` を足した状態でも、`AppShortcutsProvider` がパッケージ内にある限り `autoShortcuts` は 0 のままで、アプリターゲットへ移した瞬間だけ 0 → 8 になりました。2 つが絡んでいる可能性も疑っていたんですが、別々の話でした。
 
@@ -234,7 +248,7 @@ struct IntentTodoWatchApp: App {
 - macOS native 対応は `#if` で Delegate 分岐 + 共通実体クラスへ委譲
 - pbxproj の `platformFilter = ios;` を見落とすと macOS ビルドで Embed エラーが出る
 - ターゲット依存をなるべく minimum に保つため、`TodoService.swiftDataBacked(container:)` のような薄いファクトリを TodoAppIntents 側に置く
-- `AppShortcutsProvider` をアプリ本体に置く制約は健在。一方「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を書いてはいけない」の方は、再検証で断定を取り下げた (実機ルーティングは未確認なので運用は据え置き)
+- `AppShortcutsProvider` をアプリ本体に置く制約は健在。一方「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を書いてはいけない」の方は誤りで、**公式手順どおり各ターゲットで宣言する形に切り替えた**
 
 次回は [SwiftData + CloudKit 同期で踏んだスキーマ要件と落とし穴の話 (4/N)](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) を書きます。
 
@@ -242,6 +256,8 @@ struct IntentTodoWatchApp: App {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
+- **2026-08-12**: `includedPackages` 付き `AppIntentsPackage` を 4 ターゲットで宣言する公式手順へ切り替え。metadata 件数の一致 / AppIntentsTesting 22 テスト / Shortcuts 実機確認の 3 つを根拠にした
 - **2026-08-11**: 「`AppIntentsPackage` をどこに宣言するか」の節を追加。重複宣言の禁止という断定を取り下げ、`AppShortcutsProvider` の制約とは独立であることを確認。SwiftData Group Lab の出典 (セッション 8017) が一次資料で確認できなかったため、伝聞である旨に書き換え
 - **2026-07-08**: `AppShortcutsProvider` を SPM パッケージに置くと `autoShortcuts` が集約されない、という節を追加
 - **2026-06-24**: 別プロセス前提とマイグレーションの責務をアプリ本体に寄せる、という節を追加

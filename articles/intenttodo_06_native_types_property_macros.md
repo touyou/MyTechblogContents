@@ -60,7 +60,7 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 ポイントは、`category` のように **別の `AppEntity` を `@Property` で持てる** ことです。
 これで「あるカテゴリに属する Todo」みたいな辿り方が Shortcuts 側で組めるようになります。名詞と名詞を関連でつなぐ、というのを App Intents の語彙でやっている感じです。
 
-### (2026-07-02 追記) @Property(indexingKey:) でセマンティック検索に載せる
+### @Property(indexingKey:) でセマンティック検索に載せる
 
 この記事を公開したあと、`@Property` にはもう一段先があると知って (セッション 240)、`indexingKey:` も採用しました。
 `@Property(title:indexingKey:)` の `indexingKey` に `CSSearchableItemAttributeSet` の KeyPath を渡すと、そのプロパティの値が Spotlight のセマンティックインデックスへ宣言的にマップされて、意味ベースの検索や Q&A の対象になります。5/N で書いた `CSSearchableIndex` の明示登録 (キーワード検索の経路) とは併存できて、その上にセマンティックな経路が足される形です。
@@ -198,7 +198,7 @@ enum TodoPlace {
 「入力と公開はシステム型、保存は primitive、境界で変換」というのは、書く前は二度手間っぽくて気が進まなかったんですが、やってみると役割がきれいに分かれて結構気持ちよかったです。
 Siri に見せる顔 (リッチな型) と、CloudKit に保存する都合 (枯れた primitive) は、そもそも要求が別物なので、無理に 1 つの表現に寄せない方が素直だなと思いました。
 
-### (2026-07-02 追記) Transferable + ValueRepresentation で外にも書き出せる名詞にする
+### Transferable + ValueRepresentation で外にも書き出せる名詞にする
 
 ネイティブ型の話には続きがあって、99/N の将来トピックに挙げていた `ValueRepresentation` (セッション 240 / 345) もその後採用しました。
 `TodoAppEntity` を `Transferable` に適合させて `transferRepresentation` に表現を並べると、Todo をドラッグ / コピー / 共有で **構造化された値としてアプリの外に書き出せる** ようになります。
@@ -236,7 +236,7 @@ extension TodoAppEntity: Transferable {
 - `IntentPerson(identifier:name:handle:)` は **全引数が必須** でした。`handle` を省くと `Missing arguments for parameters 'identifier', 'handle'` になるので、無いものは明示的に `nil` を渡します。
 - export closure は `async throws` なので、担当者や場所が無い Todo は **`throw` してその表現ごと出さない** 形にしました。空っぽの `IntentPerson` を返すより、「この Todo に人の表現は無い」とシステムに伝わる方が筋がいいと思います。
 
-### (2026-07-28 追記) beta 3 で `PlaceDescriptor` を `@Parameter` から一時退避した
+### beta 3 で `PlaceDescriptor` を `@Parameter` から一時退避した
 
 ここまでさんざん「ネイティブ型で受ける」と書いておいて何なんですが、**Xcode 27 beta 3 で `PlaceDescriptor` を `@Parameter` / `@Property` から外して、いったん場所名の `String` に退避しました**。
 
@@ -395,7 +395,7 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 ローカル id と安定 id が別々のアプリだと `id` を `SyncableEntityIdentifier<Local, Stable>` 型にする必要があるみたいですが、IntentTodo はそもそも別 id を持っていないので、`String` id のまま適合できました。
 「すでに正しく設計されていると、新 API への適合がタダで済む」のは結構気持ちのいい瞬間で、CloudKit の id 設計をサボらずにやっておいてよかったなと思いました。
 
-## (2026-07-28 追記) TransientAppEntity で集計値も名詞にする
+## TransientAppEntity で集計値も名詞にする
 
 Phase 1 で 1 つだけ手を付けられずに残していた `TransientAppEntity` (セッション 344) を、Xcode 27 beta 4 のタイミングで試しました。
 
@@ -505,6 +505,7 @@ public struct GetTodoSummaryIntent: AppIntent {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: `TodoEntityStore` の登録について「`App.init()` で 1 回登録すれば足りる」と書いていたのを訂正 (Widget Extension 側でも登録が要る)
 - **2026-08-11**: `\.textContent` は「SDK に露出していない」と書いていたが誤りで、実在する (`contentDescription` を選ぶ理由を型の制約から意味の制約に訂正)。`@ComputedProperty` の出自を 345 → **275** に再訂正 (2026-08-05 の訂正自体が誤りだった)。`PlaceDescriptor` の SSU バグは beta 5 でも未修正、判定は必ずクリーンビルドで行う旨を追加
 - **2026-08-05**: `@ComputedProperty` / `@DeferredProperty` を「WWDC 2026 の新要素」として書いていたのを訂正

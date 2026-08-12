@@ -61,7 +61,7 @@ public enum TodoListType: String {
 
 「スキーマが要求するプロパティ (name / type) を満たしつつ、独自プロパティ (colorHex) は足してもいい」という塩梅は、思っていたより柔らかくて好印象でした。
 
-### (2026-07-02 追記) beta 2 で watchOS がサポート対象から外れた
+### beta 2 で watchOS がサポート対象から外れた
 
 この list / listType 適合、**Xcode 27 beta 2 で watchOS が対象から外れました**。`TodoAppIntents` パッケージは watchOS でもビルドするので、beta 2 に上げたら `'reminders' is unavailable in watchOS` / `'list' is unavailable in watchOS` でいきなり落ちるようになって気付きました。
 
@@ -90,32 +90,34 @@ public struct CategoryAppEntity: Hashable {
 ここからが、やってみて分かった「保留」の話です。
 カテゴリが素直に適合できたので、当然 **Todo 本体を `@AppEntity(schema: .reminders.reminder)` に適合させたい** と思いました。ところがこれが結構な地雷原でした。
 
-reminder 本体スキーマは、要求してくるプロパティがとにかく多いです。
+最初に手を出したときは、自前の `init(from: TodoItem)` で順番に代入しようとして `self.images used before being initialized` で弾かれ続けました。代入順を変えたり、デフォルト値を入れたり、他のマクロを外したり、と一通り試したんですが解消せず、「マクロが生成する init と自前 init が噛み合わないんだろう」と結論して保留にしていました。
 
-- `dueDate: DateComponents?` (こっちが持っている `Date?` と型が衝突する)
-- 非 optional の `list`
-- 再帰的な `subtasks: [Self]`
-- さらに `images` / `tags` / `urls` / `recurrence` / `section` / `locationTrigger` など
+これは **誤診でした**。あとから、適合そのものには着手せず **ビルド時のスキーマ検証にわざとエラーを吐かせて要求プロパティを全部洗い出す** という probe を書いたら、前提から違っていたことが分かります。
 
-そして本丸が、**マクロが生成する init が `EntityProperty<T>` を引数に取る** ことでした。
-`section` や `locationTrigger` のような **入れ子のサブエンティティを再帰的に要求** してくるので、自分が持っている「モデルから組み立てる `init(from:)`」(プロパティを順番に代入していくやつ) と、まるで噛み合いません。
+マクロ展開を読むと、生成されるのは `AssistantSchemaEntity` と `AppEntity` の conformance 2 つだけで、**init は生成されません**。自前の `init(from:)` はそのまま使えます。当時弾かれていたのは単に **要求プロパティを全部埋めていなかったから** でした。
 
-具体的には、自前 init で順次代入しようとすると `self.images used before being initialized` で弾かれます。
-代入順を変えたり、デフォルト値を入れたり、他のマクロを外したり、と一通り試したんですが解消しませんでした。
-これは SDK 27 で `@State` がマクロ化されたときの初期化規約と同じ根っこの問題っぽくて、マクロ生成の初期化フローに自前の init を後付けで合わせるのが、そもそも構造的に難しいようでした。
+要求プロパティは probe で確定しています。`title` / `note` / `dueDate` (`DateComponents?`) / `isCompleted` / `completionDate` / `creationDate` (optional 必須) / `isFlagged` (optional 必須) / `tags` (`Set<String>`) / `list` (**非** optional 必須) / `recurrence` (`Calendar.RecurrenceRule?`) / `locationTrigger` / `urls`。入れ子で `.reminders.locationTrigger` (`place: PlaceDescriptor` と `event`) と `.reminders.locationTriggerEvent` (arrive / depart) の 2 つが要ります。
 
-そこで判断したのが、**Todo 本体の reminder スキーマ適合は保留する** ことでした。
+そのうえで残った本当の障害が 3 つです。
 
-- カテゴリ (list) で適合できているので、**App Schema の仕組み自体は検証できている**
-- リッチな共有 Entity を reminder 本体スキーマに無理やり押し込むのは、得られるものに対してコストが見合わない
-- ここは独立タスクとして切り出して、深掘りできるタイミングで再挑戦する
+1. **`list` が非 optional 必須**。こちらの `category` は 4/N に書いた CloudKit 要件で optional なので、そのままでは埋まりません
+2. **`dueDate` が `DateComponents`**。モデルは `Date?` なので変換が要ります (これは 6/N の二重表現と同じ話なので、まあやれば済みます)
+3. **`locationTrigger` が `PlaceDescriptor` を `@Property` に強制する**
 
-「やってみて、今のモデル設計のままだと適合できないと分かった」というのは、Apple のドキュメントを読んだだけでは出てこない情報だと思うので、保留したこと自体を記録として残しておきます。
-小スキーマ (list) は素直、大スキーマ (reminder) は地雷、という温度差が分かっただけでも、試した価値はあったかなと思っています。
+この 3 つ目が効きました。6/N に書いた `AppIntentsSSUTraining` のバグ (`GeoToolbox.PlaceDescriptorEntity` がドット入りの variable 名になって正規表現に落ちるやつ) に、正面からぶつかります。DerivedData ごと消したクリーンビルドで probe を 2 つ回して確かめました。
 
-(2026-07-02 追記) その後、WWDC 2026 の App Intents Group Lab で「新しい Siri との連携はいずれかの App Schema 採用が前提」という話が出ていたので、この保留を一度再評価しました。ドキュメントを掘ると、reminder 本体は入れ子のサブエンティティとして `@AppEntity(schema: .reminders.section)` と `@AppEntity(schema: .reminders.locationTrigger)` (さらにその中の `@AppEnum(schema: .reminders.locationTriggerEvent)`) を要求していることが分かって、`locationTrigger` の `place` が `PlaceDescriptor` なあたりは 6/N の橋渡しと相性が良さそうなんですが、**サブエンティティを揃えても上のマクロ生成 init の問題は解消しない** ので、結論は据え置きのままにしました。Xcode 27 beta 2 でも当時の probe コードを復元してビルドし直してみたところ、初期化エラー (`'self' used before all stored properties are initialized`) は同じように再現しています。一方で、カテゴリの list 適合 + discoverable な自前 Intent 群 + 後述の system intent だけでも意味理解・検索・遷移は成立していて、本体適合が無いと新しい Siri と何も連携できないわけではない、というのが今の見立てです。スキーママクロの init 規約が扱いやすくなるのを待つ独立タスクとして置いています。
+- `@Parameter var placeProbe: PlaceDescriptor?` → `variables.3.name` でエラー
+- `.reminders.locationTrigger` 適合 entity に `@Property var place: PlaceDescriptor` → `variables.1.name` でエラー
 
-(2026-08-11 追記) この保留、再挑戦するときの取っ掛かりが 1 つ見つかりました。セッション 344 の Code-along は、`calendar_event` という reminder に負けないくらいリッチなスキーマ (出席者は `TransientAppEntity` の入れ子、場所は union) に **手書きの init 無しで** 適合させています。Xcode のスキーマ・コードスニペットで型の骨格を出して、モデル → エンティティの詰め替えは Query 側に持たせる、という流儀です。自分がやっていた「自前の `init(from: TodoItem)` で順番に代入していく」書き方が、マクロ生成の backing storage と単に衝突していただけかもしれません。まだ試せていないので結論は据え置きのままですが、次に手を付けるならここから、という当たりは付きました。
+variable の index が probe に応じて 3 → 1 と変わるので、キャッシュではなく実際に走った結果です。**`@Parameter` だけでなく `@Property` (入れ子のスキーマ entity 側) でも踏みます**。6/N では `@Parameter` を `String` に退避して回避しましたが、reminder 本体スキーマは `locationTrigger` を必須で要求して、その entity が `place: PlaceDescriptor` を要求してくるので、退避のしようがありません。
+
+というわけで **`.reminders.reminder` 適合は SDK の SSU バグが直るまで着手不可** と確定しました。据え置きという結論自体は最初から変わっていませんが、理由が「自分の init の書き方が悪い」から「SDK 側のバグでブロックされている」に変わったので、待つ先が変わります。手を動かせば直せるものだと思って寝かせていたのが、実は待つしかないものだった、というのは早めに分かってよかったです。
+
+検証の手順で 1 つ注意があって、**probe を消した直後のビルドでもエラーが出続けます**。`Metadata.appintents` に probe の痕跡が残っているためで、SSU の temp-dir だけ消しても metadata の再抽出は走りませんし、ターゲットの build ディレクトリを部分的に消しても Xcode は「変更なし」と判断します。判定は DerivedData ごと消してやるのが確実でした。
+
+なお、WWDC 2026 の App Intents Group Lab で「新しい Siri との連携はいずれかの App Schema 採用が前提」という話が出ていたので、本体適合が無いと詰むのかは一度気にしました。ただ実際には、カテゴリの list 適合 + discoverable な自前 Intent 群 + 後述の system intent だけでも意味理解・検索・遷移は成立しています。本体適合が無いと新しい Siri と何も連携できない、というわけではなさそうです。
+
+小スキーマ (list) は素直、大スキーマ (reminder) は地雷、という温度差が分かっただけでも試した価値はあったかなと思っています。「やってみて、今のモデル設計と現行 SDK のままだと適合できないと分かった」というのは、ドキュメントを読んだだけでは出てこない情報なので、保留したこと自体を記録として残しておきます。
 
 ## system intents: OpenIntent / DeleteIntent
 
@@ -182,7 +184,7 @@ IntentTodo にはもともと UI の `Button(intent:)` から 1 件ずつ消す 
 この 2 つの system intent はどちらも **AppShortcuts には登録していません**。
 本編 5/N で書いたとおり AppShortcuts は 10 件上限なので枠を温存したいのと、system intent は AppShortcut が無くてもシステム側が意味解釈してくれるので、登録しなくても効くからです。
 
-### (2026-07-02 追記) 検索もシステムの語彙に乗せる: .system.searchInApp
+### 検索もシステムの語彙に乗せる: .system.searchInApp
 
 「開く」「削除する」に続けて、**検索** もシステムの語彙に乗せました (セッション 343)。適合すると、Siri / Apple Intelligence が検索語をアプリ自身の検索 UI に流して、結果をアプリ側で見せられるようになります。`ShowInAppSearchResultsIntent` 自体は iOS 16 からある型で、スキーママクロで適合させる形が新しい部分のようです。
 
@@ -234,7 +236,7 @@ struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 
 - App Schema は自分の Entity / Intent を `reminders` 等のドメイン語彙に意味で適合させる仕組み。Siri / Apple Intelligence がコンテンツを意味理解できるようになる
 - 小スキーマ (`Category` = `.reminders.list` / `TodoListType` = `.reminders.listType`) は素直に適合できた。`.reminders` は iOS 27+ 限定、`Hashable` は明示実装が必要
-- 大スキーマ (`.reminders.reminder`) は `EntityProperty<T>` init + 再帰サブエンティティ要求で自前 init と噛み合わず、**保留** にした。適合させない判断も 1 つの結論
+- 大スキーマ (`.reminders.reminder`) は **保留**。当初は「マクロ生成 init と自前 init が噛み合わない」と思っていたが、probe で洗い直したら本当の障害は `list` が非 optional 必須・`dueDate` が `DateComponents`・`locationTrigger` が `PlaceDescriptor` を強制して SSU バグに正面衝突、の 3 点だった。SDK 待ちで着手不可
 - system intent (`OpenIntent` / `DeleteIntent`) はプロトコル直適合でよい。`DeleteIntent` は `entities: [Entity]` の配列要求なので、UI 駆動の単体削除とは分けてバルク削除を新設した
 - system intent は AppShortcuts 無しでも意味解釈されるので、10 件枠を温存できる
 
@@ -244,6 +246,8 @@ struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
+- **2026-08-12**: reminder 本体スキーマの据え置き理由を probe の実測で全面的に書き換え。「マクロ生成 init が自前 init と衝突する」は誤りで、本当の障害は `list` の非 optional 要求・`dueDate` の型・`locationTrigger` 経由の SSU バグの 3 点。SDK 待ちで着手不可と確定
 - **2026-08-11**: `.system.searchInApp` の出典を **343** に再訂正 (2026-08-05 に 343 → 344 と直したのが誤りだった)。`OpenIntent` / `DeleteIntent` の「(セッション 344)」という帰属も、344 で扱われているのはスキーマ版の方だと注記。watchOS の schema unavailable が beta 5 でも継続することを確認。reminder 本体スキーマ再挑戦のリード (セッション 344 の CometCal パターン) を追加
 - **2026-08-05**: `.system.searchInApp` の出典を 343 → 344 に訂正 (この訂正自体が誤りだった)
 - **2026-07-08**: beta 3 で `.system.search` が `.system.searchInApp` にリネームされたのを反映

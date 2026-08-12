@@ -89,7 +89,7 @@ IntentTodo で参考にしている指針は以下です。
 逆に **払っている税** もあります。
 
 - Intent ファイルの数が増えがち
-- 同じアクションに対して Primary / FromExtension の 2 系統を持つ必要がある場合がある (本シリーズで後述)
+- 同じアクションでも、呼出元によって別の Intent を用意したくなる場合がある (本シリーズで後述)
 - 1 アクション追加のセレモニー (Repository → Service → Intent → AppShortcut) の段数が多い
 
 このトレードオフは、今のところメリット側に振り切れていますが、設計を「とりあえず Intent にする」と機械的に当てはめるのではなく、本質的なアクションだけを Intent 化するという判断は引き続き必要です。
@@ -103,7 +103,7 @@ IntentTodo で参考にしている指針は以下です。
 - [(2) TodoService と @Dependency: ビジネスロジックの一元化](https://zenn.dev/touyou/articles/intenttodo_02_todoservice_dependency)
 - [(3) マルチプラットフォーム Extension の構成 — SPM 化と Delegate 分離](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
 - [(4) SwiftData + CloudKit 同期 — 互換 schema と落とし穴](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit)
-- [(5) App Intents 運用の罠 — Primary/FromExtension / Control Widget / Spotlight](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
+- [(5) App Intents 運用の罠 — Live Activity / Control Widget / Spotlight](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 
 WWDC 2026 編 (6〜10) は、`xcode27` ブランチで新 API を試してみて分かった設計判断をまとめます。
 こちらは本編と違って実機まで通せていないものが多いので、「採用していいか / 設計にどう効くか」を軸に、検証の深さ (ビルド / 単体 / 実機) を各記事に明記して書きます。
@@ -117,3 +117,9 @@ WWDC 2026 編 (6〜10) は、`xcode27` ブランチで新 API を試してみて
 そして [(99) 検証待ち・将来書く予定のトピック](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) は、棚卸しの番外編です。
 
 引き続きどうぞよろしくお願いします。
+
+## 更新履歴
+
+本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
+
+- **2026-08-12**: Primary / FromExtension の 2 系統を持つ話が撤去されたことに追随し、5/N のタイトル表記もあわせて更新

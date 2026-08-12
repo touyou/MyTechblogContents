@@ -107,11 +107,17 @@ IntentTodo は App Intents Extension を持っていないし、バルクの Swi
 
 決め手は、`allowedExecutionTargets` が制御するのはあくまで **どのプロセスが `perform()` するか** で、クラッシュが起きる **パラメータ解決 (entity resolution) を経由するかどうか** は変えられない、という点です。FromExtension (`todoId: String`) と Primary (`todo: TodoAppEntity`) を分けているのは、パラメータの「型」を変えて解決そのものを踏まないようにするためなので、実行先を動かしても解決は解決として走ります。`.widgetKitExtension` の存在を踏まえても、Live Activity Extension はそもそも指定対象に入っていません。LA のボタン用には `LiveActivityIntent` (アプリプロセスでの実行が保証されるプロトコル) もあるんですが、クラッシュは perform より手前の解決段で起きるので、解決そのものを踏まない String 版が結局必要でした。というわけで FromExtension は維持です。
 
-唯一残っているのは「`[.main]` にピンしたとき解決の実行プロセスまで本体側に寄るのか」という実機確認 (R) で、もし寄るなら話が変わる可能性はありますが、現状はコードでパラメータの型を分けておく方が確実だと思っています。
-
 新しい API が出ると「これで前の workaround を畳めるかも」とつい期待するんですが、この宿題については逆に **ちゃんと裏を取らずに一度「畳めない」と思い込んでいた** 時期もあって (`.widgetKitExtension` の存在を見落としていました)、期待する方向にも決めつける方向にも転びうるんだなというのは教訓でした。
 
-(2026-06-24 追記) この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化していました。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、今回 **公式に正しい設計だった** と裏が取れた格好です。「ウィジェット側で entity 解決のような重い処理を踏ませない」という分離の動機自体も、この実行モデルと整合しているなと思いました。
+### 分離そのものが要らなくなった
+
+この「畳めない」という結論、**前提の方が消えました**。Live Activity のボタン経由でも entity の事前解決はメインアプリプロセスで走ってクラッシュしない、と実機で確かめられたので、そもそも分ける理由が無くなっています。FromExtension 分離は撤去して 1 アクション 1 Intent に統一しました (経緯は [5/N の追記](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls))。
+
+なので `allowedExecutionTargets` については「FromExtension を畳む道具にはならない」という結論だけが残ります。制御できるのは perform のプロセスであって entity 解決を踏むかどうかではない、という整理自体は変わりません。畳めたのは別の理由からだった、という格好です。
+
+ここは自分としてはちょっと面白くて、**「この API で workaround を畳めるか」を延々考えていたけれど、答えは「workaround がもう要らない」だった** わけです。道具の側で解決しようとすると、前提が生きているかどうかを疑う機会を逃すんだなと思いました。
+
+この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化していました。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、今回 **公式に正しい設計だった** と裏が取れた格好です。「ウィジェット側で entity 解決のような重い処理を踏ませない」という分離の動機自体も、この実行モデルと整合しているなと思いました。
 
 ## 複数の型を1つの結果で返す: @UnionValue
 
@@ -143,7 +149,7 @@ public func perform() async throws -> some IntentResult & ReturnsValue<[TodoOrCa
 
 `EntityQuery` は単一の Entity 型に縛られますが、`@UnionValue` を返り値に使うと **複数種類を 1 つの結果リストに混ぜられる** のが利点です。これは次回 (10/N) の Visual Intelligence でもそのまま再利用できました。
 
-(2026-08-05 追記) セッションを洗い直したら、`@UnionValue` マクロ自体は WWDC 2024 (iOS 18、セッション 10134) からあるものでした。この記事が扱っている 345 は、`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件を提示した回です。実際ハマったのがその細目の方だったので、体感として新機能に見えていたんだと思います。なお上に書いた `public enum` の `: Sendable` 明示は 345 で言われていることではなくて、**自分がビルドを通そうとして踏んだだけ** の話なので、そこは分けて読んでもらえればと思います。
+セッションを洗い直したら、`@UnionValue` マクロ自体は WWDC 2024 (iOS 18、セッション 10134) からあるものでした。この記事が扱っている 345 は、`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件を提示した回です。実際ハマったのがその細目の方だったので、体感として新機能に見えていたんだと思います。なお上に書いた `public enum` の `: Sendable` 明示は 345 で言われていることではなくて、**自分がビルドを通そうとして踏んだだけ** の話なので、そこは分けて読んでもらえればと思います。
 
 ## 検証してみたら「使えなかった」API: RelevantEntities
 
@@ -164,7 +170,7 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 これは「実装をミスった」のではなく「**API の設計上、自分のドメインには口が用意されていない**」という種類の壁で、ドキュメントを上から読んでいるだけだと「使えそう」に見えてしまうやつでした。
 実際に適合させようと手を動かして初めて、context の選択肢が音楽再生などに限定されていると分かったので、こういうのこそ記録に残す価値があるなと思っています。
 
-(2026-08-05 追記) セッション 345 を洗い直したときに、iOS 27 で `RelevantEntities.shared.removeAllEntities(for:)` / `removeEntities(_:from:)` / `removeAllEntities()` という **寄付を取り消す側** の API が増えているのを見つけました。ただ、上に書いたとおり寄付する側の context が無い以上、消す側だけ増えても出番はやっぱり無いので、結論は据え置きのままです。`AppEntityContext` の方も 345 で `.audio(.workout(activityType:))` のような拡張が入ったんですが、増えたのは audio ドメインの中身で、reminders / todo 向けの口が開いたわけではありませんでした。
+セッション 345 を洗い直したときに、iOS 27 で `RelevantEntities.shared.removeAllEntities(for:)` / `removeEntities(_:from:)` / `removeAllEntities()` という **寄付を取り消す側** の API が増えているのを見つけました。ただ、上に書いたとおり寄付する側の context が無い以上、消す側だけ増えても出番はやっぱり無いので、結論は据え置きのままです。`AppEntityContext` の方も 345 で `.audio(.workout(activityType:))` のような拡張が入ったんですが、増えたのは audio ドメインの中身で、reminders / todo 向けの口が開いたわけではありませんでした。
 
 ## 検証できた深さ
 
@@ -180,7 +186,7 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 - `EntityCollection<T>` は `.identifiers` で id だけ取れて entity 解決を回避できる。バルク処理で効く
 - `LongRunningIntent` は `performBackgroundTask` で時間を延ばせるが、`progress` を更新し続けないと打ち切られる
 - `CancellableIntent` は `onCancel:` + ループ内 `try Task.checkCancellation()`。perform は `@MainActor` にせず、必要なところだけ await でホップする
-- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ。未指定なら実行プロセスはヒューリスティクスで決まる。**FromExtension 分離はこれでは畳めない** — 制御できるのは perform のプロセスであって entity 解決を踏むかどうかではないため
+- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ。未指定なら実行プロセスはヒューリスティクスで決まる。**FromExtension 分離はこれでは畳めなかった** — 制御できるのは perform のプロセスであって entity 解決を踏むかどうかではないため (分離自体は後日、クラッシュが再現しないと分かって撤去しました)
 - `@UnionValue` で複数 Entity 型を 1 つの結果に混ぜられる。`public enum` は `: Sendable` 明示が必要
 - `RelevantEntities` は **reminders ドメイン向けの `AppEntityContext` が存在せず適合不能**。実装ミスではなく API 設計上の壁。保留
 
@@ -190,6 +196,8 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
+- **2026-08-12**: FromExtension 分離そのものが不要になった (LA 経由でもクラッシュしないと実測) ことを追記。`allowedExecutionTargets` で畳めないという結論自体は不変
 - **2026-08-11**: `allowedExecutionTargets` を未指定にしたときの挙動 (ヒューリスティクス) を追記。「Live Activity Extension プロセスでの entity 解決クラッシュ」という原因断定を取り下げ (結論の「畳めない」は不変)。`public enum` の `: Sendable` 明示をセッション 345 の内容として書いていたのを、手元のビルド観測だと明記
 - **2026-08-05**: `@UnionValue` の出自を WWDC 2024 (セッション 10134) と訂正。`RelevantEntities` の取り消し系 API と `AppEntityContext` の拡張を確認 (結論は据え置き)
 - **2026-07-02**: FromExtension 分離を `allowedExecutionTargets` で畳めるかの宿題を「畳めない」で確定

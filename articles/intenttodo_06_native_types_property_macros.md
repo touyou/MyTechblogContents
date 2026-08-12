@@ -324,8 +324,18 @@ private static func loadSubtaskProgress(forID id: String) async throws -> String
 }
 ```
 
-deferred property が走るのはメインアプリプロセス (Siri / Shortcuts / Spotlight の follow-up) だけなので、`App.init()` で 1 回登録しておけば足ります。
 プレビューや SPM テストみたいに未登録の場面では、空の結果に degrade させて落ちないようにしています。
+
+登録場所については、最初「deferred property が走るのはメインアプリプロセスだけだから `App.init()` で 1 回登録すれば足りる」と書いていたんですが、これは足りませんでした。2/N に書いたとおり Widget / Control の Intent は既定でどちらのプロセスでも実行されうるので、**Widget Extension 側の `WidgetBundle.init()` でも登録が要ります**。登録し忘れると、Extension プロセスで解決されたときだけ中身が空になって「Todo not found」が描かれる、という切り分けにくい症状になりました。
+
+```swift
+MainActor.assumeIsolated {
+    AppDependencyManager.shared.add(dependency: todoService)
+    TodoEntityStore.register(container: sharedWidgetModelContainer)   // ← これも要る
+}
+```
+
+`@Dependency` (`AppDependencyManager`) への登録と `TodoEntityStore` への登録は **別々** です。前者だけ登録して満足すると、Intent は動くのに deferred property や snippet だけ空、という形で出てきます。同じ「プロセスごとに登録が要るもの」なので、片方を足したらもう片方も確認する、と覚えておくのが良さそうでした。
 
 ### ハマりどころ 2: プロパティマクロで Hashable の自動合成が壊れる
 
@@ -484,7 +494,7 @@ public struct GetTodoSummaryIntent: AppIntent {
 - `@Property` でモデル属性をシステムに公開し、関連 (`category`) も Entity として持てる
 - `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する (`PlaceDescriptor` は SSU バグ回避で `String` に一時退避中。境界だけ直せば済んだのは二重表現のおかげでした)
 - `@ComputedProperty` (同期・軽い導出) と `@DeferredProperty` (非同期・要求時フェッチ、Spotlight 非 index) を使い分ける。どちらも出自は iOS 26 で、2026 の新 API ではない
-- Entity は `@Dependency` を使えないので、共有コンテナは `TodoEntityStore` に置いて参照する
+- Entity は `@Dependency` を使えないので、共有コンテナは `TodoEntityStore` に置いて参照する。`AppDependencyManager` とは別々の登録なので、アプリと Widget Extension の両プロセスで登録する
 - プロパティマクロは `Hashable` 自動合成を壊すので `==` / `hash(into:)` を明示実装する
 - `SyncableEntity` は CloudKit id をそのまま使っていれば適合を書き足すだけで済む
 - 集計値のように後から id で引かれないものは `TransientAppEntity` にすると、`EntityQuery` も永続化も無しで Shortcuts の条件分岐に載せられる
@@ -495,6 +505,7 @@ public struct GetTodoSummaryIntent: AppIntent {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-12**: `TodoEntityStore` の登録について「`App.init()` で 1 回登録すれば足りる」と書いていたのを訂正 (Widget Extension 側でも登録が要る)
 - **2026-08-11**: `\.textContent` は「SDK に露出していない」と書いていたが誤りで、実在する (`contentDescription` を選ぶ理由を型の制約から意味の制約に訂正)。`@ComputedProperty` の出自を 345 → **275** に再訂正 (2026-08-05 の訂正自体が誤りだった)。`PlaceDescriptor` の SSU バグは beta 5 でも未修正、判定は必ずクリーンビルドで行う旨を追加
 - **2026-08-05**: `@ComputedProperty` / `@DeferredProperty` を「WWDC 2026 の新要素」として書いていたのを訂正
 - **2026-07-28**: `TransientAppEntity` (`TodoListSummaryEntity` + `GetTodoSummaryIntent`) の節を追加。beta 3 の SSU バグで `PlaceDescriptor` を `String` に退避した経緯を追加

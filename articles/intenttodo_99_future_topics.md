@@ -197,6 +197,18 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 
 一連の作業でいちばん効いたのは、**「セッションで説明されていたこと」「API ドキュメントを読んで知ったこと」「自分がビルドして観測したこと」を、後から見分けられる形で書いていなかった** という反省でした。3 つとも自分の中では同じ「知っていること」なんですが、確度も、後から確かめる手段も全然違います。特に 3 番目の観測は SDK が更新されるたびに賞味期限が来るので、そこを混ぜて書くと、直せるはずのものが直せないまま残ります。
 
+### (2026-08-12 追記) 4 つ目の型: 推論を実測と並べて書いてしまう
+
+上の 3 分類にもう 1 つ足りていませんでした。**推論を、実測と同じ体裁で書いてしまう** というやつです。
+
+Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話なんですが、snippet も出ないという方は、Apple の「Siri, Spotlight, and the Shortcuts app が snippet を表示する」という **肯定リストに Control が載っていない** ことからの推論でした。それを dialog の実測結果と同じ表に並べて書いたので、あとから読むと両方とも実測されたルールに見えます。
+
+厄介だったのは、この推論が **それを反証する実験の可能性ごと潰していた** ことでした。「Control では snippet が出ない」を前提に snippet を返す Intent を全部 Control から外したので、Control 経由で snippet を返す経路が 1 つも無い構成になっていて、「Control Center で snippet が一切出ない」のは当たり前、という検証すらできない状態になっていました。
+
+決着させたのは **呼出元だけを変えて、同じ Intent・同じ snippet を走らせる比較** です。結果としては推論のとおり「Control では出ない」だったんですが、そこに至る過程が違います。詳しい経緯と切り分けの表は [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書きました。
+
+なので今の自分ルールは 2 つ増えました。**肯定リスト (「A・B・C が対応」) から否定 (「D は非対応」) を導かない**、導いたなら推論だと明示する。そして **「どの面が何を提示するか」は、まず既知の良い面で動かしてから疑わしい面に持っていく**。逆順にやると変数が絡んで、いつまでも確定しません。
+
 ### 実機検証待ちに積み増しになったもの
 
 洗い直した結果、「机上では確からしいけれど実機で確かめないと確定しない」という宿題がむしろ増えました。ここに並べておきます。
@@ -204,10 +216,11 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 - **`AppIntentsPackage` の重複宣言**: メタデータ上の重複は無いことまで確認済み。Siri / Shortcuts の実機ルーティング (`LNContextErrorDomain` 系) が本当に壊れないかは未確認なので、現状は重複させない運用のまま
 - **Live Activity の entity 事前解決**: Primary 版の Intent を LA のボタンに直結して実機で叩き、今の SDK でも trap するのかを見たい。再現しないなら FromExtension 分離を簡素化できる (上の E とつながる話)
 - **`allowedExecutionTargets` 未指定の Widget / Control Intent**: 実際どちらのプロセスで perform され、entity 解決がどこで走るのかを実機ログで見たい。`CompleteTodosIntent` だけは `[.main]` に固定済み
-- **`.controlWidgetStatus(_:)` の見え方**: シミュレータビルドまで。実機の Control Center でどのくらい出るのか、ローカル通知と併用して鬱陶しくないかは未確認 (→ [5/N の追記](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls))
 - **`UISceneAppIntent` の `canImport` ガード**: `_AppIntents_UIKit` という独立フレームワークに属していて、iOS / watchOS / visionOS にはあるがネイティブ macOS には無い、というところまで確認済み。iOS 側で `#if canImport(_AppIntents_UIKit)` が通ることも実際に走らせて確かめました。ただマルチウィンドウの具体的な機能要求が無いので実装自体は保留
 - **reminder 本体スキーマ適合の再挑戦** (上の F): セッション 344 の CometCal パターンという取っ掛かりが見つかったので、そこから試す (→ [7/N に追記](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents))
 - **`.onAppIntentExecution` の cold start 問題**: そもそも今のコードベースでは `.onAppIntentExecution` をどこでも使っていない (`@Dependency` + `perform()` に完全移行済み) ので、現時点では検証対象が無い状態です。再導入するときに「`@State` の path が未構築」「シーンの activation conditions 未設定」「`supportedModes` に foreground が無い」の 3 仮説を潰す、というメモだけ残しました
+
+(2026-08-12 追記) このうち **Control まわりは実機で決着しました**。dialog も snippet も Control では提示されないこと、Control のフィードバックは `perform()` 完了時の自動リロードによるコントロール自身の再描画であること、それにともなって `.controlWidgetStatus(_:)` を撤去したことまで含めて [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書き直しました。実機の Control Center を触って初めて分かったことが多くて、シミュレータのビルドが通ったところで満足していると、到達不能なコードにも気付けないんだなというのは反省点です。
 
 ## まとめ
 
@@ -215,7 +228,7 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 - 最初に並べた将来トピックのうち、Visual Intelligence / Interactive Snippets / Intent Modes の一部は WWDC 2026 編で片付いた
 - FoundationModels (端末内 LLM) は「やらないと決めた」もの。主眼から意図的に外している
 - 残りの検証待ち (watchOS / visionOS / Spotlight ラグ / macOS 細部 / LA crash 再現 / reminder 本体適合 / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の復帰 / `UndoableIntent`) は、手元の機材と検証コストで順番が決まる予定
-- 書き溜めた「制約」をセッション書き起こしと全数突き合わせたら、断定しすぎ・理由付けの誤り・出典の取り違えがまとめて出てきた。「セッションで説明されていたこと / API ドキュメントで知ったこと / 自分がビルドして観測したこと」は、後から見分けられる形で分けて書いておかないと直せなくなる
+- 書き溜めた「制約」をセッション書き起こしと全数突き合わせたら、断定しすぎ・理由付けの誤り・出典の取り違えがまとめて出てきた。「セッションで説明されていたこと / API ドキュメントで知ったこと / 自分がビルドして観測したこと」、それに「そこから推論したこと」は、後から見分けられる形で分けて書いておかないと直せなくなる
 
 書ける段階になり次第、ここから本編へ昇格させていきます。
 
@@ -223,6 +236,7 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-12**: 「推論を実測と並べて書いてしまう」という 4 つ目の型を追加 (Control の snippet 非対応が実測ではなく肯定リストからの推論だった件)。Control まわりの実機検証待ちが決着したので一覧から外した
 - **2026-08-11**: 「制約を全部洗い直した」節と、実機検証待ちに積み増しになったものの一覧を追加。`.system.searchInApp` の出典を **343** に戻した (2026-08-05 に 344 と直したのが誤りだった)。`@ComputedProperty` の出自も 275 に再訂正。`PlaceDescriptor` の SSU バグが beta 5 でも未修正であることを反映。あわせて記事全体を、日付を追う書き方から「今どうなっているか」を先に書く形へ整理
 - **2026-08-05**: セッションを WWDC 2022 まで遡って洗い直した節を追加。トピック K (`UndoableIntent`) を追加
 - **2026-07-28**: トピック J (`PlaceDescriptor` をネイティブ型に戻す) を追加。`TransientAppEntity` の採用を反映

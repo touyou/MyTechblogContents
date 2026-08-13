@@ -54,6 +54,8 @@ LNPerformActionErrorCodeUnsupportedValueType
 
 しかも Siri / Shortcuts / AppIntentsTesting 経由では成功するので、テストは通ります。壊れていたのは UI の削除経路だけでした。対処は確認なし版の Intent を分けて、UI 側は SwiftUI の `.confirmationDialog` で確認してからそちらを呼ぶ形にしています。詳しい経緯は [5/N の落とし穴 4](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書きました。
 
+これは `requestConfirmation` に限らず、次に書く **`requestChoice` でも同じ** です。対話を求める API を `perform()` に置くなら、その Intent を UI の `Button(intent:)` から呼ばない、という線引きが要ります。
+
 ついでに、10/N に書いた AppIntentsTesting の話とも繋がります。**`requestChoice` を使う Intent はテストから run できません**。対話版と非対話版を分けておくと、この制約を回避できてテスト可能性が上がる、という副次効果がありました。呼出元ごとに分けるのは対話のためだったんですが、結果的にテストのためにもなっていた形です。
 
 ### requestChoice で選択肢を出す
@@ -282,6 +284,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-13**: 呼出元に対話を提示する面が無い制約は `requestChoice` でも同じ、という点を明記
 - **2026-08-12**: 呼出元に確認を出す面が無いと `requestConfirmation` が失敗する話を追加。FromExtension 撤去に追随
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-11**: 出自の整理をさらに訂正。`requestConfirmation(_:confirmLabel:cancelLabel:)` / `IntentDonationManager` / `IntentDonationMatchingPredicate` はセッションではなく API ドキュメント由来、`requestChoice(between:dialog:view:)` は 343 ではなく 275 が出典

@@ -189,7 +189,7 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 - Widget Extension 内の `ControlConfigurationIntent` をアプリから参照できない理由: 「Name Mangling」ではなく単にターゲット/モジュール境界でした。共有したいなら SPM に出すのが公式の方法です
 - 全 Intent で `WidgetReloader.reloadAllWidgets()` を呼ぶルール: Widget 内の `Button(intent:)` 起点なら **システムが自動でリロードを保証している** (セッション 10028) ので、手動が本当に要るのは Siri / Shortcuts / アプリ UI 側から変えたときだけでした。無条件に呼ぶ運用は安全側なので変えていませんが、理由は「Widget 起点は自動、それ以外の経路のために必要」が正確です
 - watchOS の `Button(intent:)`: プラットフォーム別のメモに「watchOS は `role:` 付きのシグネチャが使えないから手動で `Task { try? await intent.perform() }` する」と書いてあったんですが、これは別のメモにある「手動 `perform()` は `@Dependency` がゼロ初期化のままになるのでクラッシュする、必ず `Button(intent:)` を使う」という指針と真逆でした。実際の `WatchUI` のコードを見に行ったら全部 `role:` 無しの `Button(intent:)` で書いてあって、手動 perform を勧めていた方が誤記です。使えないのは `role:` 付きのシグネチャだけでした。同じリポジトリのドキュメント同士が正反対のことを言っているのに、突き合わせるまで誰も (自分も) 気付いていなかった、というのはちょっと怖かったです
-- `#Predicate` の Optional 直接比較: 「visionOS 等で」とプラットフォーム限定で書いていましたが、マクロの型推論の話なので基本は全プラットフォーム共通のはずで、当時の再現/非再現は toolchain のバージョン差だった可能性が高いです
+- `#Predicate` の Optional 直接比較: 「visionOS 等で」とプラットフォーム限定で書いていましたが、これは **マクロ固有の制約** でした。プラットフォーム差でも toolchain 差でもなくて、落ちるのは「非 Optional なプロパティ == Optional な値」の 1 パターンだけです。同じ式を `#Predicate` の外に書くと普通に通ります
 
 **3. セッション番号・年代の帰属間違い**
 
@@ -209,13 +209,15 @@ Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話
 
 なので今の自分ルールは 2 つ増えました。**肯定リスト (「A・B・C が対応」) から否定 (「D は非対応」) を導かない**、導いたなら推論だと明示する。そして **「どの面が何を提示するか」は、まず既知の良い面で動かしてから疑わしい面に持っていく**。逆順にやると変数が絡んで、いつまでも確定しません。
 
+結局そのあと、IntentTodo 側のドキュメントは **全部の記述に `[Apple]` (公式が明言) / `[measured]` (自分が実測) / `[inferred]` (そこからの推論) のラベルを付ける** 形に作り直しました。ここまで痛い目を見ておいて言うのもなんですが、機械的にラベルを打つのがいちばん確実だなと思っています。SDK が更新されたときに `[measured]` だけ優先的に洗い直せばいい、という運用上の利点も付いてきました。
+
 ### 実機検証待ちに積み増しになったもの
 
 洗い直した結果、「机上では確からしいけれど実機で確かめないと確定しない」という宿題がむしろ増えました。ここに並べておきます。
 
 - **`AppIntentsPackage` の重複宣言**: メタデータ上の重複は無いことまで確認済み。Siri / Shortcuts の実機ルーティング (`LNContextErrorDomain` 系) が本当に壊れないかは未確認なので、現状は重複させない運用のまま
 - **`allowedExecutionTargets` 未指定の Widget / Control Intent**: 実際どちらのプロセスで perform され、entity 解決がどこで走るのかを実機ログで見たい。`CompleteTodosIntent` だけは `[.main]` に固定済み
-- **`UISceneAppIntent` の `canImport` ガード**: `_AppIntents_UIKit` という独立フレームワークに属していて、iOS / watchOS / visionOS にはあるがネイティブ macOS には無い、というところまで確認済み。iOS 側で `#if canImport(_AppIntents_UIKit)` が通ることも実際に走らせて確かめました。ただマルチウィンドウの具体的な機能要求が無いので実装自体は保留
+- **`UISceneAppIntent`**: パッケージ内に probe を置いて iOS / My Mac / visionOS の 3 destination でビルドし、**Package スコープは障壁ではない** と確定しました。正しいガードは `#if canImport(_AppIntents_UIKit) && !os(watchOS)` です。watchOS がややこしくて、フレームワーク自体は存在するので `canImport` は true になるのに `UISceneAppIntent` 型が無くて、同時ビルドされる Watch App が落ちます。10/N の visionOS の話とまったく同じ形でした。ただマルチウィンドウの具体的な機能要求が無いので、実装自体は保留のままです
 - **reminder 本体スキーマ適合** (上の F): probe で要求仕様は確定したものの、`locationTrigger` が `PlaceDescriptor` を強制して SSU バグに当たるため **SDK 待ち**。実機検証というより待ちのタスク
 - **`.onAppIntentExecution` の cold start 問題**: そもそも今のコードベースでは `.onAppIntentExecution` をどこでも使っていない (`@Dependency` + `perform()` に完全移行済み) ので、現時点では検証対象が無い状態です。再導入するときに「`@State` の path が未構築」「シーンの activation conditions 未設定」「`supportedModes` に foreground が無い」の 3 仮説を潰す、というメモだけ残しました
 
@@ -235,6 +237,7 @@ Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-13**: `#Predicate` の Optional 制約はマクロ固有と確定 (toolchain 差ではない)。`UISceneAppIntent` は Package スコープが障壁ではないと確定し、正しいガード (`&& !os(watchOS)`) を反映。知見に根拠ラベルを付ける運用に触れた
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: 「推論を実測と並べて書いてしまう」という 4 つ目の型を追加 (Control の snippet 非対応が実測ではなく肯定リストからの推論だった件)。Control まわりの実機検証待ちが決着したので一覧から外した
 - **2026-08-11**: 「制約を全部洗い直した」節と、実機検証待ちに積み増しになったものの一覧を追加。`.system.searchInApp` の出典を **343** に戻した (2026-08-05 に 344 と直したのが誤りだった)。`@ComputedProperty` の出自も 275 に再訂正。`PlaceDescriptor` の SSU バグが beta 5 でも未修正であることを反映。あわせて記事全体を、日付を追う書き方から「今どうなっているか」を先に書く形へ整理

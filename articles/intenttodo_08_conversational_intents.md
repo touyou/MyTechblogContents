@@ -11,7 +11,7 @@ published: true
 :::
 
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 8 回目です。
-WWDC 2026 編の 3 本目で、`xcode27` ブランチでの検証です (この編の前提は 6/N 冒頭を見てください)。
+WWDC 2026 編の 3 本目です (この編の前提は 6/N 冒頭を見てください)。
 
 今回は、Intent を **対話的・予測的に賢くする** ための新 API をまとめて試した話です。
 具体的には `requestConfirmation` / `requestChoice` で perform() を一旦止めてユーザーに聞く話、`IntentDialog(full:supporting:)` で返事を出し分ける話、Interactive Snippet でその場で操作させる話、`IntentDonationManager` で寄付する話の 4 本立てです。
@@ -186,20 +186,43 @@ Button(intent: ToggleTodoCompletionIntent(todo: entity)) {
 
 なお、このスニペットは **app プロセスで提示される** ので、本編 5/N で書いた entity 解決クラッシュは該当しません。ここでは entity ベースの Intent を素直に使っています (そのクラッシュ自体、後日 iOS 27 では再現しないと分かって回避策ごと撤去しました)。
 
-## 予測のために寄付する: IntentDonationManager
+## 予測のために寄付する: IntentDonationManager — と思っていたら規約違反だった
 
-最後が寄付です。
-アクションを `IntentDonationManager` に寄付しておくと、システムが「この人はこの時間帯によく Todo を追加するな」みたいに学習して、先回りで提案してくれるようになります。
+最後が寄付です。アクションを `IntentDonationManager` に寄付しておくと、システムが「この人はこの時間帯によく Todo を追加するな」みたいに学習して、先回りで提案してくれるようになります。
 
-追加のときは、`AddTodoIntent` の perform() で寄付します。失敗しても致命的じゃないので `try?` で握りつぶしています。
+自分は `AddTodoIntent` の `perform()` の中で `try? await donate()` を呼ぶ形で入れていました。**これは間違いだったので、今は撤去しています。**
 
-```swift
-// Donate the action so the system can predict / proactively suggest it.
-try? await donate()
-```
+公式ドキュメント (Donations and discovery) はこう書いています。
 
-逆に削除のときは、**寄付を消し** ます。
-消した Todo を参照する寄付が残っていると、システムが「もう存在しない Todo に対するアクション」を提案してしまうので、それを防ぐためです。
+> Restrict your donations to direct interactions with your app's interface, and **not to interactions started by Siri or the Shortcuts app**.
+
+CosmoTunes の `DonationManager` にも同じことがコメントで書いてあります (*"Avoid issuing donations from inside an intent's `perform()`, because the framework already donates intents invoked through Siri or Shortcuts."*)。システムは自分が走らせた Intent をすでに寄付しているので、`perform()` の中で寄付すると二重計上になる、ということでした。
+
+そして、**`perform()` は呼出元を判別できません**。`IntentSystemContext` が持っているのは `currentMode` と `isVoiceOnly` だけで、invocation source を知る API はありません。つまり `perform()` 内の寄付は **必ず Siri / Shortcuts 経由でも走る** ので、上のガイダンスに違反することが確定しています。分岐しようがない、という話です。
+
+### 3 つの案を検討して、全部やらないことにした
+
+じゃあどこで寄付すればいいのか。サンプルが取っている形は 2 通りありました。
+
+1. **サービス層に `donateIntent:` フラグ** (CometCal): `CalendarManager.createEvent(..., donateIntent: true)` が既定で寄付して、Intent 側は `donateIntent: false` を明示して抜ける
+2. **UI のタップ地点から専用マネージャ経由で寄付** (CosmoTunes の `DonationManager`)
+
+どちらも「UI からは Intent を通さずサービスを直接呼ぶ」設計でだけ成立します。IntentTodo は 1/N に書いたとおり **UI も `Button(intent:)` で同じ Intent を走らせる** ので、サービス層に届いた時点で常に Intent 経由です。しかも `Button(intent:)` はタップのコールバックを渡してくれないので、タップ地点に寄付を差す隙もありません。
+
+そこで 3 案目として「Intent に呼出元フラグを持たせる」(`shouldDonate` のようなプロパティを UI 側で立てる) を考えたんですが、これは成立しませんでした。理由が 2 つとも機械的です。
+
+- **素のプロパティは実行側のプロセスに届きません**。Intent のシリアライズ面は `@Parameter` だけで、システムは実行プロセスで `init()` してからパラメータを流し込みます。Widget / Control のように別プロセスで走る経路では必ずデフォルト値に戻ります。一方でアプリ内の `Button(intent:)` では運ばれうるので、**「アプリ内だけ通って、他の呼出元で静かに落ちる」** という一番たちの悪い形になります
+- **`@Parameter` にすると Siri / Shortcuts から立てられます**。`ParameterSummary` から外せば Shortcuts エディタには出ませんが、公式ドキュメントいわく「summary に無いパラメータはエディタに出ないだけで、存在するし解決もされる」ので、統合メタデータには残ってモデルが値を埋められます。避けたかった「Siri 起点の寄付」がむしろ起きます。おまけに保存済みのショートカットはパラメータ込みで replay されるので、後から消せない契約になります
+
+そもそも Apple のガイダンスは「呼出元で分岐せよ」ではなく **「`perform()` の中では寄付するな」** です。フラグをどこに置くかの問題ではなくて、置き場所が `perform()` ではない、という話でした。寄付する層は「呼出元を知っている層」= UI で、タイミングは操作が成功した後、ということになります。
+
+もう 1 つコストとして効いたのが、**寄付には観測用の公開 API が無い** ことでした。`deleteDonations` はあるのに列挙は無いので、AppIntentsTesting で押さえられません。「効いているか確認できないコードを Intent の公開スキーマに足す」形になるのは、10/N で書いた検証の梯子を作ったあとだと結構抵抗があります。
+
+というわけで **現状 IntentTodo の寄付はゼロ** です。残っている選択肢は `AppIntent.callAsFunction(donate:)` で一部の UI 経路だけ `Button(intent:)` から直接実行に切り替えることなんですが、それは **設計の核 (Intent を唯一の実行経路とする) を寄付のために崩す** ことになるので採りませんでした。再訪する条件だけ決めてあって、Siri の予測 / 提案 (`PredictableIntent` は寄付ゼロだとそもそも提案が出ません) を機能として欲しくなったときです。そのときは「原則の例外を作る」対価が目的に見合います。
+
+### 消す側は呼出元に関係なく正しい
+
+一方で **`deleteDonations(matching:)` の方は残しています**。消えた entity への提案を残さないための後片付けなので、誰が呼んだかに関係なく正しい処理です。
 
 ```swift
 try? await IntentDonationManager.shared.deleteDonations(
@@ -207,8 +230,7 @@ try? await IntentDonationManager.shared.deleteDonations(
 )
 ```
 
-「追加で寄付、削除で寄付を消す」をペアで持っておくと、提案が実体とズレにくくなる、というのが設計上の肝でした。
-寄付しっぱなしだと、消したはずの Todo がいつまでも提案に出てくる、みたいな気持ち悪さが残るので、削除側の後始末まで含めて 1 セットだと思っています。
+CosmoTunes も削除経路には必ずこれを入れていて、IntentTodo も削除系 3 Intent はこの形です。今は寄付する側がゼロなので消すものも無いんですが、システム側が自動で寄付している分に対しては効きます。「追加で寄付、削除で寄付を消す」をペアで持つ、と前は書いていましたが、**ペアのうち片方だけが自分の責任だった** というのが今の理解です。
 
 ## 「消して」と「言ってない」を区別する: IntentParameter.valueState
 
@@ -244,6 +266,61 @@ private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -
 
 この記事の主題 (perform() を止めて聞き返す) とは道具が違いますが、「ユーザーが『消して』と言ったのか、単に何も言わなかったのか」を区別するという意味では同じ方向の話だと思ったので、ここに追記しています。深さはビルド成立 (B) までで、Shortcuts の UI が実際に「クリア」と「未指定」を区別して渡してくるかは実機待ちです。
 
+## 実行の前に止めるか、後で取り消すか: UndoableIntent
+
+99/N に「検証候補」として置いていた `UndoableIntent` (iOS 26 / セッション 275) も入れました。削除 3 種 (確認あり / 確認なし / バルク) と完了トグルが対象です。実行前の `requestConfirmation` と実行後の取り消しをどう住み分けるのかが分からない、というのが宿題だったんですが、やってみたら **住み分けるものではなくて、呼出元の性質で自動的に決まる** という結論になりました。`undoManager` は Intent を走らせた面が用意するもので、用意しない呼出元 (ウィジェットの `Button(intent:)` など) では `nil` になるので、登録がまるごと no-op になります。これは失敗ではなく想定どおりの分岐なので、`guard let` で静かに抜けます。つまり「確認を出せる面には確認が出るし、取り消せる面では取り消せる」だけで、こちらが場合分けする話ではありませんでした。
+
+実装で分かったことをいくつか。
+
+- **`UndoManager.registerUndo(withTarget:handler:)` はハンドラごと `@MainActor`** です (Foundation の swiftinterface が `handler: @escaping @MainActor (TargetType) -> Void` になっています)。`Task { @MainActor in }` でホップする必要はなく、`TodoService` をそのまま呼べます
+- **完了トグルの取り消しは「逆トグル」ではなく「元の値へ戻す」**。取り消すまでの間に別経路 (Siri / ウィジェット / 別デバイスの CloudKit マージ) で状態が変わっていると、トグルは意図と逆に倒れます。なので `setCompletion(todoId:isCompleted:)` という絶対値の API を呼びます。5/N に書いた `SetValueIntent` を絶対値で受ける話と同じ形が、ここでも出てきました
+- **復元は冪等にする**。`restore(_:)` は同じ id の Todo が既にあればそれを返すだけにして、二重の取り消しや CloudKit が先に戻したケースで重複を作らないようにしています
+- 削除はサブタスクを cascade で連れていくので、スナップショットにサブタスクも入れて **サブタスクの id も保ちます**。カテゴリはリレーションを値で持ち越せないので id だけ持って復元時に引き直し、カテゴリ自体が消えていたら関連を落として復元します (カテゴリが無いせいで Todo が戻らない方が困るので)
+- `TodoItem` / `SubTask` に **id を受け取る init を別途生やしました**。通常の `init(title:)` に id を足すと、普通の作成経路が既存の Todo と衝突しうる形になるので
+
+登録処理は `TodoUndoRegistrar` という 1 つの型に集約しています。削除系の Intent が 3 つあるので、同じ登録をそれぞれに書くと片方だけ直し忘れる形で壊れるからです。
+
+```swift
+@MainActor
+static func registerRestore(
+    _ snapshots: [TodoItemSnapshot],
+    undoManager: UndoManager?,
+    service: TodoService
+) {
+    guard let undoManager, !snapshots.isEmpty else { return }
+    undoManager.registerUndo(withTarget: service) { service in
+        for snapshot in snapshots {
+            // 1 件戻せなくても残りは戻す
+            _ = try? service.restore(snapshot)
+        }
+    }
+    undoManager.setActionName(
+        String(localized: "Delete ^[\(snapshots.count) Todo](inflect: true)")
+    )
+}
+```
+
+取り消しメニューに出る名前は inflection 付きで書けます (6/N の複数形の話と同じです)。**スナップショットは削除する前に取る** のと、**同じ id で戻す** のが要点で、後者は Spotlight の index や entity の identity を保つために効いてきます。id が変わると「戻した」ように見えて別物になるので。
+
+## Siri に読ませるエラー文言を決める
+
+対話まわりでもう 1 つ、失敗したときの言い方も Siri に届く経路でした。IntentTodo は `IntentError` に `CustomAppIntentErrorConvertible` を付けています。
+
+```swift
+extension IntentError: CustomAppIntentErrorConvertible {
+    public var appIntentError: AppIntentError { ... }
+}
+```
+
+CosmoTunes はドメインエラーの enum に `CustomLocalizedStringResourceConvertible` を付けて、throw の直前に `AppIntentError(wrapping:)` で包む形だったんですが、1 段上のこちらを選びました。理由と注意点が 4 つあります。
+
+- **throw する側で包む必要がありません**。公式いわく *"When you throw a conforming error from a method such as `perform()` […] the framework reads the `appIntentError` property and uses it directly."* なので、`TodoService` は AppIntents を import せずに `IntentError` を投げるだけで済みます。2/N で書いた「サービス層は Intent の都合を知らない」という線を保てるのが大きいです
+- `errorDescription` (開発者向けに "Validation error: …" みたいなプレフィックスを付けているやつ) と、Siri が読む文言を **別々に決められます**。前者を読み上げさせたくないので
+- 「見つからない」系は `AppIntentError(predefinedError: .Unrecoverable.entityNotFound, description:)` に載せています。文言だけでなく「参照先の entity が無い」という種別がシステムに伝わります
+- ただし **`init(predefinedError:description:)` は受け付けない値を渡すと実行時に `fatalError()` します** (公式に明記されています)。ビルドでは検出できないので、全ケースを 1 度組み立てるだけのテストを置きました
+
+なお両方 (`CustomLocalizedStringResourceConvertible` と `CustomAppIntentErrorConvertible`) に準拠した場合、システムは後者だけを見ます。
+
 ## この回で使った API がいつ入ったものか
 
 WWDC 2022 から 2026 までのセッションを網羅的に洗い直したので、この記事で扱った道具の出自を整理しておきます。WWDC 2026 編の中に置いたせいで、全部が iOS 27 の新 API のように読めてしまう書き方になっていました。
@@ -255,6 +332,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 - `requestChoice` と `IntentChoiceOption` は iOS 26 (WWDC 2025 セッション 275) が初出でした。SwiftUI View を添える `requestChoice(between:dialog:view:)` も同じ 275 です。なので本文の「選ばれたオプションに安定 id が無い」という制約も、iOS 26 の時点からあった話ということになります。
 - `IntentDialog(full:supporting:)` はちょっとややこしくて、**型としては WWDC 2022 (セッション 10032) に登場する** けれど、`full:` と `supporting:` を分けて出し分ける **具体例が出てくるのはセッション 343 (2:45)** でした。API 自体が新しいわけではなく、使いどころを示した実例の方が 2026 側にある、という形です。
 - Interactive Snippet (`SnippetIntent`) も iOS 26 (セッション 275) の機能で、`SnippetIntent.reload()` まで含めてこの年に入っています。
+- `UndoableIntent` も iOS 26 (セッション 275) です。取り消しの実装形そのものは WWDC 2026 の公式サンプル (CosmoTunes の `DeleteAlarmIntent`) が見せてくれているので、API と実例の年が離れている、という点では `IntentDialog(full:supporting:)` と同じ形になっています。
 - `IntentDonationManager` と、本文で `deleteDonations(matching:)` に渡している `IntentDonationMatchingPredicate` は、**どちらもセッションの書き起こしには出てこず、API ドキュメント由来** です。WWDC 2023 (セッション 10103) にあるのは `RelevantIntent` / `RelevantIntentManager` / `RelevantContext` の方で、自分は隣にあったこれらと混ぜて覚えていました。
 
 自分のアプリに入れる分には「今の SDK で使えるか」しか見ていなかったので気にしていなかったんですが、記事として読むと「WWDC 2026 で何が増えたのか」の情報として不正確なので直しておきます。ベースラインが iOS 26 のプロジェクトに iOS 27 の新要素を足していく作り方をしていると、この 2 世代の境目は自分でも結構あいまいになるなと思いました。
@@ -276,7 +354,9 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 - `requestChoice` の `IntentChoiceOption` は安定 id を持たないので、選択肢生成と逆引きを enum に一元化してタイトル照合 + フォールバックでドリフトを防ぐ
 - `IntentDialog(full:supporting:)` で「音声単独」と「視覚併用」のメッセージを出し分ける
 - Interactive Snippet はボタンを押すたびにシステムが `SnippetIntent` を再 perform するので、perform で毎回最新 entity を取り直す。app プロセス提示なので entity 解決クラッシュは無関係
-- `IntentDonationManager` は「追加で `donate()`、削除で `deleteDonations(...)`」をペアにして、提案が実体とズレないようにする
+- **`perform()` の中で `donate()` を呼ぶのは規約違反**。呼出元を判別する API が無いので Siri / Shortcuts 経由でも走ってしまう。寄付する層は「呼出元を知っている層」= UI で、`Button(intent:)` を唯一の実行経路にしている設計とは両立しないため、いまは寄付ゼロ。`deleteDonations(matching:)` の方は呼出元に関係なく正しいので残す
+- `UndoableIntent` は「確認と取り消しの住み分け」ではなく、`undoManager` を用意する呼出元でだけ効く仕組み。復元は **同じ id で・冪等に**、完了トグルの取り消しは逆トグルではなく元の値へ戻す
+- Siri に読ませるエラー文言は `CustomAppIntentErrorConvertible` で決める。サービス層が AppIntents を import せずに済む
 
 次回は、[大量の Todo を一括処理する `EntityCollection` / `LongRunningIntent` / `CancellableIntent` と、「検証してみたら自分のアプリには適合しなかった」`RelevantEntities` の話 (9/N)](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis) を書きます。
 
@@ -284,6 +364,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-28**: 寄付の節を全面的に書き換え。`perform()` 内の `donate()` は公式ガイダンス違反なので撤去し、代わりの 3 案も検討のうえ「入れない」で決着した経緯に差し替え (`deleteDonations` は残す)。`UndoableIntent` と `CustomAppIntentErrorConvertible` の節を追加
 - **2026-08-13**: 呼出元に対話を提示する面が無い制約は `requestChoice` でも同じ、という点を明記
 - **2026-08-12**: 呼出元に確認を出す面が無いと `requestConfirmation` が失敗する話を追加。FromExtension 撤去に追随
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)

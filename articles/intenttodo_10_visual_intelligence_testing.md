@@ -11,7 +11,7 @@ published: true
 :::
 
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 10 回目です。
-WWDC 2026 編 (6〜10) の最後で、`xcode27` ブランチでの検証です (前提は 6/N 冒頭)。
+WWDC 2026 編 (6〜10) の最後です (前提は 6/N 冒頭)。
 
 最後は外向きのサーフェスとして Visual Intelligence 連携 (セッション 297) と、Intent を実際の経路で動かすテスト基盤 (AppIntentsTesting / セッション 295) を試した話です。
 
@@ -30,13 +30,14 @@ public struct TodoVisualIntelligenceQuery: IntentValueQuery {
     var todoService: TodoService   // ← IntentValueQuery は @Dependency が使える
 
     public func values(for input: SemanticContentDescriptor) async throws -> [TodoOrCategory] {
-        let labels = input.labels.map { $0.lowercased() }
+        let labels = input.labels
         guard !labels.isEmpty else { return [] }
 
         // TodoService は MainActor 隔離。ホップして snapshot を取り、
         // 以降は Sendable な entity 値で off-actor フィルタする。
         let todos = try await MainActor.run { try todoService.listTodos(filter: .all) }
-        // ... labels を todo タイトル / カテゴリ名に部分一致させて返す ...
+        // ... labels を todo タイトル / カテゴリ名に localizedStandardContains で
+        //     部分一致させて返す ...
         return matchedTodos + matchedCategories
     }
 }
@@ -49,7 +50,7 @@ public struct TodoVisualIntelligenceQuery: IntentValueQuery {
 
 - **`IntentValueQuery` は `@Dependency` が使えます**。6/N で「`AppEntity` は `@Dependency` 使えない」と書きましたが、value query の方は `_SupportsAppDependencies` に適合しているので、`TodoService` を直接注入できます。entity みたいに `TodoEntityStore` を迂回しなくていいので、ここは素直でした。
 - 戻り値が **単一 Entity 型に縛られない** のが `EntityQuery` との違いです。9/N で作った `@UnionValue` の `[TodoOrCategory]` をそのまま返せるので、Todo とカテゴリの混在結果を出せます。
-- `SemanticContentDescriptor` は `labels: [String]` と `pixelBuffer: CVReadOnlyPixelBuffer?` を持っています。`labels` は一般的な英語ラベル (建物の固有名みたいなのは来ない、`en_US`、同義語や翻訳なし) です。本アプリは labels を Todo タイトル / カテゴリ名に部分一致させました。`pixelBuffer` で画像一致もできますが、それは ML モデルが要るので今回は見送りました。
+- `SemanticContentDescriptor` は `labels: [String]` と `pixelBuffer: CVReadOnlyPixelBuffer?` を持っています。`labels` は一般的な英語ラベル (建物の固有名みたいなのは来ない、`en_US`、同義語や翻訳なし) です。本アプリは labels を Todo タイトル / カテゴリ名に部分一致させました。`pixelBuffer` で画像一致もできますが、それは ML モデルが要るので今回は見送りました。なお最初はラベルが英語主体だからと `lowercased()` してから `contains` していたんですが、**突き合わせ先の Todo は日本語** なので例外にする理由がなく、他の検索経路と同じ `localizedStandardContains(_:)` に揃えました (6/N)。自前の小文字化も要らなくなります。
 - **並行性**: `values(for:)` は nonisolated なので、MainActor の `TodoService` は `MainActor.run { ... }` でホップして取得して、その後は Sendable な `TodoAppEntity` 値で off-actor にフィルタする、という形にしています。
 - 他の query と同じで **登録は不要** で、システムが自動発見します (AppShortcut も要りません)。
 - 数の制限があって、**`SemanticContentDescriptor` を受ける `IntentValueQuery` はアプリに 1 つだけ** です (セッション 297 の 11:39)。IntentTodo は `TodoVisualIntelligenceQuery` の 1 つきりなので問題になっていませんが、あとから「Todo 用と Category 用で分けよう」と思い付いていたら通らなかったことになります。複数の型を返したいときは、次の項目の `@UnionValue` で戻り値の型を混ぜて 1 つの query に集約するのが正解でした。
@@ -231,6 +232,18 @@ func testAddThenShowChain() async throws {
 - `setUp` で毎回 `app.launch()` すると、テスト数が増えたときにシミュレータの起動が散発的に失敗します。起動済みなら `activate()` に分岐させて解消しました
 - クリーンビルド直後の最初のテストだけ "bundle is not present" で落ちます。`setUp` で軽いクエリが通るまで待つようにしました
 
+### 画面が publish している entity も検証できる (ただし watchOS を除く)
+
+`AppEntityDefinition.viewAnnotations()` を使うと、**いま画面が publish している onscreen entity** を検証できます。CosmoTunes は Now Playing / ライブラリの各セグメント / Canvas / タイマーカードと **画面ごとに** テストを持っていて、IntentTodo は詳細画面 (単一 annotation) と一覧 (コレクション annotation) の 2 本にしました。一覧側は「作った 2 件が両方 annotation に出る」を superset で見ています。他のテストが残した Todo が混ざりうるので、件数の完全一致で見ると不安定になるためです。
+
+ただし **watchOS ではこの手が使えませんでした**。`AppIntentsTesting` は watchOS SDK にも存在していて、`IntentDefinitions` の発見も `suggestedEntities()` も `viewAnnotations()` もリンク・実行ともに通るんですが、**intent の `run()` が `LNPerformActionPrebuiltErrorCodeActionNotAllowed` (`LNPerformIntentPrebuiltErrorDomain` の code 4025) で落ちます**。テストの前提データを作る `AddTodoIntent` が走らないので、annotation を読むところまで到達できません。
+
+watch アプリの UI から前提データを作る道もあるんですが、watchOS シミュレータの `typeText` が不安定なのは既存テストで経験済みで、そちらに寄せると「落ちても理由が分からないテスト」になります。5/N に書いた条件付き assert の反省もあるので、**watchOS 側は自動化を諦めて手動確認に回しました**。実装 (annotation 自体) は 4 プラットフォームのビルドで担保しています。
+
+切り分けで地味に困ったのが、失敗の本当の理由 (上の 4025) が `xcodebuild` の標準出力には出てこなくて、`.xcresult` の Failure Message にしか無かったことでした。`xcrun xcresulttool get test-results tests --path <xcresult>` で読みます。**テストが落ちた理由を読む経路** 自体を知らないと、こういうのは「なんか watchOS だと落ちる」で終わってしまうなと思います。
+
+ついでに、watchOS の一覧では `.appEntityIdentifier(forSelectionType:)` (コレクション版) も効きませんでした。CosmoTunes のコメントが *"The collection-form `.appEntityIdentifier(forSelectionType:)` is only honored when applied to a `List`"* と書いていて、watch の一覧も `List` ではあるんですが、**selection を持っていません** (行が `Button(intent:)` と `NavigationLink` なので)。`forSelectionType:` は selection 値の型を手がかりにする仕組みなので、当て先が無い、ということでした。「`List` なら効く」ではなく「**selection のある `List` なら効く**」と理解を訂正して、watch では行ごとの単一 annotation (`.appEntityIdentifier(EntityIdentifier(for: entity))`) に落としています。
+
 ### Apple が想定している検証の順番
 
 もう 1 つ、AppIntentsTesting をどこまでやればいいのかの目安が見つかりました。セッション 240 (24:13〜25:57) が **progressive validation** として順番を明示していて、`AppIntentsTesting` → Shortcuts アプリ → Spotlight → Siri、と段階を上げていく形です。
@@ -256,17 +269,6 @@ func testAddThenShowChain() async throws {
 この編は実機 (R) まで通せていないものが多いので、Siri / Visual Intelligence を実際に喋らせて確認できたぶんは、おいおい各記事に追記していく予定です。
 残っている検証待ち・将来トピックは [99/N](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) にまとめてあります。
 
-## 更新履歴
-
-本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
-
-- **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
-- **2026-08-12**: AppIntentsTesting を 22 テストまで広げて実 run でグリーンにした知見を追加 (型消去 API の落とし穴 / テスト不可な経路 / 検証の梯子)。「UI テストターゲットは synchronized folder ではない」という記述が誤りだったので訂正
-- **2026-08-11**: openable 要件を「Mac 固有の追加バリデーション」と書いていたのを、ルールは全プラットフォーム共通で macOS ビルドだけがコンパイル時に enforce する、と訂正。`SemanticContentDescriptor` を受ける `IntentValueQuery` はアプリに 1 つだけという制約と、AppIntentsTesting の署名チーム要件を追加。セッション 297 の正式タイトルを訂正
-- **2026-08-05**: `IntentValueQuery` / `SemanticContentDescriptor` の出自 (iOS 26 / セッション 275) を補足
-- **2026-07-28**: `canImport` だけだと visionOS 実機ビルドが落ちる話を追加
-- **2026-07-02**: beta 2 で `VisualIntelligence` が Mac にも import 可能になった話を追加
-
 ## まとめ
 
 - `IntentValueQuery` はカメラ / スクショの visual search にアプリのコンテンツを返す入口。`AppEntity` と違い `@Dependency` が使え、`@UnionValue` で複数型を返せる。`SemanticContentDescriptor` を受ける query は **アプリに 1 つだけ** なので、複数型を返したいなら `@UnionValue` に寄せる
@@ -276,5 +278,18 @@ func testAddThenShowChain() async throws {
 - 結果タップ (`OpenTodoIntent`) / 複数結果型 (`@UnionValue`) は既存部品を再利用できた
 - AppIntentsTesting は実経路で intent を動かせるが **UI テストバンドル必須**、かつテストランナーとアプリの署名チームを揃える必要がある。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
 - `entity.id` は `NSNull` で、id は `entity.identifier.instanceIdentifier` から取る。`makeIntent(x: nil)` は `.unset` になるので明示クリアは型付き nil で渡す。`requestChoice` を使う Intent は run できない
+- `viewAnnotations()` で画面が publish している entity を検証できる。ただし **watchOS では `run()` が code 4025 で落ちて前提データを作れない** ので、そこは手動確認に回す。`forSelectionType:` も「`List` なら効く」ではなく「**selection のある `List` なら効く**」
 - Apple が示す検証の順番は **AppIntentsTesting → Shortcuts → Spotlight → Siri**。フレーズのルーティングだけは手動確認の領域と割り切ってよい
 - WWDC 2026 編全体を通して、Entity / Intent を丁寧に設計しておくほど新サーフェスへの適合が安くなる、というのが一番の実感だった
+
+## 更新履歴
+
+本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
+
+- **2026-08-28**: `viewAnnotations()` による画面ごとの検証と、watchOS では `run()` が code 4025 で落ちて自動化できない話を追加。`forSelectionType:` が効く条件を「selection のある `List`」に訂正。Visual Intelligence のラベル照合も `localizedStandardContains` に揃えたことを反映。更新履歴をまとめの後ろへ移動 (他の記事と順序を揃えた)
+- **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
+- **2026-08-12**: AppIntentsTesting を 22 テストまで広げて実 run でグリーンにした知見を追加 (型消去 API の落とし穴 / テスト不可な経路 / 検証の梯子)。「UI テストターゲットは synchronized folder ではない」という記述が誤りだったので訂正
+- **2026-08-11**: openable 要件を「Mac 固有の追加バリデーション」と書いていたのを、ルールは全プラットフォーム共通で macOS ビルドだけがコンパイル時に enforce する、と訂正。`SemanticContentDescriptor` を受ける `IntentValueQuery` はアプリに 1 つだけという制約と、AppIntentsTesting の署名チーム要件を追加。セッション 297 の正式タイトルを訂正
+- **2026-08-05**: `IntentValueQuery` / `SemanticContentDescriptor` の出自 (iOS 26 / セッション 275) を補足
+- **2026-07-28**: `canImport` だけだと visionOS 実機ビルドが落ちる話を追加
+- **2026-07-02**: beta 2 で `VisualIntelligence` が Mac にも import 可能になった話を追加

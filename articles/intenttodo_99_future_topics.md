@@ -16,7 +16,7 @@ published: true
 一方で、検証はまだだけれど書きたいトピックや、検証待ちの状態で温めている知見もそれなりにあります。
 この記事はそれらを「将来書く予定」として並べておく場所で、進捗に合わせて随時更新していきます。
 
-なお、この記事を最初に書いたあと、[WWDC 2026 編 (6〜10/N)](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) を `xcode27` ブランチで書きました。
+なお、この記事を最初に書いたあと、[WWDC 2026 編 (6〜10/N)](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) を `xcode27` ブランチ (現在は `main` にマージ済み) で書きました。
 そちらで当時「将来トピック」に挙げていたものの一部が片付いた (あるいは「やらないと決めた」) ので、まずその差分を反映しておきます。
 
 ## なぜ未検証のものを書かないか
@@ -36,7 +36,9 @@ published: true
 
 逆に、片付いたというより **「試したけど採用しなかった」「やらないと決めた」** ものもあります。
 
-- **Intent Modes の `.foreground(.dynamic)`** (旧トピック G): `ShowTodosIntent` を一度 `[.background, .foreground(.dynamic)]` + `continueInForeground()` に寄せてみたんですが、これをやると `OpensIntent` (Intent 合成) を外すことになって、それは設計として手放したくなかったので revert しました。今の `ShowTodosIntent` は `.foreground` + `opensIntent:` のままです。`ForegroundContinuableIntent` が deprecated で `.foreground(.dynamic)` が後継、という対応関係は掴めたものの、自分のアプリでは Intent 合成を優先する判断になった、というのが結論でした。
+- **Intent Modes の `.foreground(.dynamic)`** (旧トピック G): `ShowTodosIntent` を一度 `[.background, .foreground(.dynamic)]` + `continueInForeground()` に寄せてみたんですが、これをやると `OpensIntent` (Intent 合成) を外すことになって、それは設計として手放したくなかったので revert しました。今の `ShowTodosIntent` は `.foreground` + `opensIntent:` のままです。そのときは「dynamic 自体は有用なので、もっと適した Intent が出てきたら検討する」と宿題にしていたんですが、その後 **全 21 Intent を見直して「当て先が無い」で閉じました**。詳細は [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis) に書いています。
+- **寄付 (`IntentDonationManager`)**: これは「片付いた」というより **入れないことに決めた** ものです。`perform()` の中で寄付するのは公式ガイダンス違反なので撤去して、代わりに UI のタップ地点で寄付する案を 3 通り検討したんですが、どれも「UI からは Intent を直接呼ぶ」前提で、`Button(intent:)` を唯一の実行経路にしている設計と両立しませんでした。再訪する条件 (Siri の予測 / 提案を機能として欲しくなったとき) だけ決めて閉じています → [8/N](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)
+- **`SpotlightSearchTool` + `LanguageModelSession`** (セッション 246): 前提の「Spotlight への entity 寄付」は揃ったんですが、残りの作業が FoundationModels 側に寄るので **スコープ外** としました。下の FoundationModels をやらない判断と同じ線引きです → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 - **FoundationModels (端末内 LLM)** (旧トピック F の一部): Todo 自動生成・サマリー・Tool Calling といった端末内 LLM 連携は、検証計画の段階で **本リポジトリの主眼から意図的に外す** ことにしました。App Intents 中心設計の実証という軸からは少しずれるのと、ここに踏み込むと検証範囲が一気に広がるからです。やらない判断をした、というのも 1 つの結論として残しておきます。
 
 ## WWDC 2026 の SwiftData レビューで整理できたもの
@@ -64,13 +66,14 @@ WWDC 2026 で `ResultsObserver` / `ModelResultsObserver` という、SwiftUI の
 
 ### A. watchOS App + Complication 全ファミリー検証
 
+- ~~WatchAddTodoView の `Button(intent:)` 経由の Todo 追加 (`@Dependency` 解決クラッシュなく動くか)~~ → **シミュレータで確認して、実際に壊れていたので直しました**。`NavigationModel` を watch アプリ側で登録していなかったせいで、追加が **無音で失敗** していました (クラッシュしないので気付けていなかったやつです)。ついでに詳細画面への導線と onscreen annotation も入れています → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) / [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)
 - WatchTodoListView での incomplete + due-soon セクション表示
-- WatchAddTodoView の `Button(intent:)` 経由の Todo 追加 (`@Dependency` 解決クラッシュなく動くか)
 - Complication 全 4 ファミリー (Circular / Corner / Rectangular / Inline) の表示確認
 - タイムライン更新の挙動 (`Timeline.policy(.after:)` で 15 分以内に反映されるか)
 - ウォッチフェイスへの登録動作
+- `OpenTodoIntent` 経由で watch の詳細画面に飛べるか (watchOS では AppIntentsTesting の `run()` が通らないので、ここは手で見るしかありません)
 
-これは Apple Watch 実機を引っ張り出してペアリング状態の確認から、という腰の重さでまだ手付かず。
+実機を引っ張り出してペアリング状態の確認から、というところは相変わらず腰が重いんですが、**シミュレータで一連の操作をなぞるだけでも 1 つ実害が見つかった** ので、「実機が要る」を理由に全部を寝かせるのは良くなかったなと思っています。
 
 ### B. visionOS 空間 UI 検証
 
@@ -86,9 +89,11 @@ visionOS でハマった「`NavigationSplitView.selection` の更新を Navigati
 
 ### C. Spotlight の iOS 反映ラグ
 
-シリーズ 5/N で `IndexedEntity` 準拠だけでは Spotlight に出ないので `CSSearchableIndex.indexAppEntities` の明示登録が必要、という話を書きました。
+シリーズ 5/N で `IndexedEntity` 準拠だけでは Spotlight に出ないので `indexAppEntities` の明示登録が必要、という話を書きました。
 macOS では即座に検索ヒットするのですが、iOS では index 反映に数分〜10 分単位のラグがあるようで、まだ実機で検索ヒットを確認できていません。
 反映タイミングの再現性が取れたら、別記事で `CSSearchableIndex` の運用 Tips としてまとめたいです。
+
+実装側はその後だいぶ育っていて、名前付き index への移行・`IndexedEntityQuery` の実装・client state による起動時全件 index の省略・連続失敗からの自己修復までは入りました (5/N)。**Spotlight の再インデックス要求 (`reindexAllEntities`) が実際にシステムから呼ばれる状況** の再現も、このラグの話と一緒に見たい項目です。手で叩く方法だけは分かっていて、macOS は `mdutil -cr <bundle id>`、iOS は 設定 → デベロッパ → CoreSpotlight Testing です。
 
 ### D. macOS native の細部
 
@@ -123,7 +128,8 @@ list 適合で App Schema の仕組み自体は検証できていますし、Gro
 
 シリーズ 5/N で軽く触れた、Spotlight の fire-and-forget エラー扱いと近い話で、IntentTodo 全体に「`LoadResult<T>.success(T) | .unavailable(reason: String)` のような型で『不明』と『ゼロ』を強制区別する」リファクタを入れたい欲があります。
 これがあると Provider / Intent / View 層を通じて『データが無い』と『データが取れなかった』を別の概念として扱えるようになり、ユーザーに嘘の安心感を与える silent failure が減らせるはず。
-silent failure 系の個別修正は `main` 側でいくつか入れた (fetch 失敗を黙って 0 件にせず throw する、等) んですが、`LoadResult<T>` を全 layer に通すとなるとコストが大きいので、prototype 程度で試してから記事化する予定です。
+
+個別修正の方はその後もいくつか入れました。fetch 失敗を黙って 0 件にせず throw する、コンテナ生成に失敗したコンプリケーションは空白ではなく「不明」を出す ([3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions))、通知やライブアクティビティが設定で塞がれていたら記録して設定へ誘導する、Spotlight の差分反映が続けて失敗したら次回起動でフル再インデックスする ([5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)) あたりです。**どれも「不明」と「ゼロ」を区別するという同じ形** をしているので、型で一発で表現したい気持ちは強くなりました。ただ `LoadResult<T>` を全 layer に通すとなるとコストが大きいので、prototype 程度で試してから記事化する予定です。
 
 ### I. WWDC 2026 セッションを読み直して増えた採用候補 (すべて決着済み)
 
@@ -137,7 +143,7 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 - **`TransientAppEntity`** (セッション 344) → **採用**。集計値を返す `TodoListSummaryEntity` + `GetTodoSummaryIntent` を新設して、Shortcuts で「未完了が N 件以上なら通知」のような条件分岐を組めるようにしました → [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)。上の「通知の entity アノテーションは永続 `AppEntity` 必須」という制約とちょうど裏表で、id で名指しされる名詞と、その場で計算して返すだけの値が型で分かれている、という整理に落ち着きました
 - **`allowedExecutionTargets` の再検証** (セッション 345) → **「FromExtension は畳めない」で確定**。制御できるのは perform のプロセスであって entity 解決の有無ではない、が理由です。なおその FromExtension 分離自体、後日クラッシュが再現しないと分かって撤去したので、宿題ごと消えました → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 - **reminder 本体スキーマ適合の優先度** (Group Lab) → **据え置き継続**。詳細は上の F
-- **`EntityPropertyQuery`** → **不採用**。既存の `TodoEntityQuery` (`EntityStringQuery`) で足りていて、入れる理由が無かったためです
+- **`EntityPropertyQuery`** → **不採用**。当初は「既存の `TodoEntityQuery` (`EntityStringQuery`) で足りている」と書いていましたが、理由の方が不正確でした。正しくは `TodoEntityQuery` が `EnumerableEntityQuery` に適合しているので **Shortcuts の Find アクションと絞り込みが自動生成される** からです。`EntityPropertyQuery` が要るのは全件ロードが重くなる規模のときで、件数が増えたら再評価します → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 
 ついでの話として、SDK 27 の SwiftUI 新 API (ドラッグ並べ替えの `reorderable()` / `reorderContainer`) に追従したときも、並べ替えの永続化は `ReorderTodosIntent` という Intent として定義しました。ドラッグ確定は `Button(intent:)` に載せられないので View からは Intent と同じ `TodoService.reorderTodos(orderedIDs:)` を直接呼ぶんですが、ロジックの置き場を Intent 側の語彙に寄せておくことで、「アクションはまず Intent として定義する」という 1/N の原則は崩れていません。
 
@@ -163,11 +169,11 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 ローカルの `xcodebuild` は exit 0 で返ってくるのに Xcode Cloud だけ失敗する、という気付きにくい壊れ方をするのも含めて、経緯は [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) に書きました。
 SDK が更新されたら退避コミットを revert してクリーンビルドし直す、というのを毎回の beta 追従のチェック項目にしています。緯度経度を Intent 経由で受け取る口が閉じたままなので、ここは早く戻したいところです。
 
-### K. `UndoableIntent` で取り消しに対応する
+### K. `UndoableIntent` で取り消しに対応する (採用済み)
 
-セッションを 2022 から洗い直していて、まだ手を付けていないのに気付いたのが `UndoableIntent` です。iOS 26 (セッション 275) で入っていたもので、`undoManager.registerUndo(withTarget:handler:)` と組み合わせて Intent の実行を取り消せるようにするプロトコルでした。
+セッションを 2022 から洗い直していて、まだ手を付けていないのに気付いたのが `UndoableIntent` (iOS 26 / セッション 275) でした。その後、削除 3 種と完了トグルに入れています。
 
-IntentTodo には削除・バルク完了・スヌーズと、取り消したくなりそうな破壊的アクションが一通り揃っているので、相性は悪くないはずです。ただ 8/N で書いたとおり削除には `requestConfirmation` を先に入れていて、「実行前に止める」で今のところ足りている感覚もあります。実行前の確認と実行後の取り消しをどう住み分けるか (両方あると鬱陶しいのか、それとも Siri から実行したときは取り消しの方が効くのか) は、実際に入れてみないと分からないところなので、検証候補として置いておきます。
+宿題にしていた「実行前の確認と実行後の取り消しをどう住み分けるか」は、**住み分けるものではありませんでした**。`undoManager` は Intent を走らせた面が用意するもので、用意されない呼出元では登録がまるごと no-op になるので、こちらが場合分けする話ではなかったです。実装の要点 (同じ id で戻す / 冪等にする / 完了トグルの取り消しは逆トグルではなく元の値へ) は [8/N](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents) に書きました。
 
 ## 制約を全部洗い直した
 
@@ -211,25 +217,48 @@ Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話
 
 結局そのあと、IntentTodo 側のドキュメントは **全部の記述に `[Apple]` (公式が明言) / `[measured]` (自分が実測) / `[inferred]` (そこからの推論) のラベルを付ける** 形に作り直しました。ここまで痛い目を見ておいて言うのもなんですが、機械的にラベルを打つのがいちばん確実だなと思っています。SDK が更新されたときに `[measured]` だけ優先的に洗い直せばいい、という運用上の利点も付いてきました。
 
+### 5 つ目の型: 1 つしか見ていないのに「見た」と思う
+
+もう 1 つ足すことになりました。**片側しか見ていないのに、確かめた気になる** というやつです。
+
+3/N に書いた「iOS アプリの出荷メタデータからスキーマが消えていた」件で、自分は最初「マクロが `@Property` を生成してくれていないのでは」と疑っていました。実際には生成されていて、全バンドルを並べたら **落ちているのは iOS アプリの 1 つだけ** だと分かります。macOS も visionOS も、パッケージ側も正常でした。見ていたのが 1 つだったから、原因の候補がぜんぶ「マクロ側の問題」に見えていたわけです。
+
+同じ形は前にもありました。`@Property(indexingKey:)` が iOS / macOS でしか vend されていない件は iOS destination のビルドだけ通していて気付かなかったし、`AppShortcutsProvider` がパッケージから集約されない件はパッケージ側のメタデータだけ見て「出ている」と判断していました。**片側しか見ていないと、別の原因に見えます。**
+
+なので運用としては「entity やメタデータまわりを触ったら複数 destination を回す」に加えて、**確かめるときは正常なはずの側も一緒に並べる** ことにしました。差分が 1 行で出るので、そもそも仮説を立てる必要がなくなります。5/N の「呼出元だけを変えて同じ Intent を走らせる」と同じで、比較対象を作ると一発なんだよなと思います。
+
 ### 実機検証待ちに積み増しになったもの
 
 洗い直した結果、「机上では確からしいけれど実機で確かめないと確定しない」という宿題がむしろ増えました。ここに並べておきます。
 
-- **`AppIntentsPackage` の重複宣言**: メタデータ上の重複は無いことまで確認済み。Siri / Shortcuts の実機ルーティング (`LNContextErrorDomain` 系) が本当に壊れないかは未確認なので、現状は重複させない運用のまま
-- **`allowedExecutionTargets` 未指定の Widget / Control Intent**: 実際どちらのプロセスで perform され、entity 解決がどこで走るのかを実機ログで見たい。`CompleteTodosIntent` だけは `[.main]` に固定済み
-- **`UISceneAppIntent`**: パッケージ内に probe を置いて iOS / My Mac / visionOS の 3 destination でビルドし、**Package スコープは障壁ではない** と確定しました。正しいガードは `#if canImport(_AppIntents_UIKit) && !os(watchOS)` です。watchOS がややこしくて、フレームワーク自体は存在するので `canImport` は true になるのに `UISceneAppIntent` 型が無くて、同時ビルドされる Watch App が落ちます。10/N の visionOS の話とまったく同じ形でした。ただマルチウィンドウの具体的な機能要求が無いので、実装自体は保留のままです
+- **App Shortcut のフレーズ**: `AppIntentsPackage` を公式手順どおり宣言する形に切り替えたので (3/N)、残っているのは **フレーズのルーティングだけ** です。しかも今はフレーズにパラメータを埋めた (「Complete 〜 in IntentTodo」) ので、候補の解決まで含めて実機で見たいところが増えました。AppIntentsTesting は型名で intent を引くのでこの経路を通りません
+- **`allowedExecutionTargets` 未指定の読み取り系 Intent**: 書き込み系は全部 `[.main]` に固定したので (2/N / 9/N)、残るのは読み取り系です。実際どちらのプロセスで perform され、entity 解決がどこで走るのかを実機ログで見たい
+- **Control をアプリ完全終了状態で叩いたときの体感**: 書き込み系を `[.main]` に固定したことで、アプリのバックグラウンド起動が挟まるようになりました。dialog も snippet も出ない面なので、遅延が実用上どうかは実機で見るしかありません
+- **`.reminders.list` 適合が実機の Siri / Apple Intelligence で効くか**: 統合メタデータに載っていることまでは確定しました (3/N)。AppIntentsTesting は型名で intent / entity を引くのでスキーマ経路を通らず、ここから先は手動確認の領域です
+- **`UISceneAppIntent`**: `#if canImport(_AppIntents_UIKit) && !os(watchOS)` という **ガードの形さえ間違えなければ Package スコープでも置ける** ことを確認したうえで、その後 `LaunchAppIntent` / `OpenTodoIntent` に採用しました。狙いはマルチウィンドウではなく cold start です (5/N)。実機で cold start の遷移を確かめるのが残りです
 - **reminder 本体スキーマ適合** (上の F): probe で要求仕様は確定したものの、`locationTrigger` が `PlaceDescriptor` を強制して SSU バグに当たるため **SDK 待ち**。実機検証というより待ちのタスク
-- **`.onAppIntentExecution` の cold start 問題**: そもそも今のコードベースでは `.onAppIntentExecution` をどこでも使っていない (`@Dependency` + `perform()` に完全移行済み) ので、現時点では検証対象が無い状態です。再導入するときに「`@State` の path が未構築」「シーンの activation conditions 未設定」「`supportedModes` に foreground が無い」の 3 仮説を潰す、というメモだけ残しました
+- **`.onAppIntentExecution` の cold start 問題**: そもそも今のコードベースでは `.onAppIntentExecution` をどこでも使っていない (`@Dependency` + `perform()`、それに `AppIntentSceneDelegate` に移行済み) ので、現時点では検証対象が無い状態です。再導入するときに「`@State` の path が未構築」「シーンの activation conditions 未設定」「`supportedModes` に foreground が無い」の 3 仮説を潰す、というメモだけ残しました
 
 このうち **Control まわりは実機で決着しました**。dialog も snippet も Control では提示されないこと、Control のフィードバックは `perform()` 完了時の自動リロードによるコントロール自身の再描画であること、それにともなって `.controlWidgetStatus(_:)` を撤去したことまで含めて [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書き直しました。実機の Control Center を触って初めて分かったことが多くて、シミュレータのビルドが通ったところで満足していると、到達不能なコードにも気付けないんだなというのは反省点です。
+
+## 公式サンプル 4 本と突き合わせた
+
+セッションの書き起こしを洗い直したのに続いて、WWDC 2026 の App Intents 系 **公式サンプル 4 本** (CometCal / UnicornChat / CosmoTunes / PhotosDomainExample) を落としてきて、自分の実装と 1 項目ずつ突き合わせるということもやりました。
+
+セッションとは出てくるものが違って、**セッションでは触れられない粒度の作法** がコード側に書いてあります。今回そこから拾ったのは、表示表現のローカライズ (ランタイム値をキーにしない)、Siri が subtitle を読み上げること、donation の置き場所、`attributeSet` と `indexingKey:` のキー衝突、onscreen annotation の適用先、といったあたりでした。どれも「知らないと踏むけれど、踏んでも壊れたように見えない」種類のもので、6/N と 8/N に反映しています。
+
+一方で、**サンプルにも古い書き方は残っています**。`openAppWhenRun` のような旧 API を使っているものもあるので、「サンプルにこう書いてあるから正しい」ではなく「今のドキュメントと突き合わせてどうか」まで見る必要がありました。
+
+取り込み方で 1 つ引っかかったのも書いておくと、**サンプルをリポジトリの中に展開してはいけません**。Xcode の同期グループがサンプルの `.xcodeproj` を拾って、追跡下の `project.pbxproj` に project reference として書き込んでしまいます (`.gitignore` は効きません)。リポジトリの外に置くのが安全でした。zip の実 URL は各ドキュメントページの JSON (`https://developer.apple.com/tutorials/data<path>.json` の `sampleCodeDownload.action.identifier`) から引けます。
 
 ## まとめ
 
 - 本編は「実機で詰まった話」、WWDC 2026 編は「採用していいか / 設計判断」と、軸を分けて書いている
 - 最初に並べた将来トピックのうち、Visual Intelligence / Interactive Snippets / Intent Modes の一部は WWDC 2026 編で片付いた
-- FoundationModels (端末内 LLM) は「やらないと決めた」もの。主眼から意図的に外している
-- 残りの検証待ち (watchOS / visionOS / Spotlight ラグ / macOS 細部 / LA crash 再現 / reminder 本体適合 / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の復帰 / `UndoableIntent`) は、手元の機材と検証コストで順番が決まる予定
+- FoundationModels (端末内 LLM) と `SpotlightSearchTool`、それに寄付 (`IntentDonationManager`) は「やらないと決めた」もの。主眼から外れるか、設計の核と両立しないため
+- 残りの検証待ち (watchOS / visionOS の実機 / Spotlight ラグ / macOS 細部 / reminder 本体適合 / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の復帰) は、手元の機材と検証コストで順番が決まる予定
 - 書き溜めた「制約」をセッション書き起こしと全数突き合わせたら、断定しすぎ・理由付けの誤り・出典の取り違えがまとめて出てきた。「セッションで説明されていたこと / API ドキュメントで知ったこと / 自分がビルドして観測したこと」、それに「そこから推論したこと」は、後から見分けられる形で分けて書いておかないと直せなくなる
+- 確かめるときは **正常なはずの側も一緒に並べる**。片側だけ見ていると、同じ現象がぜんぜん違う原因に見える
 
 書ける段階になり次第、ここから本編へ昇格させていきます。
 
@@ -237,6 +266,7 @@ Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-28**: 決着したものを反映 (`.foreground(.dynamic)` は当て先なしで終了 / `UndoableIntent` は採用 / 寄付と `SpotlightSearchTool` は「入れない」/ `UISceneAppIntent` は cold start 目的で採用 / watch の追加が無音で失敗していたのを修正)。実機検証待ちの一覧を現状に合わせて書き直し。「5 つ目の型: 片側しか見ていないのに確かめた気になる」と、公式サンプル 4 本との突き合わせの節を追加
 - **2026-08-13**: `#Predicate` の Optional 制約はマクロ固有と確定 (toolchain 差ではない)。`UISceneAppIntent` は Package スコープが障壁ではないと確定し、正しいガード (`&& !os(watchOS)`) を反映。知見に根拠ラベルを付ける運用に触れた
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: 「推論を実測と並べて書いてしまう」という 4 つ目の型を追加 (Control の snippet 非対応が実測ではなく肯定リストからの推論だった件)。Control まわりの実機検証待ちが決着したので一覧から外した

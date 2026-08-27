@@ -11,7 +11,7 @@ published: true
 :::
 
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 7 回目です。
-WWDC 2026 編の 2 本目で、引き続き `xcode27` ブランチでの検証になります (この編の前提は 6/N の冒頭を見てください)。
+WWDC 2026 編の 2 本目です (この編の前提は 6/N の冒頭を見てください)。
 
 今回は、IntentTodo の Entity を **システムのドメインに意味で適合させる** 話 (App Schema) と、「開く」「削除する」を **system intent プロトコル** に乗せた話です。
 そして、適合させようとして **途中で保留にした** 部分も正直に書きます。やってみて「ここは今は無理」と分かったのも 1 つの結論だと思っているので。
@@ -55,7 +55,7 @@ public enum TodoListType: String {
 
 ここで気付いたことがいくつかありました。
 
-- **`.reminders` ドメインは iOS 27+ 限定** でした。`'reminders' is only available in iOS 27.0 or newer` というエラーが出て、採用するには deployment を 27 世代へ上げる必要がありました (なのでこの検証は `xcode27` ブランチに隔離しています)。
+- **`.reminders` ドメインは iOS 27+ 限定** でした。`'reminders' is only available in iOS 27.0 or newer` というエラーが出て、採用するには deployment を 27 世代へ上げる必要がありました (この引き上げごと `main` にマージしたので、今はアプリのベースラインが iOS 27 です)。
 - スキーママクロが `typeDisplayRepresentation` を生成してくれるので、自分で書いていた分は **削除** しました。
 - 6/N で書いたプロパティマクロのときと同じで、スキーママクロも非 `Hashable` な backing を生やすので、`Hashable` の自動合成が壊れます。`==` / `hash(into:)` を明示実装で補いました。
 
@@ -69,10 +69,15 @@ public enum TodoListType: String {
 
 ```swift
 #if os(watchOS)
-public struct CategoryAppEntity: AppEntity, Hashable {
+public struct WatchCategoryAppEntity: AppEntity, Hashable {
     public static let typeDisplayRepresentation: TypeDisplayRepresentation = "List"
+    @Property(title: "Name")            // ← フォールバック側にも明示が要る (後述)
+    public var name: String
     // ... スキーマ無しの素の AppEntity として全プロパティを再宣言 ...
 }
+
+/// 呼出側は共通の名前で参照できるようにしておく
+public typealias CategoryAppEntity = WatchCategoryAppEntity
 #else
 @AppEntity(schema: .reminders.list)
 public struct CategoryAppEntity: Hashable {
@@ -84,6 +89,16 @@ public struct CategoryAppEntity: Hashable {
 幸い watchOS では Siri / Apple Intelligence のスキーマルーティング自体を使っていないので、機能的には何も失っていません。これも iOS destination だけビルドしていると露見せず、watchOS を含むフルビルドで初めて出るやつでした (ガードを外して watchOS 向けにビルドし直し、上のエラーがそのまま再現することも確認済みです)。ベータの間はこういう「後から対象プラットフォームが狭まる」変更も来るんだな、というのは学びでした。
 
 なおこの制約、**beta 3 でも beta 5 (27A5237l) でも継続** しています。SDK が上がるたびにガードを外してビルドし直していますが、そのたびに `'reminders' is unavailable in watchOS` が同じように出るので、フォールバックは当面必要なままです。後述の `.system` ドメイン側も同様でした。
+
+### フォールバック側は型名も分ける
+
+上のコードで watchOS 側だけ `WatchCategoryAppEntity` という別の型名になっているのには理由があって、これを最初に書いたとき (両方 `CategoryAppEntity` にしていたとき)、**iOS アプリの出荷メタデータから `.reminders.list` の適合がまるごと消えていました**。
+
+同じ mangled type name にスキーマ付きの形とスキーマ無しの形が両方あると、アプリの統合メタデータへのマージで **情報が少ない方が勝ちます**。iOS アプリは watchOS アプリを `IntentTodo.app/Watch/` に埋め込むので、iOS の出荷メタデータに watchOS 用のスキーマ無しの形が持ち込まれて、そちらに倒れていた、ということでした。プロパティも 0 件になります。
+
+型名を分ければ 2 つのエントリが共存してスキーマが残るので、`public typealias CategoryAppEntity = WatchCategoryAppEntity` で呼出側の名前だけ据え置きました。あわせて、フォールバック側にも `@Property(title:)` を明示しています。スキーマ版はマクロが `name` / `type` の `@Property` を生成してくれますが、素の `AppEntity` は自分で書かないと **プロパティ 0 件の entity** になります (渡せるけれど何も読めない、という状態です)。
+
+この壊れ方、**コンパイラにもビルド緑にも一切現れません**。切り分けの経緯と検出方法は 3/N の「統合メタデータでは『情報が少ない方』が勝つ」に書きました。ここで言いたいのは、**フォールバックを書いたら、それが本来の形を食い潰していないかまで見る** ということかなと思っています。watchOS のためのつもりで書いたものが iOS の機能を消していた、というのは想像していませんでした。
 
 ## 大きいスキーマで詰まる: Todo 本体を reminder にできなかった話
 
@@ -222,6 +237,35 @@ struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 
 ベータの間はこうやって途中で名前が変わることもあるんだな、というのを地で行く話でした。
 
+## 集中モードに乗せる: SetFocusFilterIntent
+
+system intent の仲間としてもう 1 つ、**集中モードごとに一覧の見せ方を変える** `SetFocusFilterIntent` も入れました。これは WWDC 2022 (セッション 10121) からある古株ですが、「システムが決めた場に自分の Intent を差し込む」という意味では `OpenIntent` / `DeleteIntent` と同じ系統です。設定 > 集中モード にアプリのフィルタとして現れて、Focus の切り替わりでシステムが `perform()` を呼んでくれます。
+
+IntentTodo では「カテゴリ / 急ぎのみ / 完了を隠す」の 3 パラメータにしました。書いてみると、他の Intent と性格が違うところが 4 つあります。
+
+**1 つ目は `allowedExecutionTargets` を宣言しないこと**です。2/N で「書き込み系はアプリ本体に固定」と書いたばかりですが、Focus filter の実行先は Focus の仕組みが決めます (アプリが動いていればアプリ、そうでなければ AppIntents Extension。セッション 10121 の 9:29)。こちらから固定しても意味がないし、将来 Extension を足したときに噛み合わなくなるので、ここにはあのルールを適用しませんでした。「全部に同じルールを当てる」が正しいとは限らない例です。
+
+**2 つ目は、AppIntents Extension が無いとアプリ未起動中の遷移を取りこぼすこと**。埋め合わせは `SetFocusFilterIntent.current` (同 11:47) で、起動時とフォアグラウンド復帰時に現在値を取り直しています。Focus filter が未設定だと throw するので、その場合は「絞り込みなし」に倒します。
+
+**3 つ目がいちばん怖くて、`notificationFilterPredicate` に一致しない通知は黙らされます** (同 13:15)。照合相手は `UNMutableNotificationContent.filterCriteria` なんですが、**criteria を付けていない通知は述語を返した瞬間に全部消えます**。5/N に書いたとおり、このアプリではコントロールの失敗通知が唯一の伝達手段なので、これが消えると「何も起きなかった」と区別できなくなります。なので失敗通知には専用の criteria を付けて、許可リストに常に含めるようにしました。
+
+```swift
+public var appContext: FocusFilterAppContext {
+    guard let allowed = resolvedFilter.allowedNotificationCriteria else {
+        return FocusFilterAppContext()          // 絞っていないときは述語を返さない
+    }
+    return FocusFilterAppContext(
+        notificationFilterPredicate: NSPredicate(format: "SELF IN %@", allowed)
+    )
+}
+```
+
+**4 つ目は、絞り込みの判定を 1 か所に集約すること**。読み手がリスト UI (アプリプロセス) とウィジェット (別プロセス) の 2 つに分かれるので、ウィジェットには App Group の `UserDefaults` 経由で設定だけを渡して、「どの Todo を残すか」は共通の関数を通します。ウィジェットの件数表示も絞り込み後の母数で数えないと、「表示 0 件なのに未完了 5 件」みたいな嘘になります。
+
+UI 側では **絞り込み中であることの表示と、その場での解除手段をセットで出す** ようにしました (標準のカレンダーが同じ形をしていて、セッションでも 2:04 でそう言っています)。表示だけだと、絞られていることに気付いたユーザーが設定アプリまで行くしかなくなるので。解除は永続化せず、次の Focus 遷移で畳みます。
+
+`displayRepresentation` は設定済みの内容を動的に反映します (同 8:07)。ここも 6/N に書いたとおり、ランタイム文字列は `"\(value)"` の補間形式で渡します。
+
 ## 検証できた深さ
 
 今回は以下です。
@@ -237,8 +281,10 @@ struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 - App Schema は自分の Entity / Intent を `reminders` 等のドメイン語彙に意味で適合させる仕組み。Siri / Apple Intelligence がコンテンツを意味理解できるようになる
 - 小スキーマ (`Category` = `.reminders.list` / `TodoListType` = `.reminders.listType`) は素直に適合できた。`.reminders` は iOS 27+ 限定、`Hashable` は明示実装が必要
 - 大スキーマ (`.reminders.reminder`) は **保留**。当初は「マクロ生成 init と自前 init が噛み合わない」と思っていたが、probe で洗い直したら本当の障害は `list` が非 optional 必須・`dueDate` が `DateComponents`・`locationTrigger` が `PlaceDescriptor` を強制して SSU バグに正面衝突、の 3 点だった。SDK 待ちで着手不可
+- watchOS 用のフォールバックは **型名も分ける**。同じ型名だと統合メタデータでスキーマ無しの側が勝って、iOS の出荷メタデータから適合が消える
 - system intent (`OpenIntent` / `DeleteIntent`) はプロトコル直適合でよい。`DeleteIntent` は `entities: [Entity]` の配列要求なので、UI 駆動の単体削除とは分けてバルク削除を新設した
 - system intent は AppShortcuts 無しでも意味解釈されるので、10 件枠を温存できる
+- `SetFocusFilterIntent` は「実行先を選べない Intent」。`notificationFilterPredicate` を返すと **criteria の無い通知が全部消える** ので、自分の失敗通知は許可リストに常置する
 
 次回は、[Siri 応答を賢くする対話的な Intent (`requestConfirmation` / `requestChoice` / `IntentDialog(full:supporting:)`) と、Interactive Snippet、寄付 (`IntentDonationManager`) の話 (8/N)](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents) を書きます。
 
@@ -246,6 +292,7 @@ struct ShowTodoSearchResultsIntent: ShowInAppSearchResultsIntent {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-28**: watchOS フォールバックの型名を分ける話 (同名だと iOS の出荷メタデータからスキーマが消える) を追加。`SetFocusFilterIntent` の節を追加。`.reminders` の iOS 27 要件が `main` のベースラインになったことを反映
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: reminder 本体スキーマの据え置き理由を probe の実測で全面的に書き換え。「マクロ生成 init が自前 init と衝突する」は誤りで、本当の障害は `list` の非 optional 要求・`dueDate` の型・`locationTrigger` 経由の SSU バグの 3 点。SDK 待ちで着手不可と確定
 - **2026-08-11**: `.system.searchInApp` の出典を **343** に再訂正 (2026-08-05 に 343 → 344 と直したのが誤りだった)。`OpenIntent` / `DeleteIntent` の「(セッション 344)」という帰属も、344 で扱われているのはスキーマ版の方だと注記。watchOS の schema unavailable が beta 5 でも継続することを確認。reminder 本体スキーマ再挑戦のリード (セッション 344 の CometCal パターン) を追加

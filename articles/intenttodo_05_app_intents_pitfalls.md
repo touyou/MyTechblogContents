@@ -12,7 +12,7 @@ published: true
 
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 5 回目です。
 
-本記事では、IntentTodo を作っていて実機で気付いた App Intents 運用上の落とし穴を 4 つまとめます。
+本記事では、IntentTodo を作っていて実機で気付いた App Intents 運用上の落とし穴を 5 つまとめます。
 ドキュメント上では分かりにくいけれど、実装してみてはじめて気付くタイプのものを集めました。
 1 つ目は後日の実測で解消したので、**ワークアラウンドを入れて、しばらく運用して、根拠が消えたので撤去した** という一連の流れごと残しています。
 
@@ -281,6 +281,31 @@ case .todoList, .incompleteTodos, .favoriteTodos:
 
 `NavigationModel` に filter を渡す口が無かったのが根本だったので、検索語で使っていた `pendingSearchText` と同じハンドシェイクで `pendingFilter` を新設して塞ぎました。教訓としては、**画面ターゲットの `AppEnum` に case を足すのと、`perform()` でその状態を書き込むのは別作業** ということかなと思っています。まとめ `case` + `break` は「宣言はあるが実装が無い」を静かに隠すので、`AppEnum` を足したら書き込み側もセットで、を意識しておきたいところです。
 
+### おまけ 3: cold start の 1 行を落とすと、アプリは開くのに画面に行かない
+
+遷移まわりでもう 1 つ。iOS / visionOS では `LaunchAppIntent` と `OpenTodoIntent` を `UISceneAppIntent` に準拠させて、`SceneDelegate` を `AppIntentSceneDelegate` にしています。狙いはマルチウィンドウではなく **cold start** の方でした。
+
+```swift
+final class SceneDelegate: NSObject, UIWindowSceneDelegate, AppIntentSceneDelegate {
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession,
+               options connectionOptions: UIScene.ConnectionOptions) {
+        // Intent がきっかけでシーンが作られた場合、その Intent はここに渡ってくる
+        guard let appIntent = connectionOptions.appIntent else { return }
+        appIntent.performNavigation(forScene: scene)
+    }
+
+    func scene(_ scene: UIScene, willPerformAppIntent appIntent: any UISceneAppIntent) {
+        appIntent.performNavigation(forScene: scene)   // 起動済みのシーンに対する実行
+    }
+}
+```
+
+肝は `connectionOptions.appIntent` の方で、**アプリが起動していない状態から Intent で開かれたときは `willPerformAppIntent` に来ません**。この 1 行を落とすと「アプリは開くが目的の画面に行かない」が cold start のときだけ起きます。起動中に試すと普通に動くので、たちが悪いです。
+
+実装で気を付けたのは、遷移の中身を `applyNavigation()` という 1 つのメソッドに集約して、`perform()` とシーン経由の両方からそれを呼ぶ (冪等) ようにしたことでした。別々に書くと片方だけ直す事故になって、しかも **cold start しか壊れないので気付けません**。ここもソースを走査して集約が維持されていることを見るテストを置いています。
+
+`performNavigation(forScene:)` はプロトコル要件が nonisolated なので、`@MainActor` を付けずに実装して中で `MainActor.assumeIsolated` しています。呼び出し元をシーンデリゲート (= メインスレッド) に限っているから成立する形です。
+
 ## 落とし穴 3: `IndexedEntity` 準拠だけでは Spotlight に検索されない
 
 `TodoAppEntity` を `IndexedEntity` に準拠させ、`attributeSet` も実装したのに **Spotlight で検索しても何も出てこない**、という現象に出会いました。
@@ -302,13 +327,13 @@ extension TodoAppEntity: IndexedEntity {
 
 ### 解決策: TodoService に hook を生やす
 
-IntentTodo では `TodoService` に Spotlight 操作を private hook として組み込みました。
+IntentTodo では `TodoService` に Spotlight 操作を hook として組み込みました。
 
 ```swift
 @MainActor
 public final class TodoService {
     public func create(...) throws -> TodoAppEntity {
-        defer { WidgetReloader.reloadAllWidgets() }
+        defer { Self.dataDidChange() }
         // ... persist ...
         let entity = TodoAppEntity(from: item)
         reindexSpotlight(entity)
@@ -316,37 +341,24 @@ public final class TodoService {
     }
 
     public func delete(todoId: String) throws {
-        defer { WidgetReloader.reloadAllWidgets() }
+        defer { Self.dataDidChange() }
         // ... persist ...
         try repository.delete(by: uuid)
         deindexSpotlight(id: todoId)
     }
 
-    private func reindexSpotlight(_ entity: TodoAppEntity) {
+    func reindexSpotlight(_ entity: TodoAppEntity) {
         #if os(iOS) || os(macOS)
         Task {
             do {
-                try await CSSearchableIndex.default().indexAppEntities([entity])
+                try await TodoSpotlightIndex.index().indexAppEntities([entity])
             } catch {
                 spotlightLogger.error("reindex failed: \(String(reflecting: error))")
             }
         }
         #endif
     }
-
-    private func deindexSpotlight(id: String) {
-        #if os(iOS) || os(macOS)
-        Task {
-            do {
-                try await CSSearchableIndex.default().deleteAppEntities(
-                    identifiedBy: [id], ofType: TodoAppEntity.self
-                )
-            } catch {
-                spotlightLogger.error("deindex failed: \(String(reflecting: error))")
-            }
-        }
-        #endif
-    }
+    // deindex 側もほぼ同じ形 (deleteAppEntities(identifiedBy:ofType:) を呼ぶだけ)
 }
 ```
 
@@ -356,21 +368,66 @@ mutation のたびに差分 index、起動時に全件 index、という構成�
 // IntentTodoApp.init() の中
 let todoService = TodoService.swiftDataBacked(container: modelContainer)
 AppDependencyManager.shared.add(dependency: todoService)
-Task { await todoService.indexAllForSpotlight() }  // 起動時に全件投入
+Task(priority: .utility) { await todoService.indexAllForSpotlight() }  // 起動時に全件投入
 ```
 
-### Spotlight 系のエラーは fire-and-forget でいい
+### index は名前付きにする
 
-ここでのエラーは Intent 呼び出し側に伝播させたくない (Todo 追加のたびに Spotlight 失敗で UI エラーが出るのは過剰) ので、Task で fire-and-forget + Logger.error にしています。
+上のコードで `CSSearchableIndex.default()` ではなく `TodoSpotlightIndex.index()` (中身は `CSSearchableIndex(name: "dev.touyou.IntentTodo.Todos")`) を使っているのは、公式ドキュメントの Note が **"use a named `CSSearchableIndex` type and not the default index. Use the default index only for prototyping and testing your code during development."** と言っているからです。最初は default index で書いていて、あとから移しました。
 
-ただし、CSSearchableIndex のエラーは `NSError(domain: CSSearchableIndexErrorDomain, code:)` で `code` を見れば `quotaExceeded` / `invalidIndexState` / `userInteractionRequired` / `indexUnavailable` が区別できるはずなので、自己修復ループ (N 回連続失敗で次回起動時に full reindex) にするとより堅牢になりそう、というのは今後の改善ポイントです。
+移行のときに 1 つ気を付けることがあって、**旧 default index に残ったアイテムがそのまま出るので同じ Todo が二重に見えます**。初回起動で 1 度だけ `CSSearchableIndex.default().deleteAllSearchableItems()` を呼んで掃除しました (default index にはこのアプリの Todo しか入れていないので、全消しで安全です)。
+
+### donate 側だけ書くと片手落ち
+
+`indexAppEntities` で donate する側だけ書いていたのも足りていませんでした。公式 (Making app entities available in Spotlight) が **受け側の実装も要求** しています。
+
+> If you donate app entities to a `CSSearchableIndex` using its `indexAppEntities(_:priority:)` method, **implement the `IndexedEntityQuery` protocol** in your entity's query object to handle reindexing.
+
+これが無いと、Spotlight 側が index を作り直したくなったときに応答先が無くて、次にアプリが起動して全件 index が走るまで検索に出てこなくなります。`TodoEntityQuery` に `reindexEntities(for:indexDescription:)` / `reindexAllEntities(indexDescription:)` を実装しました。
+
+書いてみて引っかかったのが 2 つ。まず **`@MainActor` を付けられません**。`CSSearchableIndexDescription` が non-Sendable なので、MainActor 隔離した実装には渡せなくて `Non-Sendable parameter type 'CSSearchableIndexDescription' cannot be sent from caller of protocol requirement` になります。同じファイルの `entities(for:)` などは `@MainActor` で問題ないので、ここだけ nonisolated にして内側で await する形にしました。もう 1 つは単体テストで直接呼びにくいことで、`CSSearchableIndexDescription` の public な init は `init(coder:)` だけなので、素直にインスタンスを作れません。
+
+### 起動のたびの全件 index は client state で省く
+
+全件 index を毎回やるのももったいないので、名前付き index の `beginBatch()` / `endBatch(withClientState:)` / `fetchLastClientState()` を使って、前回コミットしたダイジェストと一致していたら丸ごと飛ばすようにしました。
+
+```swift
+let state = TodoSpotlightIndex.clientState(
+    for: items.map { "\($0.id.uuidString)@\($0.modifiedAt.timeIntervalSinceReferenceDate)" }
+)
+let index = TodoSpotlightIndex.index()
+if !isRepairing, await TodoSpotlightIndex.lastClientState(of: index) == state {
+    return   // 前回から変わっていないので何もしない
+}
+index.beginBatch()                                    // batch は index 呼び出しの前に開く
+try await index.indexAppEntities(items.map { TodoAppEntity(from: $0) })
+try await index.endBatch(withClientState: state)      // 全件成功したときだけコミット
+```
+
+細かいところが地味に効きます。client state は 250 バイト上限なので SHA-256 で 32 バイトに畳んでいて、入力は **必ずソートしてから** hash します (fetch 順に依存すると、同じ内容でもダイジェストがぶれて結局毎回フル再インデックスになります)。ダイジェストの材料に **id だけでなく `modifiedAt` も混ぜる** のも要点で、id の集合が同じでも中身が変わることがあります (アプリ未起動中に他デバイスの編集が CloudKit で届いた、とか)。あと Todo が 0 件のときは batch を開かずに抜けています。空の no-op バッチで `endBatch` すると state が永続化されなくて、毎回フル再インデックスになりました。なお **batching は default index では使えない** (公式ヘッダに "Batching is unsupported for the CSSearchableIndex returned by the defaultSearchableIndex method" とあります) ので、名前付き index への移行が前提です。
+
+Swift の API 名が ObjC ヘッダと違う (`beginIndexBatch` → `beginBatch()`、`endIndexBatchWithClientState:` → `endBatch(withClientState:)`) のも、ヘッダ名のまま書いてビルドエラーになって気付きました。
+
+### Spotlight 系のエラーは fire-and-forget、ただし数える
+
+差分反映のエラーは Intent 呼び出し側に伝播させたくない (Todo 追加のたびに Spotlight 失敗で UI エラーが出るのは過剰) ので、Task で fire-and-forget + `Logger.error` にしています。
+
+ところがこれ、**上の省略と組み合わさると「壊れたまま復旧しない」状態を作れてしまいます**。差分反映が失敗しても呼出側には伝わらないし、client state は差分の成否と無関係に「最新」のままなので、次回起動の全件再インデックスも省略されます。結果、index が壊れた端末は Spotlight / Siri から Todo を引けないまま放置されて、しかも **アプリ内では正常に見えます**。自分で入れた最適化が、自分で書いた fire-and-forget と噛み合って穴になっていた形でした。
+
+なので連続失敗を数えるようにしました。
+
+- 閾値 (3 回) に達したら `UserDefaults` に「次回起動でフル再インデックス」の要求を立てて、client state が一致していても **省略しない**
+- 1 回の失敗で倒さないのは、`quotaExceeded` や一時的な `indexUnavailable` みたいなその場限りの失敗にフル再インデックスをぶつけても直らないからです
+- 成功したら連続カウントを畳む。フル再インデックスが通ったら要求を降ろす
+
+判定は全部 `UserDefaults` の読み書きなので、テスト用の suite を注入すれば実機の Spotlight を壊さずに全分岐を押さえられました。「fire-and-forget にする」と決めたなら、**その失敗をどこかで拾い直す口もセットで要る** んだなと思います。
 
 ### platform gate
 
 `CSSearchableIndex` は `#if canImport(CoreSpotlight)` で大半の Apple platform で使えますが、`TodoAppEntity: IndexedEntity` 自体が `#if os(iOS) || os(macOS)` で限定しているので、両者の gate を **同じものに揃える** のがビルドエラー回避のコツです。
 canImport に変えると visionOS で `CSSearchableIndex` は import できても `IndexedEntity` 準拠が無いのでビルドエラーになります。
 
-この「gate を揃える」話には続きがあって、逆に `canImport` でガードしていた Visual Intelligence 側が、SDK 更新後の visionOS 実機ビルドでだけ落ちるということがありました。`canImport` は import 可否しか見ないうえ、同じ OS でもシミュレータと実機で結果が変わることがある、というのが原因です。詳しくは [10/N の追記](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) に書きました。
+この「gate を揃える」話には続きがあって、逆に `canImport` でガードしていた Visual Intelligence 側が、SDK 更新後の visionOS 実機ビルドでだけ落ちるということがありました。`canImport` は import 可否しか見ないうえ、同じ OS でもシミュレータと実機で結果が変わることがある、というのが原因です。詳しくは [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) に書きました。
 
 ## 落とし穴 4: アプリ内の `Button(intent:)` から `requestConfirmation` は失敗する
 
@@ -407,6 +464,55 @@ if deleteButton.waitForExistence(timeout: 3) {
 
 `if` で包んであるうえ、探していたラベルが `"Delete"` (実際は `"Delete todo"`) だったので、**中身が一度も実行されないまま緑** でした。要素が見つからないときに素通りするテストは、テストが無いのと同じどころか「テストがある」という誤った安心感がある分たちが悪いなと思います。`if` を外して正しいラベルで assert し直して、詳細画面用のケースも足しました。
 
+## 落とし穴 5: 失敗が「無音」になる経路が 3 つあった
+
+最後は毛色の違う話で、**失敗しているのにどこにも出てこない** 経路をまとめて塞いだときの話です。クラッシュしてくれれば気付けるんですが、App Intents まわりは「静かに何も起きない」で終わる形が結構あります。
+
+### `@Dependency` の登録漏れはクラッシュではなく無音の失敗
+
+いちばん実害が大きかったのがこれで、**watch アプリから Todo を追加する手段が丸ごと死んでいました**。
+
+`AddTodoIntent.perform()` は最後に `navigationModel.dismissAddTodo()` を呼ぶので `NavigationModel` に依存しているんですが、`AppDependencyManager` にそれを登録していたのは iOS / macOS のアプリだけで、watch アプリは `ModelContainer` と `TodoService` しか登録していませんでした。watchOS シミュレータで「追加 → タイトル入力 → Add」まで操作すると、コンソールにこれが出ます。
+
+```
+AddTodoIntent failed to execute with error: Failed to retrieve dependency of type NavigationModel.
+Please register your dependency with AppDependencyManager before performing a dependent intent.
+```
+
+**クラッシュではありません** (`fatalError` ではなく Intent 実行の失敗)。なので画面は何も変わらず、エラー表示も出ません。ユーザーから見ると「Add を押しても何も起きない」だけです。
+
+厄介なのは、同じパッケージが全ターゲットにリンクされているので **プラットフォームごとに Intent の集合が変わらない** ことでした。iOS 向けに書いた Intent が watch でもそのまま生えていて、そこで要求される依存も同じです。「iOS で動いているから大丈夫」は根拠にならなくて、**依存の登録はプロセスごと・プラットフォームごとに全部揃える** 必要があります (2/N の表と同じ話が、また別の形で出てきました)。
+
+ちなみにこの経路には既存の UI テストもあったんですが、「追加画面へ遷移してボタンがあること」までしか見ていなかったので一度も踏まれていませんでした。落とし穴 4 の条件付き assert と同じで、**assert の手前で止まっているテスト** が緑を出し続けていた形です。
+
+### 通知が拒否されていると、コントロールの失敗はどこにも出ない
+
+落とし穴 2 に書いたとおり、Control からの失敗を伝える手段は **ローカル通知しかありません**。ということは、通知が拒否されているとその一本足が折れて、失敗が完全に無音になります。コントロールは前の状態のまま再描画されるので、「何も起きなかった」と区別が付きません。
+
+しかも `UNUserNotificationCenter.add` は **許可が無くても error を返しません** (システムが黙って捨てます)。なので `add` の完了を見ているだけでは検出できなくて、送る前に許可状態を見るしかありませんでした。
+
+```swift
+let center = UNUserNotificationCenter.current()
+let status = await center.notificationSettings().authorizationStatus
+guard status == .authorized || status == .provisional else {
+    logger.error("notification dropped: not authorized (status=\(status.rawValue))")
+    MissedFeedback.record(.notification)   // 「伝えられなかった」ことを残す
+    return
+}
+```
+
+`MissedFeedback` は App Group の `UserDefaults` に「この経路で伝えられなかった」という記録を置くだけの小さな仕組みです。**書き手が Control / Widget の Extension プロセスになり得る** ので、プロセスをまたげる場所に置く必要がありました。読み手はアプリの一覧画面で、設定アプリへのリンク付きのバナーを出して、閉じたら記録を消します。
+
+出す条件は「通知設定が無効なこと」ではなく **実際に取りこぼしたとき** にしています。ユーザーが意図的に切っている設定を毎回蒸し返したくないので、実害が出た 1 回目から出す、という線引きです。逆に経路が使えるようになったら (許可が下りた / 有効に戻った) 記録を消します。古い記録でバナーを出し続けると、それはそれで嘘になるので。
+
+### ライブアクティビティも同じ形だった
+
+同じ構図がもう 1 つあって、`Activity.request` の前に `ActivityAuthorizationInfo().areActivitiesEnabled` を見て抜ける、というのは必須なんですが (無効な端末で毎回 throw させるとエラーが溢れます)、**そこで無言 return すると、ユーザーは「期限が近い Todo がロック画面に出てこない」理由に到達できません**。
+
+なので抜ける前に `logger.warning` に残して (`error` にしないのは、ユーザー設定に沿った正常系だからです)、`MissedFeedback` に記録する形に揃えました。
+
+3 つとも「エラーは起きているのに、誰にも伝わらない」という同じ形で、しかも **アプリの中だけ見ていると全部正常に見えます**。Spotlight の自己修復もそうでしたが、伝える手段が 1 つしか無いところは、その手段が塞がれたときのことまで含めて設計しないといけないんだなと思いました。
+
 ## まとめ
 
 - **Live Activity からの AppEntity 解決でクラッシュする** → Primary / FromExtension Intent 分離で回避していたが、iOS 27 では再現しないことを実測できたので **撤去して 1 アクション 1 Intent に統一**。分けるなら理由は呼出元プロセスではなく振る舞いの違いで
@@ -414,15 +520,17 @@ if deleteButton.waitForExistence(timeout: 3) {
 - **Control Widget では dialog も snippet も出ない** → 成功は `perform()` 完了時の自動リロードによるコントロール自身の再描画で伝える。通知は失敗時だけ。読ませたい情報は Siri / Spotlight 側へ寄せる
 - **Control の Button と Toggle は「対象が固定されているか」で選ぶ** → `isOn` は provider が読み戻せる永続的な bool が要るので、対象が動くアクションは Toggle にできない。`SetValueIntent` は絶対値で受ける
 - `StaticControlConfiguration(kind:provider:)` + `ControlValueProvider` パターンで body を薄く保つ。provider のエラーは `try?` で潰さず throw する
-- **Spotlight は IndexedEntity だけでは index されない** → `CSSearchableIndex.default().indexAppEntities(...)` の明示登録が必要。TodoService の mutation hook と起動時の全件投入で組む
+- **Spotlight は IndexedEntity だけでは index されない** → `indexAppEntities(...)` の明示登録が必要。index は名前付きにして、受け側の `IndexedEntityQuery` もセットで実装する。起動時の全件 index は client state で省けるが、**省略と fire-and-forget を組み合わせると壊れたまま復旧しない** ので連続失敗を数える
 - **アプリ内の `Button(intent:)` から `requestConfirmation` は失敗する** → 確認を提示する面が無いため。Siri / Shortcuts / AppIntentsTesting では通るので気付きにくい。確認なし版を分けて、UI 側は `.confirmationDialog` で確認する
+- **失敗が無音になる経路を塞ぐ** → `@Dependency` の登録漏れはクラッシュせず「何も起きない」で終わる。通知の許可が無いと Control の失敗報告は消える (`add` は error を返さない)。伝える手段が 1 つしか無いところは、塞がれたときの記録と設定誘導までセットで作る
 
-これで本編 (1〜5) は一区切りです。ここから先は [WWDC 2026 編 (6/N)](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) で、`xcode27` ブランチで新しい App Intents の API を試してみて分かった設計判断をまとめていきます。検証待ち・将来書く予定のトピックは [番外編 (99/N)](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) に並べてあります。
+これで本編 (1〜5) は一区切りです。ここから先は [WWDC 2026 編 (6/N)](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) で、新しい App Intents の API を試してみて分かった設計判断をまとめていきます。検証待ち・将来書く予定のトピックは [番外編 (99/N)](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) に並べてあります。
 
 ## 更新履歴
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-28**: 落とし穴 5 (失敗が無音になる 3 経路 — `@Dependency` 登録漏れ / 通知拒否 / ライブアクティビティ無効) を追加。Spotlight の節を名前付き index + `IndexedEntityQuery` + client state による省略と自己修復まで書き直し (「自己修復ループは今後の改善ポイント」だったものを実装済みに)。cold start でシーン経由の遷移を取りこぼす話 (おまけ 3) を追加
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12 (2)**: Live Activity の entity 解決クラッシュが iOS 27 で **再現しない** ことを実測し、Primary / FromExtension 分離を撤去した経緯を追加 (タイトルの「FromExtension」も差し替え)。`WidgetCenter` がコントロールを更新しない件と、落とし穴 4 (アプリ内 `Button(intent:)` から `requestConfirmation` が失敗する) を追加
 - **2026-08-12**: 落とし穴 2 を全面的に書き直し。**Control では snippet も出ない** ことを実機 (呼出元だけを変えた比較) で確定し、切り分けの経緯と教訓を追加。Control を Toggle 化したのに伴い、Button / Toggle の使い分けと `SetValueIntent` を絶対値で受ける話を追加。前日に追記した `.controlWidgetStatus(_:)` は **撤去** した (公式ガイダンスに反していたうえ、当時の provider の predicate のせいで分岐が到達不能なデッドコードだった)。成功通知を全廃し失敗時のみに縮小。`LaunchAppIntent` の遷移先実装漏れの話を追加

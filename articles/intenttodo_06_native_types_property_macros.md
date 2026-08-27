@@ -13,7 +13,7 @@ published: true
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 6 回目です。
 
 ここから数本は、WWDC 2026 で増えた App Intents まわりの新要素を IntentTodo で実際に試してみて分かったことを書いていきます。
-作業は `xcode27` という別ブランチ (ベータ SDK 検証用、`main` には未マージ) でやっているので、本編 1〜5 とは少し毛色が変わります。
+作業は `xcode27` という別ブランチ (ベータ SDK 検証用) でやっていました。ひととおり検証が終わったので今は `main` にマージ済みで、アプリのベースラインも iOS 27 世代に上がっています。
 
 最初に断っておくと、この WWDC 2026 編は本編より **検証の深さが浅い** です。
 本編は「実機で詰まった話」に絞っていましたが、新 API は実機 (Siri / Visual Intelligence) まで通すのに端末や手動確認が必要なものが多くて、自分の手元だとビルド成立 (型レベル) と SPM / テストでの単体実行までしか到達できていないものが結構あります。
@@ -88,10 +88,10 @@ public var todoDescription: String?
 
 やってみて分かったことが 2 つあります。
 
-やってみて分かったことが 2 つあります。
-
 - 自然文の本文をどのキーに載せるかは少し迷いました。全文向けには `\.textContent` (`CSSearchableItemAttributeSet_Messaging.h` にある、メールやメッセージの本文全文を想定したキー) もあるんですが、Todo の詳細説明なら `CSDocuments` 側の `\.contentDescription` (「アイテムの説明文」) の方が意味的に近いと思ったので、そちらにしています。型で選べないわけではなくて、`EntityProperty.init(indexingKey:)` が取るのは `PartialKeyPath<CSSearchableItemAttributeSet>` だけなので `String?` でも `AttributedString?` でも同じオーバーロードが使えます。意味で選んだ、という話です。
 - `indexingKey:` 付きのオーバーロードは **iOS / macOS でしか vend されていません**。visionOS / watchOS では `extra argument 'indexingKey' in call` でビルドが落ちるので、上のコードのとおり `#if os(iOS) || os(macOS)` で素の `@Property` にフォールバックしています。しかもこれ、iOS destination のビルドでは何も起きず、**watchOS を含むフルビルドで初めて露見** します。entity まわりを触ったら複数 destination を回す、というのはこの後も何度か出てくる教訓です。なお Xcode 27 beta 2 でもガードを外して試したら同じエラーで落ちたので、この分岐は当面必要みたいです。
+
+あとから 1 つ事故に気付いて直しました。`indexingKey:` はプロパティを `CSSearchableItemAttributeSet` のキーにマップするものなので、**同じキーを `IndexedEntity.attributeSet` 側でも埋めていると衝突します**。どちらが勝つかは公式に定義されていません。IntentTodo は `todoDescription` を `\.contentDescription` にマップしているのに、`attributeSet` の方でも `contentDescription = "Completed" / "Incomplete"` を上書きしていたので、**セマンティック検索に載せたかった本文が固定文に置き換わりうる** 状態でした。完了状態は `keywords` で表現する形に変えて、`attributeSet` には `indexingKey:` で表現できない属性 (期限やキーワード) だけを書くようにしています。
 
 深さは他と同じくビルド成立 (B) までで、セマンティック検索が実際に賢くなるかは実機待ちです。
 
@@ -477,6 +477,73 @@ public struct GetTodoSummaryIntent: AppIntent {
 
 棲み分けとしては、99/N に書いた「通知の `appEntityIdentifiers` は永続 `AppEntity` 必須で `TransientAppEntity` は不可」という制約と表裏だと思っていて、**後から id で名指しされる名詞は `AppEntity`、その場で計算して返すだけの値は `TransientAppEntity`** と分かれている感じです。集計値に無理やり id を付けて永続 Entity に見せかけなくてよくなった、というのが実際に使ってみての感想でした。深さはビルド成立 (B) までで、Shortcuts で実際に条件分岐を組んで走らせるところは実機待ちです。
 
+## 名詞の「見せ方」の作法 — 公式サンプルと突き合わせて直したところ
+
+ここまでは Entity に何を持たせるかの話でしたが、WWDC 2026 の App Intents 系公式サンプル 4 本 (CometCal / UnicornChat / CosmoTunes / PhotosDomainExample) を落としてきて自分のコードと 1 項目ずつ突き合わせたら、**見せ方の方でいくつか間違えていた** ことが分かったので、そこも書いておきます。
+
+### ランタイム文字列は `"\(value)"` の補間で渡す
+
+`DisplayRepresentation(title:)` が取るのは `LocalizedStringResource` です。ここに `LocalizedStringResource(stringLiteral: todo.title)` を渡すと、**ランタイムの文字列がそのままローカライズキーになります**。翻訳テーブルに存在しないキーの引きが毎回走るし、キーが実行時に決まるので String Catalog の抽出対象にもなりません。サンプル 4 本はすべて補間形式でした。
+
+```swift
+// ❌ ランタイム値をキーにしている
+DisplayRepresentation(title: LocalizedStringResource(stringLiteral: title))
+
+// ✅ 補間形式 (キーは "%@" で、title は引数として渡る)
+DisplayRepresentation(title: "\(title)")
+```
+
+同じ理由で、**表示すべき subtitle が無いときは空文字ではなく `nil`** を返します (`subtitle` は `LocalizedStringResource?`)。空の `LocalizedStringResource("")` は空キーの引きになるので。3/N に書いたパッケージのローカライズと同じ「型としては通るのに翻訳から外れる」系の話で、この手のものはビルドでは絶対に出てきません。
+
+### Siri は subtitle を読み上げる
+
+CosmoTunes の `TimerEntity` / `AlarmEntity` にコメントで明記してあったんですが、`DisplayRepresentation` の subtitle は **音声で読まれます**。なので `"5:00"` のような位置指定の表記を入れると「ご、コロン、ぜろ、ぜろ」と読まれてしまいます。`Duration.formatted(.units(width: .wide))` や `Date.FormatStyle` の自然文表記を使え、ということでした。
+
+IntentTodo の `TodoAppEntity` の subtitle は `dueDate.formatted(date: .abbreviated, time: .omitted)` で最初から自然文だったのでセーフでしたが、**今後 subtitle に時刻を足すときに踏む** やつなので書き留めておきます。「表示に使う文字列」と思って書いたものが耳にも流れる、というのは Entity を Siri に見せる設計だと常に付いて回ります。
+
+### `synonyms:` と、画像の遅延クロージャ
+
+CosmoTunes は entity ごとに `synonyms:` を付けて Siri のマッチ幅を広げていて、画像は **トレーリングクロージャ形** で渡していました。テキストだけ必要な文脈では画像を解決させない、という意図です。
+
+```swift
+DisplayRepresentation(
+    title: "\(title)",
+    subtitle: "^[\(trackCount) track](inflect: true)",
+    synonyms: ["\(title) mix tape", "\(title) playlist"]
+) {
+    DisplayRepresentation.Image(systemName: "music.note.list")
+}
+```
+
+複数形は `^[\(n) track](inflect: true)` で inflection を効かせます。IntentTodo も Todo / Category / SubTask の 3 つを `synonyms:` + 遅延クロージャ形にして、集計 Entity の件数は `^[\(n) todo](inflect: true)` に直しました (それまで `count == 1 ? "todo" : "todos"` と手で書いていたところです)。
+
+組み立ては `makeDisplayRepresentation(...)` という static 関数に寄せました。理由は次の項目です。
+
+### `displayRepresentations(for:)` で候補一覧を軽くする
+
+`EntityQuery` には表示表現だけをまとめて返す口があります。公式いわく "Return full representations; the system materializes only the components it needs (for example, dropping a deferred image when only text is required)" で、候補一覧の描画で entity 本体を N 回組み立てるコストを避けるためのものです。
+
+既定の実装は `entities(for:)` を呼んでから 1 件ずつ `displayRepresentation` を読むので、IntentTodo だと「表示に使わない `CategoryAppEntity` の生成」がまるごと乗ってきます。`TodoEntityQuery` / `CategoryEntityQuery` / `SubTaskEntityQuery` の 3 つに実装して、いずれも **SwiftData のモデルから直接** `makeDisplayRepresentation(...)` を呼ぶ形にしました。表示表現の組み立てを static 関数に切り出したのは、ここで entity を作らずに同じ表現を返せるようにするためです。
+
+### 文字列の突き合わせは全部 `localizedStandardContains(_:)`
+
+もう 1 つ、地味だけど効く直しがありました。`EntityStringQuery.entities(matching:)` は **システムが絞り込んでくれない** ので自分でフィルタするんですが、そこに `lowercased().contains()` を使うとロケール非依存になって、かな / カナやダイアクリティカルマーク、トルコ語の I などを別物として扱います。
+
+適用先は `EntityStringQuery` に限りませんでした。「人が読む文字列同士を突き合わせる」場所は全部同じです。
+
+| 場所 | 突き合わせるもの |
+|---|---|
+| `TodoEntityQuery` / `CategoryEntityQuery` | Siri / Shortcuts が渡す文字列 ↔ タイトル・カテゴリ名 |
+| `SearchEverythingIntent` | `query` パラメータ ↔ タイトル・カテゴリ名 |
+| `TodoVisualIntelligenceQuery` | Visual Intelligence のラベル ↔ タイトル・カテゴリ名 |
+| リスト画面の検索フィールド | 入力文字列 ↔ タイトル |
+
+Visual Intelligence のラベルは英語主体なので最初は例外にしていたんですが、**突き合わせ先の Todo は日本語** なので例外にする理由がありませんでした。`localizedStandardContains` は自前の小文字化も要らなくなるので、10/N に書いた `labels.map { $0.lowercased() }` みたいな前処理も一緒に消えています。
+
+### サンプルにも古い書き方は残っている
+
+最後に、これは逆向きの学びですが、**公式サンプルを無批判に真似するのも危ない** です。UnicornChat の `DraftMessageIntent` や PhotosDomainExample の削除系 Intent は `static let openAppWhenRun = true` を使っていて、これは公式の `supportedModes` ドキュメントでは `.foreground(.immediate)` と同等の旧 API 扱いになっています。CometCal の `EventEntity.displayRepresentation` も `DateFormatter` をその都度生成していて、自分は `Date.FormatStyle` の方に寄せる派なのでそこは真似していません。サンプルは「今の推奨」ではなく「動く実例」だと思って読むくらいがちょうどよさそうです。
+
 ## 検証できた深さ
 
 正直に書いておくと、この回の内容は以下の深さです。
@@ -490,7 +557,7 @@ public struct GetTodoSummaryIntent: AppIntent {
 
 ## まとめ
 
-- WWDC 2026 編は `xcode27` ブランチでの検証で、本編より浅い (主に型レベル + 単体)。実機可否より「採用していいか / 設計にどう効くか」を書く
+- WWDC 2026 編は `xcode27` ブランチでの検証 (現在は `main` にマージ済み) で、本編より浅い (主に型レベル + 単体)。実機可否より「採用していいか / 設計にどう効くか」を書く
 - `@Property` でモデル属性をシステムに公開し、関連 (`category`) も Entity として持てる
 - `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する (`PlaceDescriptor` は SSU バグ回避で `String` に一時退避中。境界だけ直せば済んだのは二重表現のおかげでした)
 - `@ComputedProperty` (同期・軽い導出) と `@DeferredProperty` (非同期・要求時フェッチ、Spotlight 非 index) を使い分ける。どちらも出自は iOS 26 で、2026 の新 API ではない
@@ -498,6 +565,8 @@ public struct GetTodoSummaryIntent: AppIntent {
 - プロパティマクロは `Hashable` 自動合成を壊すので `==` / `hash(into:)` を明示実装する
 - `SyncableEntity` は CloudKit id をそのまま使っていれば適合を書き足すだけで済む
 - 集計値のように後から id で引かれないものは `TransientAppEntity` にすると、`EntityQuery` も永続化も無しで Shortcuts の条件分岐に載せられる
+- 表示表現は **ランタイム値を補間形式で渡す** (`stringLiteral:` はキー扱いになる)。subtitle は Siri が読み上げるので位置指定の書式を避ける。候補一覧は `displayRepresentations(for:)` で entity を作らずに返す
+- `indexingKey:` と `attributeSet` で同じ Spotlight キーを二重に埋めない。人が読む文字列の突き合わせは全部 `localizedStandardContains(_:)` に揃える
 
 次回は、[ここで Entity 化した `Category` を `@AppEntity(schema: .reminders.list)` に適合させた話と、Todo 本体を reminder スキーマに適合させようとして保留した話 (7/N)](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents) を書きます。
 
@@ -505,6 +574,7 @@ public struct GetTodoSummaryIntent: AppIntent {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-28**: 表示表現の作法 (補間形式 / Siri が読む subtitle / `synonyms:` と遅延クロージャ / `displayRepresentations(for:)` / `localizedStandardContains`) の節を、公式サンプル 4 本との突き合わせとして追加。`indexingKey:` と `attributeSet` で同じキーを二重に埋めていたのを訂正。検証ブランチが `main` にマージされたことを反映。重複していた 1 行を削除
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: `TodoEntityStore` の登録について「`App.init()` で 1 回登録すれば足りる」と書いていたのを訂正 (Widget Extension 側でも登録が要る)
 - **2026-08-11**: `\.textContent` は「SDK に露出していない」と書いていたが誤りで、実在する (`contentDescription` を選ぶ理由を型の制約から意味の制約に訂正)。`@ComputedProperty` の出自を 345 → **275** に再訂正 (2026-08-05 の訂正自体が誤りだった)。`PlaceDescriptor` の SSU バグは beta 5 でも未修正、判定は必ずクリーンビルドで行う旨を追加

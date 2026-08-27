@@ -212,6 +212,16 @@ public static var configuration: ModelConfiguration {
 
 「production でだけ fatalError、DEBUG では fallback」 という分岐は、SPM テストやプレビューを動かしつつ、production の不整合は TestFlight や App Store 審査の段階で確実に表面化させたい、という意図です。
 
+### ただしこの fallback、macOS では働かない
+
+その後 macOS の SPM テストで引っかかって分かったんですが、上の分岐の入口になっている `FileManager.containerURL(forSecurityApplicationGroupIdentifier:)` は、**プラットフォームで挙動が違います**。iOS は entitlement が無ければ `nil` を返しますが、**macOS は entitlement の無いプロセスでもパスを返します** (`~/Library/Group Containers/<id>`。ディレクトリは存在するけれど書き込みはできない、という状態です)。
+
+なので macOS では `sharedContainerURL` が `nil` にならず、DEBUG の fallback 経路にも入りません。開けない共有ストアをそのまま掴んで、`createContainer()` が `NSCocoaErrorDomain 256` / `SQLite 23` で throw します。「App Group が使えるかどうかの判定に `containerURL != nil` を使う」というのが、そもそも指標として成立していなかったわけです。
+
+テスト側の扱いは 2 つに分けました。**entitlement を要する経路は SPM テストで緑にしようとしない** ことにして、共有ストアを作るテストは `withKnownIssue(isIntermittent: true)` で包んでいます (entitlement のあるホストで走れば成功して、`isIntermittent` なのでその場合も緑のままです)。ストアを実際に使うテストの方は、`SharedModelContainer.createInMemoryContainer()` に切り替えました。
+
+テストを緑にするために production の分岐をいじると、いちばん守りたかった「production では確実に落とす」が壊れるので、テスト側を諦める方が筋がいいなと思っています。
+
 ## エラーログを早めに仕込む
 
 ModelContainer の作成失敗は `SwiftDataError(_error: .loadIssueModelContainer, _explanation: nil)` のような top-level 型しか出ず、原因が見えません。
@@ -257,15 +267,16 @@ public func incompleteCount() throws -> Int {
 - `cloudKitDatabase: .automatic` + entitlements に container + APS + Portal 側の capability 設定が必要
 - 全属性に default value、全リレーションを Optional `[T]?` にする
 - 旧スキーマのストアは削除して作り直す (開発中)
-- production の fallback は silently 壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく
+- production の fallback は silently 壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく。ただし macOS は entitlement 無しでも `containerURL` がパスを返すので、この分岐自体が効かない
 - ModelContainer の失敗ログは `String(reflecting:)` + `NSError.userInfo` まで吐く
 
-次回は [App Intents 運用で踏んだ落とし穴 3 つ (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Live Activity の entity 解決クラッシュ / Control Widget の結果表示 / Spotlight 統合の実装漏れ) をまとめて書きます。
+次回は [App Intents 運用で踏んだ落とし穴 (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Live Activity の entity 解決クラッシュ / Control Widget の結果表示 / Spotlight 統合の実装漏れ / 無音で失敗する経路) をまとめて書きます。
 
 ## 更新履歴
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-28**: macOS では entitlement 無しでも `containerURL` がパスを返すため DEBUG フォールバックが働かない、という話を追加 (テスト側は `withKnownIssue` / in-memory コンテナへ)
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-11**: SwiftData Group Lab のマイグレーション指針について、出典 (セッション 8017) が一次資料で確認できなかったため、伝聞である旨に書き換え
 - **2026-06-24**: マイグレーション担当プロセスをアプリ本体に固定する方針と、WWDC 2026 の SwiftData レビューを受けた節を追加

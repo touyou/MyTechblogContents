@@ -117,23 +117,16 @@ IntentTodo も共有パッケージが Widget Extension にリンクされてい
 
 では **指定しなかったとき** はどうなるかというと、これが「呼出元に応じて固定的に決まる」ではありませんでした。セッション 345 (15:59〜16:55) によると、未指定の Intent は **システムのヒューリスティクス** でプロセスが選ばれます (アプリが起動中ならアプリを優先、そうでなければ Extension を起こす)。SDK 側でも `IntentExecutionTargets` は `.default` を独立したケースに持つ `OptionSet` になっていて、「既定はシステムに委ねる」が型としてそう表現されていました。2/N の実行プロセスの表もこれを前提に書いています。
 
-### FromExtension 分離をこれで畳めるか? → 「畳めない」で確定
+### workaround を畳む道具にはならなかった (そして workaround の方が消えた)
 
-ここで自分は「もしかして `allowedExecutionTargets` を使えば、本編 5/N で書いた **Primary / FromExtension の 2 系統** を 1 つに畳めるんじゃないか?」と期待しました。結論から言うと **畳めません**でした。
+`allowedExecutionTargets` を見つけたとき、自分は「これで 5/N の Primary / FromExtension 分離を 1 つに畳めるのでは」と期待しました。結論は **畳めません**。制御できるのは **どのプロセスが `perform()` するか** だけで、クラッシュが起きていた **パラメータ解決を経由するかどうか** は変えられないからです。分離はパラメータの「型」を変えて解決そのものを踏まない形なので、実行先を動かしても解決は解決として走ります。
 
-決め手は、`allowedExecutionTargets` が制御するのはあくまで **どのプロセスが `perform()` するか** で、クラッシュが起きる **パラメータ解決 (entity resolution) を経由するかどうか** は変えられない、という点です。FromExtension (`todoId: String`) と Primary (`todo: TodoAppEntity`) を分けているのは、パラメータの「型」を変えて解決そのものを踏まないようにするためなので、実行先を動かしても解決は解決として走ります。`.widgetKitExtension` の存在を踏まえても、Live Activity Extension はそもそも指定対象に入っていません。LA のボタン用には `LiveActivityIntent` (アプリプロセスでの実行が保証されるプロトコル) もあるんですが、クラッシュは perform より手前の解決段で起きるので、解決そのものを踏まない String 版が結局必要でした。というわけで FromExtension は維持です。
-
-新しい API が出ると「これで前の workaround を畳めるかも」とつい期待するんですが、この宿題については逆に **ちゃんと裏を取らずに一度「畳めない」と思い込んでいた** 時期もあって (`.widgetKitExtension` の存在を見落としていました)、期待する方向にも決めつける方向にも転びうるんだなというのは教訓でした。
-
-### 分離そのものが要らなくなった
-
-この「畳めない」という結論、**前提の方が消えました**。Live Activity のボタン経由でも entity の事前解決はメインアプリプロセスで走ってクラッシュしない、と実機で確かめられたので、そもそも分ける理由が無くなっています。FromExtension 分離は撤去して 1 アクション 1 Intent に統一しました (経緯は [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls))。
-
-なので `allowedExecutionTargets` については「FromExtension を畳む道具にはならない」という結論だけが残ります。制御できるのは perform のプロセスであって entity 解決を踏むかどうかではない、という整理自体は変わりません。畳めたのは別の理由からだった、という格好です。
+ただ、この宿題は結局そっちでは解けませんでした。**前提の方が消えた** からです。Live Activity のボタン経由でも entity の事前解決はメインアプリプロセスで走ってクラッシュしない、と実機で確かめられたので、そもそも分ける理由が無くなって分離ごと撤去しました (経緯は [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls))。
 
 ここは自分としてはちょっと面白くて、**「この API で workaround を畳めるか」を延々考えていたけれど、答えは「workaround がもう要らない」だった** わけです。道具の側で解決しようとすると、前提が生きているかどうかを疑う機会を逃すんだなと思いました。
 
-この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化していました。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、今回 **公式に正しい設計だった** と裏が取れた格好です。「ウィジェット側で entity 解決のような重い処理を踏ませない」という分離の動機自体も、この実行モデルと整合しているなと思いました。
+この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化しています。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、公式に正しい設計だったと裏が取れた格好です。
+
 
 ## 複数の型を1つの結果で返す: @UnionValue
 
@@ -186,7 +179,9 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 これは「実装をミスった」のではなく「**API の設計上、自分のドメインには口が用意されていない**」という種類の壁で、ドキュメントを上から読んでいるだけだと「使えそう」に見えてしまうやつでした。
 実際に適合させようと手を動かして初めて、context の選択肢が音楽再生などに限定されていると分かったので、こういうのこそ記録に残す価値があるなと思っています。
 
-セッション 345 を洗い直したときに、iOS 27 で `RelevantEntities.shared.removeAllEntities(for:)` / `removeEntities(_:from:)` / `removeAllEntities()` という **寄付を取り消す側** の API が増えているのを見つけました。ただ、上に書いたとおり寄付する側の context が無い以上、消す側だけ増えても出番はやっぱり無いので、結論は据え置きのままです。`AppEntityContext` の方も 345 で `.audio(.workout(activityType:))` のような拡張が入ったんですが、増えたのは audio ドメインの中身で、reminders / todo 向けの口が開いたわけではありませんでした。
+この結論、SDK が上がるたびに確かめ直しているんですが、今のところ変わっていません。iOS 27 で **寄付を取り消す側** の API (`removeAllEntities(for:)` など) が増えましたが、寄付する側の context が無い以上は出番がありません。`AppEntityContext` のファクトリも `.audio(_:)` 1 つのままです。
+
+ついでに、SDK の公開シンボルを全部並べて「リポジトリのどこにも名前が出てこないもの」を洗ったこともあるんですが、iOS 27 で入っていて記録が無かったのは 4 つだけで、どれも採用する筋がありませんでした (`.requiresGPU` を宣言する `LongRunningTaskOptions`、公開イニシャライザが無くてアプリからは値を作れない `RunSystemShortcutIntent`、下線付きで公開 API として使えない `IntentResponseStream`、`@UnionValue` が生成する裏側のプロトコル)。**「まだ使っていない API」を数えるより、使えない理由を 1 行ずつ書き残す方が後で役に立つ** な、というのがこの棚卸しの感想です。
 
 ## 「使えるけど使わない」を決めた API の棚卸し
 
@@ -240,7 +235,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 - `EntityCollection<T>` は `.identifiers` で id だけ取れて entity 解決を回避できる。バルク処理で効く
 - `LongRunningIntent` は `performBackgroundTask` で時間を延ばせるが、`progress` を更新し続けないと打ち切られる
 - `CancellableIntent` は `onCancel:` + ループ内 `try Task.checkCancellation()`。perform は `@MainActor` にせず、必要なところだけ await でホップする
-- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ。未指定なら実行プロセスはヒューリスティクスで決まる。**FromExtension 分離はこれでは畳めなかった** — 制御できるのは perform のプロセスであって entity 解決を踏むかどうかではないため (分離自体は後日、クラッシュが再現しないと分かって撤去しました)
+- `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ。未指定なら実行プロセスはヒューリスティクスで決まる。制御できるのは perform のプロセスであって、entity 解決を踏むかどうかではない
 - 1 件だけ付けて止まっていた `allowedExecutionTargets` は、**書き込み系は全部 `[.main]` / 読み取り系は未指定** という方針に格上げした。宣言漏れはソース走査のテストで検出する
 - 「使えるけど入れない」も判断として残す。`.foreground(.dynamic)` は当て先が無い、`EntityPropertyQuery` は `EnumerableEntityQuery` で足りている、`PredictableIntent` は寄付ゼロだと動かない
 - `@UnionValue` で複数 Entity 型を 1 つの結果に混ぜられる。`public enum` は `: Sendable` 明示が必要
@@ -252,6 +247,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-31**: 撤去済みの FromExtension 分離をめぐる 3 段階の経緯 (畳めるか → 畳めない → そもそも要らなくなった) を 1 節に圧縮。`RelevantEntities` の結論が SDK 更新後も変わっていないことと、SDK の公開シンボル棚卸しの結果を反映
 - **2026-08-28**: `allowedExecutionTargets` を「書き込み系は全部 `[.main]`」という方針に格上げした話を追加。「使えるけど使わないと決めた API」の棚卸し (`.foreground(.dynamic)` / `EntityPropertyQuery` / `PredictableIntent` / `SpotlightSearchTool` ほか) を追加。`ProgressReportingIntent` は `LongRunningIntent` 経由ですでに採用済みだったことを反映
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: FromExtension 分離そのものが不要になった (LA 経由でもクラッシュしないと実測) ことを追記。`allowedExecutionTargets` で畳めないという結論自体は不変

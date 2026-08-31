@@ -238,29 +238,23 @@ struct IntentTodoWatchApp: App {
 
 `AppShortcutsProvider` の隣にある話として、`AppIntentsPackage` の置き場所にも触れておきます。IntentTodo は長らく「パッケージ側に 1 つだけ宣言して、**メインアプリターゲットには `includedPackages` 付きの `AppIntentsPackage` を重複宣言しない**」という運用でした。2026-04 に Shortcuts のルーティングが壊れた (`LNContextErrorDomain Code=2001`) ときに、重複宣言が原因だと判断したのが根拠です。
 
-ただこれ、あとで Xcode 27 beta 5 で再検証したら **そこまで断定できる根拠が無かった** ことが分かりました。アプリターゲットと Widget / Live Activity / watchOS の全 Extension ターゲットに、公式ドキュメントどおりの形 (`includedPackages` にパッケージ側の `TodoIntentsPackage` を並べた `AppIntentsPackage`) を足してビルドし直しても、統合メタデータ (`extract.actionsdata`) の `actions` / `entities` / `queries` の件数は宣言が無かったときと 1 件も違いません。重複は起きていませんでした。
+**この根拠は後で崩れて、今は公式手順どおりの形に戻しています。** アプリ / Widget / Live Activity / watchOS App の 4 ターゲットそれぞれに `includedPackages` 付きの `AppIntentsPackage` を宣言する形です。セッション 244 (23:29〜24:00) やセッション 275 (25:50)、それに公式ドキュメントを読むと、**この「利用側にも宣言する」形のほうが標準手順** として紹介されています。
 
-そもそもセッション 244 (23:29〜24:00) やセッション 275 (25:50)、それに `AppIntentsPackage` の公式ドキュメントを読むと、**この「利用側にも `includedPackages` 付きで宣言する」形のほうが標準手順** として紹介されています。当時のコミットを読み返してみても、Intent routing の修正・`@Dependency` パターンへの統一・重複 Intent の削除をまとめてやった大きな PR の中の出来事で、重複宣言だけを切り出して再現させた記録は残っていませんでした。当時のデバッグログで疑っていたのも「Widget Extension が `TodoAppIntents` を import しているせいで Shortcuts が Widget Extension を intent の提供元として選んでしまった」の方で、これは 2/N で書いた実行プロセス選択の話であって、宣言の書き方とは別軸です。
+切り替えの根拠は 3 つで、10/N に書いた検証の梯子 (AppIntentsTesting → Shortcuts → Spotlight → Siri) の下 3 段をそのまま当てました。
 
-「壊れた記憶」をそのまま制約として書き残すと、何と何を切り分けたのかが後から辿れなくなるんだな、というのが反省点でした。
-
-### 公式手順どおりに宣言する形へ切り替えた
-
-しばらく「重複宣言しない」まま様子を見ていたんですが、追い込みきったので **公式手順の側へ切り替えました**。アプリ / Widget / Live Activity / watchOS App の 4 ターゲットそれぞれに `includedPackages` 付きの `AppIntentsPackage` を宣言しています。2026-04 に外して以来の方針転換です。
-
-判断できるところまで持っていけたのは、10/N に書いた検証の梯子 (AppIntentsTesting → Shortcuts → Spotlight → Siri) をそのまま当てたからでした。根拠は 3 つあります。
-
-1. **クリーンビルドで metadata の件数が一致**。4 バンドルすべての `Metadata.appintents` の `actions` / `entities` / `enums` / `queries` / `autoShortcuts` が、宣言前の baseline と完全一致しました。しかも `actions` の 23 件は `Intents/` に置いた intent の型数 23 とちょうど一致していて、重複していないことが二重に確かめられます
-2. **AppIntentsTesting の全 22 テストがグリーン**。Siri / Shortcuts / Spotlight と同じインフラを通る経路で、intent の実行・entity の id 解決・Spotlight クエリ・view annotation が成立しました
+1. **クリーンビルドで metadata の件数が一致**。4 バンドルすべての `actions` / `entities` / `enums` / `queries` / `autoShortcuts` が宣言前の baseline と完全一致。しかも `actions` の 23 件は `Intents/` に置いた intent の型数と一致していて、重複していないことが二重に確かめられます
+2. **AppIntentsTesting が全部グリーン**。Siri / Shortcuts / Spotlight と同じインフラを通る経路で成立しました
 3. **Shortcuts アプリでの実機確認**。アクション一覧とパラメータ表示が壊れていないことを目で見ました
 
-残った未確認は **App Shortcut の「フレーズ」ルーティングだけ** です。AppIntentsTesting は型名で intent を引くのでフレーズ経路を通りません。ここは 10/N に書いたとおり Apple も手動確認を想定している領域なので、実機の Siri で登録フレーズを 1 つ言えば済みますし、壊れていたら 4 つの宣言ファイルを消せば元に戻せます。
+残った未確認は **App Shortcut の「フレーズ」ルーティングだけ** です。AppIntentsTesting は型名で intent を引くのでフレーズ経路を通りません。ここは Apple も手動確認を想定している領域なので、実機の Siri で登録フレーズを 1 つ言えば済みますし、壊れていたら 4 つの宣言ファイルを消せば元に戻せます。
 
-「実機でしか確かめられないから保留」で止めていたものが、**梯子の下 3 段を全部登ってみたら判断できる材料が揃っていた**、というのがここでの学びでした。実機検証が要るからと丸ごと寝かせるのではなくて、自動で確かめられるところまで先に登っておくと、残りの手動確認の範囲がぐっと小さくなります。
+2026-04 に「重複宣言が原因」と判断した当時のコミットを読み返してみても、Intent routing の修正・`@Dependency` パターンへの統一・重複 Intent の削除をまとめてやった大きな PR の中の出来事で、重複宣言だけを切り出して再現させた記録は残っていませんでした。デバッグログで疑っていたのも「Widget Extension が `TodoAppIntents` を import しているせいで Shortcuts が Widget Extension を intent の提供元として選んでしまった」の方で、これは 2/N で書いた実行プロセス選択の話であって、宣言の書き方とは別軸です。「壊れた記憶」をそのまま制約として書き残すと、何と何を切り分けたのかが後から辿れなくなるんだなというのが反省点でした。
+
+そして「実機でしか確かめられないから保留」で止めていたものが、**梯子の下 3 段を全部登ってみたら判断できる材料が揃っていた**、というのがもう 1 つの学びです。実機検証が要るからと丸ごと寝かせるのではなくて、自動で確かめられるところまで先に登っておくと、残りの手動確認の範囲がぐっと小さくなります。
 
 一方で、上の `AppShortcutsProvider` の制約の方は **この話とは独立していて、そのまま生きています**。アプリと Extension に `AppIntentsPackage` を足した状態でも、`AppShortcutsProvider` がパッケージ内にある限り `autoShortcuts` は 0 のままで、アプリターゲットへ移した瞬間だけ 0 → 8 になりました。2 つが絡んでいる可能性も疑っていたんですが、別々の話でした。
 
-### 統合メタデータでは「情報が少ない方」が勝つ
+### 統合メタデータのマージは「後勝ち」で、watchOS が必ず最後に来る
 
 `autoShortcuts` が集約されない話には続きがあって、**統合メタデータでもっと分かりにくい壊れ方** をもう 1 つ踏みました。7/N で書く `@AppEntity(schema: .reminders.list)` の適合が、**iOS アプリの出荷メタデータからだけ消えていた** というやつです。
 
@@ -276,15 +270,27 @@ Debug/IntentTodo.app                              プロパティ2件 schema=['L
 
 マクロはちゃんと仕事をしていて、パッケージ側の `.appintents` には `@Property` もスキーマ登録も出ています。落ちているのは **iOS アプリバンドルの統合メタデータだけ** で、macOS と visionOS のアプリバンドルは無事でした。自分が最初に見ていたのが iOS のバンドル 1 つだけだったので、「マクロが動いていない」ように見えていたわけです。
 
-iOS だけに効く違いとして残るのは「iOS アプリは watchOS アプリを `IntentTodo.app/Watch/` に埋め込む」ことでした。7/N に書くとおり watchOS では reminders スキーマが使えないので、`#if os(watchOS)` で素の `AppEntity` にフォールバックしています。**同じ型名にスキーマ付きの形とスキーマ無しの形が両方あると、統合の結果はスキーマ無しの側になる** ということでした。決め手はたまたま中途半端に stale だったビルド成果物で、片方だけ再生成された状態のときに 2 props と 0 props が混ざって、結果が 0 props になるのが見えました。「情報が少ない方が勝つ」というマージ規則です。
+iOS だけに効く違いは「iOS アプリは watchOS アプリを `IntentTodo.app/Watch/` に埋め込む」ことでした。7/N に書くとおり watchOS では reminders スキーマが使えないので、そこだけスキーマ無しの形になります。それが iOS の統合結果に持ち込まれていた、という話です。
 
-対処は **フォールバック側の型名を分ける** ことでした。`WatchCategoryAppEntity` / `WatchTodoListType` に改名して、呼出側には `public typealias CategoryAppEntity = WatchCategoryAppEntity` で同じ名前を見せています。mangled type name が別物になるので衝突せず、2 つのエントリが共存してスキーマが残ります。代償は iOS 側のメタデータに `WatchCategoryAppEntity` が 1 件増えることですが、スキーマ適合が出荷メタデータに届かない方がよっぽど重いので、そちらを取りました。
+ここは一度 **「情報が少ない方が勝つ」というマージ規則だ** と書いたんですが、それは観測から一段飛んだ推論でした。あとで `appintentsmetadataprocessor` を直接叩いて、入力だけを変えた最小再現を取ったら、実際はこうです。
 
-ついでに、フォールバック側にも `@Property(title:)` を明示しています。スキーマ版はマクロが `name` / `type` の `@Property` を生成してくれますが、素の `AppEntity` は自分で書かないと **プロパティ 0 件の entity** になります (渡せるけど何も読めない)。
+| 実測したこと | 結果 |
+|---|---|
+| 現行 (watch 側は別型名) | `TodoAppEntity` は `reminders.ReminderEntity` / 20 プロパティ |
+| watch スライスが同じ型名を宣言 | **`[]` / 10 プロパティ** |
+| 同じ入力で watch を **先に** 置く | `reminders.ReminderEntity` / 20 プロパティ (無傷) |
+
+つまり **勝敗はスキーマの有無ではなく、入力ファイルリストの後勝ち** でした。watchOS が勝つのは、Xcode が自動生成するファイルリストがパス順で `Debug-iphonesimulator` < `Debug-watchsimulator` になっていて、**watchOS が構造的に必ず最後に来る** からです。しかも失われるのはスキーマだけではなくて、**エントリが丸ごと置き換わります** (プロパティが 20 → 10 に減る)。突き合わせのキーもモジュール名を含まない型名なので、別モジュールで同名 entity を作っても衝突します。
+
+そして、このファイルリストは `WriteAuxiliaryFile ... DependencyMetadataFileList` として **Xcode が勝手に作っています**。こちらが書いたものではないし、除外する公開の手段もありません (`swift-build` 側にもプラットフォームのフィルタは無い)。**この制約はプロジェクトの構成ではなく Apple のビルドシステム側** です。裏付けとして、WWDC 2026 の App Intents 系公式サンプル 4 本は **どれも watch ターゲットを持っていません**。この組み合わせは公式サンプルで一度も踏まれていない、ということみたいです。Feedback (FB24570185) は出しました。
+
+対処は **フォールバック側の型名を分ける** ことでした。`WatchCategoryAppEntity` のように改名して、呼出側には `public typealias CategoryAppEntity = WatchCategoryAppEntity` で同じ名前を見せています。mangled type name が別物になるので衝突せず、2 つのエントリが共存してスキーマが残ります。代償は iOS 側のメタデータに 1 件増えることですが、スキーマ適合が出荷メタデータに届かない方がよっぽど重いので、そちらを取りました。
+
+ついでに、フォールバック側にも `@Property(title:)` を明示しています。スキーマ版はマクロが `@Property` を生成してくれますが、素の `AppEntity` は自分で書かないと **プロパティ 0 件の entity** になります (渡せるけど何も読めない)。
 
 この 2 つ、`autoShortcuts` の件と同じで **コンパイラにもビルド緑にも一切現れません**。パッケージ単体の `.appintents` は正常なので、アプリバンドルの統合メタデータを直接見るまで分からないやつでした。なので今は「linked package にはあるのにアプリバンドルに無いスキーマ」を検出するスクリプトを回しています。ハマったのが nested バンドルで、`IntentTodo.app/Watch/IntentTodoWatchApp.app` は iOS の products ディレクトリに居るのに中身は watchOS ビルドなので、隣の iOS パッケージと比べると誤検出します。ここは比較対象から外しました。
 
-教訓としては、**統合メタデータは「1 つのバンドルを見て正常だった」を根拠にしてはいけない** ということかなと思っています。自分は 2 回とも「アプリ側 1 つ」か「パッケージ側 1 つ」しか見ていなくて、並べた瞬間に答えが出ました。
+教訓は 2 つあります。**統合メタデータは「1 つのバンドルを見て正常だった」を根拠にしてはいけない**。自分は 2 回とも片側しか見ていなくて、並べた瞬間に答えが出ました。そしてもう 1 つ、**メカニズムは「変える要素を 1 つに絞った比較」でしか決まりません**。「スキーマ無しが勝つ」は結果としては合っていたけれど理由が違っていて、順序を逆にする実験を 1 回やれば分かったことでした。理由が違うと、Apple への要望の書き方まで変わります (「union を取れ」ではなく「後のエントリが前を丸ごと消さないこと / 消えるなら診断を出すこと」)。
 
 ついでに年代の整理も 1 つ。「Intent や Entity を Swift Package に置ける」ようになった時期を、自分はなんとなく WWDC 2024 (セッション 10134) 頃だと思っていたんですが、10134 が言っているのはむしろ逆で "Only frameworks are supported at this time. Libraries outside of a framework are not." でした。あの時点で対応していたのは Framework 形態だけで、SPM パッケージや static library に広がったのは 2025 のセッション 244 / 275 です。この記事で書いている「Intent をパッケージに置く」構成は、そんなに昔から成立していたわけではなかったんだなというのは、ちょっと意外でした。
 
@@ -340,6 +346,69 @@ StatusBadge(title: .copy("Completed"), ...)   // private let title: LocalizedStr
 
 回帰は SwiftLint のカスタムルールで見張っています。`Text("...")` の直書きを検出するだけの雑なルールですが、**この壊れ方はビルドでもテストでも検出できない** ので、静的に引っかけるしかありませんでした。確認は結局 export の件数比較で、`UI` パッケージが 71 → 97 件になって、増えたのがまさに漏れていた文言 (`Completed` / `No Results` / `Newest First` など) でした。
 
+## Intent のコピーは、リンク先ターゲットの main bundle にしか置けない
+
+View の方を直したので Intent のコピーも同じ形だろうと思っていたら、**まったく別の仕組みでした**。しかもこちらの方がたちが悪くて、日本語を入れるまで気付いていません。
+
+出発点の読みは「AppIntents のメタデータ経由でアプリ側の catalog に載るのは `title` / `parameterSummary` / `@Parameter(title:)` あたりで、`IntentDialog` と `IntentDescription` だけが抜けている」でした。**この前提が全部間違っていました**。ビルド済みの `extract.actionsdata` から「システムが引こうとしているキー」を全部数えてアプリの catalog と突き合わせたら、抜けていたのは 134 件中 113 件で、**`title` すら抽出されていません**。
+
+catalog に載っていた 22 キーの出どころを辿ると 2 つしかなくて、アプリターゲットに直書きした `shortTitle` 8 件と、`parameterSummary` 14 件でした。`title` が 7 件あるように見えていたのは、**同じ文字列を `shortTitle` にも書いていた偶然** です。`TodoAppIntents` は `defaultLocalization` も resources も持たないので、**このモジュールでは文字列抽出そのものが走っていませんでした**。
+
+### 「パッケージに catalog を持たせれば直る」は半分だけ正しい
+
+じゃあ View と同じように `defaultLocalization` + 空の catalog を足せばいいのかというと、抽出は確かに直ります (201 キーが一気に出てきました)。ここで「これが正解」と思いかけたんですが、**解決先が別** でした。
+
+- `TodoAppIntents_TodoAppIntents.bundle/ja.lproj/` に訳は入る
+- でも `LocalizedStringResource("Complete Todos")` は既定で `Bundle.main` を引くので当たらない
+- `bundle: .atURL(Bundle.module.bundleURL)` を明示すれば引ける — **が、intent の `title` に付けるとコンパイルエラー**
+
+```
+AppIntents requires 'LocalizedStringResource' to use the main bundle
+```
+
+メタデータ側も `{"key": "..."}` しか持たず bundle も table も記録しません。つまり **メタデータ経由の文言は main bundle 一択** で、コンパイラがそれを強制しています。View で使った `.copy(_:)` パターンは Intent には使えない、ということでした。パッケージ側に catalog を置いたままにすると「訳したのに引かれない死んだ catalog」になるので、戻しています。
+
+### 結局、手動キーで持ってスクリプトで漏れを見る
+
+採った形は、各ターゲット (アプリ / watch アプリ / LiveActivity / Widget) の `Localizable.xcstrings` に `extractionState: "manual"` でキーを入れる、です。コンパイラの後ろ盾が無いので、**メタデータのキー全部が catalog にあるか** をスクリプトで突き合わせています。
+
+副作用も 1 つあって、大文字小文字だけ違うキー (`todo` と `Todo` など) が同じ catalog に同居するとシンボル生成が衝突します。生成シンボルはどこからも使っていなかったので `STRING_CATALOG_GENERATE_SYMBOLS = NO` にしました。
+
+### ついでに見つかった、英語の文法を Swift で組み立てている箇所
+
+作業中に別の壊れ方も出てきました。
+
+```swift
+// ❌ "s" や "is"/"are" は catalog に載らないまま %@ に差し込まれる
+let categoryLabel = "incomplete todo"
+IntentDialog(full: "You have no \(categoryLabel)s.")
+```
+
+キーは `You have no %@s.` になるので訳せるんですが、`%@` に入るのは英語のままです。訳すと「incomplete todoはありません。」になります。単複を訳文側に持たせる形と `^[...](inflect: true)` に直しました (6/N の inflection と同じ話です)。
+
+### Siri のフレーズは「訳」ではなく「言い方」
+
+`AppShortcuts.xcstrings` だけは性格が違って、全キーが **String Set** (1 アクションに複数の言い回し) です。ここに要るのは訳ではなく **日本語話者が実際に言う言い方** で、語順も変わります (`Add a todo in ${applicationName}` → `${applicationName}でやることを追加`)。
+
+最初に入れた訳は、ここで 1 回失敗しています。
+
+| キー | 入れた ja | 何が同じだったか |
+|---|---|---|
+| `Snooze ${todo}` | 〜をスヌーズ / 〜をスヌーズする | `する` の有無 |
+| `Delete ${todo}` | 〜の〜を削除 / 〜から〜を削除 | 助詞 |
+| `Star ${todo}` | 〜をお気に入りに追加 / 〜をお気に入りにする | 語尾 |
+
+原因は **en 側が別語彙で経路を増やしているのを訳に写せていなかった** ことでした (`Snooze` / `Delay`、`Star` / `Favorite`、`Delete` / `Remove`)。日本語は自然に訳すと同じ語彙に寄るので、「スヌーズ / 後回しにする / 先送り」のように **語彙の方を意図的に散らす** 必要があります。バリエーションを増やしたつもりが助詞違いを並べているだけ、というのはやりがちだなと思いました。
+
+なお「パラメータ有りと無しで同じ言い方になる」のは意図的です。指定なしで呼ばれたときに Siri が聞き返せるよう、パラメータ無しのフレーズを 1 つ残す、というルールの方が優先します。
+
+### `AppEnum` の表示名は UI からも引ける
+
+ローカライズの流れでもう 1 つ。Intent のパラメータに使っている `AppEnum` を UI のピッカーにも出すとき、**文言をもう 1 組 UI 側の catalog に持つ必要はありません**。`AppEnum` の祖先の `CaseDisplayRepresentable` が `localizedStringResource` を default 実装で生やしているので、`Text(option.localizedStringResource)` で `caseDisplayRepresentations` の文言がそのまま出ます。
+
+解決先はアプリターゲットの main bundle、つまり上で手動キーとして入れたものです。結果として **Siri とアプリ UI で同じ文言** が出ます。文言を 2 か所に持たなくていいのは地味に効きました。
+
+
 ## まとめ
 
 - Extension target は薄いスキャフォルドに留めて、View / 状態管理 / データ取得は SPM パッケージに移送する
@@ -347,9 +416,11 @@ StatusBadge(title: .copy("Completed"), ...)   // private let title: LocalizedStr
 - pbxproj の `platformFilter = ios;` を見落とすと macOS ビルドで Embed エラーが出る
 - ターゲット依存をなるべく minimum に保つため、`TodoService.swiftDataBacked(container:)` のような薄いファクトリを TodoAppIntents 側に置く
 - `AppShortcutsProvider` をアプリ本体に置く制約は健在。一方「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を書いてはいけない」の方は誤りで、**公式手順どおり各ターゲットで宣言する形に切り替えた**
-- 統合メタデータは **同じ型名に 2 つの形があると情報が少ない方が勝つ**。iOS アプリは watch アプリを埋め込むので、watchOS 用フォールバックの型名は分けておく
+- 統合メタデータのマージは **同じ型名のエントリがあると後の入力が前を丸ごと置き換える**。iOS アプリは watch アプリを埋め込み、しかも watchOS が構造的に必ず最後に来るので、watchOS 用フォールバックの型名は分けておく
 - コンテナ生成の失敗は `try!` にしない。落とすかどうかは「そのプロセスで表示できるものが残っているか」で決める
 - パッケージに View を置いたら、`defaultLocalization` + String Catalog + `Bundle.module` を通す口 (`LocalizedStringResource.copy(_:)`) をセットで用意する
+- **Intent のコピーは仕組みが別**。メタデータ経由の文言は main bundle 一択で、コンパイラがそれを強制する。パッケージ側の catalog は使えないので、リンク先ターゲットに手動キーで持ってスクリプトで漏れを見る
+- Siri のフレーズ (`AppShortcuts.xcstrings`) は訳ではなく **言い方** を並べる。語彙を意図的に散らさないと、助詞違いを並べただけになる
 
 次回は [SwiftData + CloudKit 同期で踏んだスキーマ要件と落とし穴の話 (4/N)](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) を書きます。
 
@@ -357,6 +428,7 @@ StatusBadge(title: .copy("Completed"), ...)   // private let title: LocalizedStr
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-31**: 統合メタデータのマージ規則を訂正。「情報が少ない方が勝つ」は推論で、実際は **入力ファイルリストの後勝ち** (watchOS が構造的に必ず最後)。失われるのはスキーマだけでなくエントリ全体で、突き合わせキーはモジュール名を含まない型名。Apple のビルドシステム側の制約と確定し、Feedback (FB24570185) を出したことを追記。「Intent のコピーは、リンク先ターゲットの main bundle にしか置けない」の節を新設 (自動抽出されるのは `parameterSummary` だけ / パッケージ側 catalog は解決されない / `IntentDialog` で英語の屈折を組み立てない / フレーズは語彙を散らす / `AppEnum` の表示名は UI からも引ける)
 - **2026-08-28**: 統合メタデータで watchOS フォールバックがスキーマを消していた話 (型名を分けて解消) を追加。コンテナ生成失敗の扱い (`try!` を使わない / コンプリケーションだけ落とさない) と、SPM パッケージの UI コピーと String Catalog の節を追加。App Shortcut のフレーズをパラメータ化するときの候補件数の注意を追加
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: `includedPackages` 付き `AppIntentsPackage` を 4 ターゲットで宣言する公式手順へ切り替え。metadata 件数の一致 / AppIntentsTesting 22 テスト / Shortcuts 実機確認の 3 つを根拠にした

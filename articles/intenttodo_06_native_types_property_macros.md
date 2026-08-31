@@ -66,7 +66,7 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 `@Property(title:indexingKey:)` の `indexingKey` に `CSSearchableItemAttributeSet` の KeyPath を渡すと、そのプロパティの値が Spotlight のセマンティックインデックスへ宣言的にマップされて、意味ベースの検索や Q&A の対象になります。5/N で書いた `CSSearchableIndex` の明示登録 (キーワード検索の経路) とは併存できて、その上にセマンティックな経路が足される形です。
 
 ```swift
-#if os(iOS) || os(macOS)
+#if os(iOS) || os(macOS) || os(visionOS)
 /// The title of the todo item (semantically indexed via `.title`).
 @Property(title: "Title", indexingKey: \.title)
 public var title: String
@@ -89,7 +89,11 @@ public var todoDescription: String?
 やってみて分かったことが 2 つあります。
 
 - 自然文の本文をどのキーに載せるかは少し迷いました。全文向けには `\.textContent` (`CSSearchableItemAttributeSet_Messaging.h` にある、メールやメッセージの本文全文を想定したキー) もあるんですが、Todo の詳細説明なら `CSDocuments` 側の `\.contentDescription` (「アイテムの説明文」) の方が意味的に近いと思ったので、そちらにしています。型で選べないわけではなくて、`EntityProperty.init(indexingKey:)` が取るのは `PartialKeyPath<CSSearchableItemAttributeSet>` だけなので `String?` でも `AttributedString?` でも同じオーバーロードが使えます。意味で選んだ、という話です。
-- `indexingKey:` 付きのオーバーロードは **iOS / macOS でしか vend されていません**。visionOS / watchOS では `extra argument 'indexingKey' in call` でビルドが落ちるので、上のコードのとおり `#if os(iOS) || os(macOS)` で素の `@Property` にフォールバックしています。しかもこれ、iOS destination のビルドでは何も起きず、**watchOS を含むフルビルドで初めて露見** します。entity まわりを触ったら複数 destination を回す、というのはこの後も何度か出てくる教訓です。なお Xcode 27 beta 2 でもガードを外して試したら同じエラーで落ちたので、この分岐は当面必要みたいです。
+- `indexingKey:` 付きのオーバーロードは **watchOS / tvOS では vend されていません**。`extra argument 'indexingKey' in call` でビルドが落ちるので、上のコードのとおり素の `@Property` にフォールバックしています。しかもこれ、iOS destination のビルドでは何も起きず、**watchOS を含むフルビルドで初めて露見** します。entity まわりを触ったら複数 destination を回す、というのはこの後も何度か出てくる教訓です。
+
+  このガード、長らく `#if os(iOS) || os(macOS)` と書いていて、visionOS も除外していました。SDK の availability を 1 つずつ確かめ直したら **visionOS では普通に使える** (`IndexedEntity` も `CSSearchableIndex.indexAppEntities` も `IndexedEntityQuery` も visionOS SDK に居ます) と分かったので、今は `|| os(visionOS)` を足しています。visionOS の出荷メタデータにもちゃんと `Indexed` が付きました。
+
+  ただこれ、**Apple が途中で対応を広げたのか、当時の自分の切り分けが間違っていたのか、今からは判別できません**。当時の記録に「どの SDK で、どの面がどう落ちたか」を書いていなかったからです (たぶん watchOS で落ちたのを visionOS にも広げて書きました)。availability を記録するときは **落ちた面・試した面・測った SDK を書き分ける**、というのがここでの教訓でした。
 
 あとから 1 つ事故に気付いて直しました。`indexingKey:` はプロパティを `CSSearchableItemAttributeSet` のキーにマップするものなので、**同じキーを `IndexedEntity.attributeSet` 側でも埋めていると衝突します**。どちらが勝つかは公式に定義されていません。IntentTodo は `todoDescription` を `\.contentDescription` にマップしているのに、`attributeSet` の方でも `contentDescription = "Completed" / "Incomplete"` を上書きしていたので、**セマンティック検索に載せたかった本文が固定文に置き換わりうる** 状態でした。完了状態は `keywords` で表現する形に変えて、`attributeSet` には `indexingKey:` で表現できない属性 (期限やキーワード) だけを書くようにしています。
 
@@ -236,28 +240,67 @@ extension TodoAppEntity: Transferable {
 - `IntentPerson(identifier:name:handle:)` は **全引数が必須** でした。`handle` を省くと `Missing arguments for parameters 'identifier', 'handle'` になるので、無いものは明示的に `nil` を渡します。
 - export closure は `async throws` なので、担当者や場所が無い Todo は **`throw` してその表現ごと出さない** 形にしました。空っぽの `IntentPerson` を返すより、「この Todo に人の表現は無い」とシステムに伝わる方が筋がいいと思います。
 
-### beta 3 で `PlaceDescriptor` を `@Parameter` から一時退避した
+### SDK バグで `@Parameter` だけ `String` に退避している
 
-ここまでさんざん「ネイティブ型で受ける」と書いておいて何なんですが、**Xcode 27 beta 3 で `PlaceDescriptor` を `@Parameter` / `@Property` から外して、いったん場所名の `String` に退避しました**。
+ここまでさんざん「ネイティブ型で受ける」と書いておいて何なんですが、**`AddTodoIntent.location` だけは今も場所名の `String`** です。SDK のバグを踏むためで、Feedback (FB24548956) を出して待っている状態です。
 
-きっかけは Xcode Cloud が赤くなったことで、ログを追うと `AppIntentsSSUTraining` (Generate SSU asset files) のフェーズが `PlaceDescriptor` のパラメータを SSU の variable に変換するときに、裏側のシステム Entity 型名 `GeoToolbox.PlaceDescriptorEntity` をそのまま variable 名として使っていて、ドットが入っているせいで `^[a-zA-Z_][a-zA-Z_$0-9]*$` の正規表現に落ちてエラーを emit していました。厄介なのは手元の `xcodebuild` が最終的に exit 0 (build succeeded) で返ってくるところで、ローカルだけ見ていると気付きません。Xcode Cloud は emitted error があると失敗扱いにするので、そこで初めて表に出てきました。
+きっかけは Xcode Cloud が赤くなったことでした。ログを追うと `AppIntentsSSUTraining` (Siri の音声理解の学習アセットを作るフェーズ) が、`PlaceDescriptor` のパラメータを SSU の variable に変換するときに、裏側のシステム Entity 型名 `GeoToolbox.PlaceDescriptorEntity` をそのまま variable 名に使っていて、**ドットが入っているせいで検証器の正規表現 `^[a-zA-Z_][a-zA-Z_$0-9]*$` に落ちて** いました。生成器と検証器が食い違っている形なので、アプリ側でできることは「その型を使わない」しかありません。
+
+厄介なのが壊れ方で、手元の `xcodebuild` は exit 0 (`** BUILD SUCCEEDED **`) で返ってきます。Xcode Cloud が emitted error を失敗扱いにするので、そこで初めて表に出てきました。実害は「該当 Intent だけ」ではなく、**そのターゲットの全 App Shortcut が音声理解の学習アセットを失う** ことです (`nlu/` が丸ごと生成されなくなります)。
+
+#### 発火条件はもっと狭く、対象の型はもっと広かった
+
+長らく「`PlaceDescriptor` を `@Parameter` にも `@Property` にも置けない」と書いていたんですが、Feedback に出す材料を作るために最小プロジェクトで 1 条件ずつ測り直したら、**`@Property` 側は裏が取れていませんでした**。
+
+| 形 | 結果 |
+|---|---|
+| `@Parameter var place: PlaceDescriptor?` + `AppShortcutsProvider` に登録 | **エラー** |
+| 同じ Intent を `AppShortcutsProvider` から外す | 緑 |
+| entity の `@Property var place: PlaceDescriptor` (スキーマ適合の入れ子) | 緑。`nlu/` も生成される |
+| `@Parameter var place: String?` に変えただけの対照 | 緑 |
+
+SSU の variable は「**App Shortcut が参照する Intent のパラメータ型名**」から作られるので、entity の `@Property` はそもそも variable になりません。当時「`@Property` でも発生する」と記録した probe は、`@Parameter` の probe と同居していたんだと思います。
+
+逆に、対象の型は `PlaceDescriptor` 固有ではありませんでした。SDK の swiftinterface をなめると `_SystemIntentValue` に適合する型は 5 つあって、確かめた 4 つが全部同じ形で落ちます (`LinkPresentation.LinkMetadata` / `MediaIntents.AudioSearch` / `Photos.PHAsset` も同様)。どれも公式が「サポートされるパラメータ型」の **Other system types** として明記しているものです。
+
+さらに、**リリース版の Xcode 26.6 でも再現しました**。`PlaceDescriptor` の `_SystemIntentValue` 適合は iOS 26 からなので、ベータ特有の話ではなく **26 世代から出荷されているバグ** だった、ということになります。Apple の公式サンプル (UnicornChat) に 13 行足すだけでも同じエラーが出ます。
+
+#### 分かったので entity 側は戻した
+
+というわけで、**`TodoAppEntity.location` は `PlaceDescriptor?` に戻しました**。退避が要るのは `AddTodoIntent.location` (App Shortcut に登録済み Intent の `@Parameter`) だけです。
+
+戻したら副産物がありました。退避していた間、`ValueRepresentation` は `TodoPlace` 経由で組み直していたので `latitude` / `longitude` に `nil` を渡していて、**座標が落ちていました** (住所表現だけを export していた)。entity が `PlaceDescriptor` を持つようになったので、モデルに緯度経度があれば `.coordinate` 表現がそのまま Maps へ流れます。
+
+不幸中の幸いだったのが、この節で書いた「入力と公開はシステム型、保存は primitive、境界で変換」の二重表現にしていたおかげで、**退避も復帰も触ったのが境界だけで済んだ** ことでした。モデルは最初から `locationName` + 緯度経度の primitive なので、`@Model` もマイグレーションも一切触っていません。ネイティブ型を保存層まで通す設計にしていたら、SDK バグひとつで永続化スキーマまで巻き添えになっていたはずです。
+
+#### 判定は必ずクリーンビルドで
+
+検証で 1 つ気を付けることがあって、**SSU のタスクは incremental ビルドだと前回のエラーをそのままログに再表示してきます**。`Metadata.appintents` が変わっていないとタスク自体が再実行されないためで、編集直後のビルドが緑でも、SSU セクションのタイムスタンプが編集前のままだったりします。「直った」とも「まだ落ちてる」とも誤読できる形なので、判定は DerivedData ごと消してからにしないといけません。ビルドログを再現性の判定に使うなら、**そのログがいつ生成されたものか** まで見る、というのは地味に効く教訓でした。
+
+## `parameterSummary` は Shortcuts 編集画面の allowlist
+
+Entity の話から少し逸れますが、`@Parameter` を足すときにセットで踏むところなので書いておきます。
+
+`AddTodoIntent` にネイティブ型のパラメータをいろいろ足したあと、**それらが Shortcuts の編集画面に 1 つも出ていない** ことに気付きました。原因は `parameterSummary` で、Apple のガイダンスがこう明言しています。
+
+> `ParameterSummary` is not cosmetic — it is the allowlist for which parameters the Shortcuts editor surfaces. […] every other `@Parameter` is **silently omitted** from the editor UI, even though it still exists and still resolves.
+
+編集行になるのは **`Summary("...")` の補間に出てくるもの** と **trailing のブロックに列挙したもの** だけです。`AddTodoIntent` の summary は `Summary("Add todo titled \(\.$title)")` だけだったので、`dueDate` / `isFavorite` / `estimatedDuration` / `assignee` / `location` は **Shortcuts からそもそも設定できませんでした**。`UpdateTodoIntent` に至っては、8/N で書いた「部分更新の三状態」を作り込んだ 6 パラメータが全部隠れています。
 
 ```swift
-// 本当はこう書きたい (SDK が直ったら戻す)
-// @Parameter(title: "Location", description: "Place associated with the todo")
-// public var location: PlaceDescriptor?
-
-@Parameter(title: "Location", description: "Place associated with the todo")
-public var location: String?
+public static var parameterSummary: some ParameterSummary {
+    Summary("Add todo titled \(\.$title)") {
+        \.$dueDate          // ← この列挙が無いと、どれも Shortcuts で設定できない
+        \.$isFavorite
+        \.$estimatedDuration
+    }
+}
 ```
 
-自分の書き方が悪いというより SDK 側のバグくさいので、退避はあくまで暫定です。ただ **beta 4 でも beta 5 (27A5237l) でも同じエラーが再現した** ので、まだ戻せていません。SDK が更新されるたびに退避コミットを revert してクリーンビルドし直す、というのを beta 追従のチェック項目にしています。
+見落としていたのは、**ビルドが緑で、Siri から名指しすれば動く** からでした。Shortcuts アプリを実際に開かないと気付けない類なので、判定は生成物側で機械的にやるのが良さそうです (`Metadata.appintents` の `otherParameterIdentifiers` に並びます)。
 
-判定のときに 1 つ引っかかったのが、**SSU のタスクは incremental ビルドだと前回失敗したときのエラーをそのままログに再表示してくる** ことでした。beta 5 の検証中、これで一瞬「まだ落ちてる」と誤読しかけています。直ったかどうかを見るときは必ず DerivedData を消してからにする必要があって、ビルドログを再現性の判定に使うなら、そのログがいつ生成されたものかまで気にしないといけないんだなというのは、地味に効く教訓でした。
+「`@Parameter` を足した」は「書き込む経路ができた」を意味しない、というのがここでの学びでした。今は **Intent が変えられるものは全部 `parameterSummary` に載せる** をルールにしています。
 
-不幸中の幸いだったのが、この節で書いた「入力と公開はシステム型、保存は primitive、境界で変換」の二重表現にしていたおかげで、**触ったのが境界だけで済んだ** ことでした。モデル (`TodoItem`) は最初から `locationName` + 緯度経度の primitive なので、`@Model` もマイグレーションも一切触っていません。ネイティブ型を保存層まで通す設計にしていたら、SDK バグひとつで永続化スキーマまで巻き添えになっていたはずで、そこは分けておいてよかったなと思いました。
-
-もう 1 つ、上に書いた `Transferable` の `ValueRepresentation` は **そのまま残せています**。SSU の variable になるのは `@Parameter` / `@Property` の型であって、export 表現は対象外だからです。なので「入力は String に退避しているけれど、書き出しは今も `PlaceDescriptor`」という状態で、`TodoPlace.descriptor(name:latitude:longitude:)` で場所名から descriptor を組み直して export しています。緯度経度を Intent から受け取る口だけが一時的に閉じている形です。
 
 ## @ComputedProperty と @DeferredProperty
 
@@ -290,6 +333,13 @@ public var subtaskProgress: String {
 ```
 
 `@DeferredProperty` は **Spotlight の index には含まれず、Siri / Shortcuts にも自動送出されない** という契約になっていて、要求時のフェッチを前提にしています。リレーション越しの重い値をうっかり全件 index に載せてしまう事故を防げるので、棲み分けとしては納得感がありました。
+
+この 2 つ、最初は「重い値を逃がすための道具」くらいに思っていたんですが、7/N でスキーマ適合をやったら **どちらも別の用途で効きました**。
+
+- `@ComputedProperty` は **名前の付け替え** に使えます。スキーマが要求する綴り (`note` / `creationDate` / `isFlagged`) とアプリの既存名が違うとき、別名を足すだけで満たせるので、モデルのリネームが要りません
+- `@DeferredProperty` は **その場のオブジェクトを読まずに id から引き直す** ための道具でもあります。SwiftData は削除済みオブジェクトの配列属性を読むと trap するので、`tags` / `urls` のような配列は deferred にして逃がしました (4/N)。スキーマ要求は deferred のままでも満たせます
+
+「軽い / 重い」の軸だけで選ぶものだと思っていたら、**スナップショットに値を持たない** という性質そのものが効く場面があったわけです。
 
 ここで 2 つハマりどころがありました。
 
@@ -414,31 +464,20 @@ IntentTodo では「今の Todo リストの集計」を返す `TodoListSummaryE
 public struct TodoListSummaryEntity: TransientAppEntity {
     public static let typeDisplayRepresentation: TypeDisplayRepresentation = "Todo List Summary"
 
-    @Property(title: "Total Todos")
-    public var totalCount: Int
-
     @Property(title: "Pending Todos")
     public var pendingCount: Int
 
     @Property(title: "Overdue Todos")
     public var overdueCount: Int
 
-    // ... completedCount / favoriteCount も同じ形
+    // ... totalCount / completedCount / favoriteCount も同じ形
 
     public var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(
-            title: "\(pendingCount) pending, \(overdueCount) overdue",
-            subtitle: "\(totalCount) total (\(completedCount) completed, \(favoriteCount) favorited)"
-        )
+        DisplayRepresentation(title: "\(pendingCount) pending, \(overdueCount) overdue")
     }
 
-    public init() {}
-
-    // 値を渡す方の init も別に用意しておく
-    public init(totalCount: Int, completedCount: Int, pendingCount: Int, overdueCount: Int, favoriteCount: Int) {
-        self.totalCount = totalCount
-        // ...
-    }
+    public init() {}                          // システムが要求する場面がある
+    public init(pendingCount: Int, ...) { }   // 値を渡す方も別に用意しておく
 }
 ```
 
@@ -452,24 +491,16 @@ public struct TodoListSummaryEntity: TransientAppEntity {
 返す側の Intent はこんな感じで、`.background` で集計だけして値と dialog を返します。
 
 ```swift
-public struct GetTodoSummaryIntent: AppIntent {
-    public static var supportedModes: IntentModes { .background }
-
-    @Dependency
-    var todoService: TodoService
-
-    @MainActor
-    public func perform() async throws
-        -> some IntentResult & ReturnsValue<TodoListSummaryEntity> & ProvidesDialog {
-        let summary = try todoService.summarize()
-        return .result(
-            value: summary,
-            dialog: IntentDialog(
-                full: "You have \(summary.pendingCount) pending todos, \(summary.overdueCount) of which are overdue.",
-                supporting: "\(summary.pendingCount) pending, \(summary.overdueCount) overdue."
-            )
+public func perform() async throws
+    -> some IntentResult & ReturnsValue<TodoListSummaryEntity> & ProvidesDialog {
+    let summary = try todoService.summarize()
+    return .result(
+        value: summary,
+        dialog: IntentDialog(
+            full: "You have ^[\(summary.pendingCount) pending todo](inflect: true), \(summary.overdueCount) overdue.",
+            supporting: "\(summary.pendingCount) pending, \(summary.overdueCount) overdue."
         )
-    }
+    )
 }
 ```
 
@@ -549,9 +580,9 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 正直に書いておくと、この回の内容は以下の深さです。
 
 - **ビルド成立 (型レベル)**: 全部 OK。`Duration` / `PersonNameComponents` / `PlaceDescriptor` / 各プロパティマクロ / `SyncableEntity` / 後から足した `TransientAppEntity` はコンパイルが通り、API 採用としては妥当だと判断しています。
-- **単体 (SPM / テスト)**: Entity 変換まわりは確認済み。
+- **単体 (SPM / テスト)**: Entity 変換・`ValueRepresentation` の export・`parameterSummary` の生成物は、AppIntentsTesting と出荷メタデータの検査で確認済みです (10/N)。
 - **実機 (Siri が実際にネイティブ型ピッカーを出すか、deferred property がいつ呼ばれるか)**: 未確認です。ここは端末での手動確認が要るので、できたら追記します。
-- `PlaceDescriptor` だけは上に書いたとおり今は SSU のバグ回避で `String` に退避しているので、ネイティブ型としての検証は beta 2 時点のものになります。
+- `PlaceDescriptor` は entity の `@Property` としては戻していますが、`AddTodoIntent` の `@Parameter` だけは SDK バグ (FB24548956) の回避で `String` のままです。
 
 なので本記事は「これらの API を採用して設計に組み込むと、こういう構造になる」という設計判断の記録として読んでもらえればと思います。
 
@@ -559,8 +590,10 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 
 - WWDC 2026 編は `xcode27` ブランチでの検証 (現在は `main` にマージ済み) で、本編より浅い (主に型レベル + 単体)。実機可否より「採用していいか / 設計にどう効くか」を書く
 - `@Property` でモデル属性をシステムに公開し、関連 (`category`) も Entity として持てる
-- `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する (`PlaceDescriptor` は SSU バグ回避で `String` に一時退避中。境界だけ直せば済んだのは二重表現のおかげでした)
-- `@ComputedProperty` (同期・軽い導出) と `@DeferredProperty` (非同期・要求時フェッチ、Spotlight 非 index) を使い分ける。どちらも出自は iOS 26 で、2026 の新 API ではない
+- `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する
+- SSU training のバグが出るのは **App Shortcut に登録した Intent の `@Parameter` に system value 型を置いたとき** だけ。entity の `@Property` は SSU の variable にならないので踏まない。`PlaceDescriptor` 固有でもベータ特有でもなく、iOS 26 世代から出荷されている (FB24548956)
+- **`parameterSummary` は Shortcuts 編集画面の allowlist**。載せ忘れたパラメータは黙って編集できなくなる (ビルドは緑、Siri から名指しすれば動く)
+- `@ComputedProperty` (同期・軽い導出) と `@DeferredProperty` (非同期・要求時フェッチ、Spotlight 非 index) を使い分ける。どちらも出自は iOS 26 で、2026 の新 API ではない。**スナップショットに値を持たない** という性質は、スキーマ要求名の付け替えや、削除済みオブジェクトを読まないための逃がしにも効く
 - Entity は `@Dependency` を使えないので、共有コンテナは `TodoEntityStore` に置いて参照する。`AppDependencyManager` とは別々の登録なので、アプリと Widget Extension の両プロセスで登録する
 - プロパティマクロは `Hashable` 自動合成を壊すので `==` / `hash(into:)` を明示実装する
 - `SyncableEntity` は CloudKit id をそのまま使っていれば適合を書き足すだけで済む
@@ -568,12 +601,13 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 - 表示表現は **ランタイム値を補間形式で渡す** (`stringLiteral:` はキー扱いになる)。subtitle は Siri が読み上げるので位置指定の書式を避ける。候補一覧は `displayRepresentations(for:)` で entity を作らずに返す
 - `indexingKey:` と `attributeSet` で同じ Spotlight キーを二重に埋めない。人が読む文字列の突き合わせは全部 `localizedStandardContains(_:)` に揃える
 
-次回は、[ここで Entity 化した `Category` を `@AppEntity(schema: .reminders.list)` に適合させた話と、Todo 本体を reminder スキーマに適合させようとして保留した話 (7/N)](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents) を書きます。
+次回は、[ここで Entity 化した `Category` と Todo 本体を reminders ドメインのスキーマに適合させた話 (7/N)](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents) を書きます。
 
 ## 更新履歴
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-31**: `PlaceDescriptor` の節を全面的に書き換え。SSU バグの発火条件は **App Shortcut 登録済み Intent の `@Parameter` だけ** と切り分けられたので、entity の `@Property` は `PlaceDescriptor?` に戻した (退避中に落ちていた座標も export されるようになった)。バグが `PlaceDescriptor` 固有でもベータ特有でもないこと、Apple へ報告済み (FB24548956) を追記。`indexingKey:` のガードに visionOS を追加 (以前の「visionOS でも落ちる」という記述は、当時どの SDK で何が落ちたかを書き残していなかったため真偽を判別できず)。`parameterSummary` が Shortcuts 編集画面の allowlist である話を新設
 - **2026-08-28**: 表示表現の作法 (補間形式 / Siri が読む subtitle / `synonyms:` と遅延クロージャ / `displayRepresentations(for:)` / `localizedStandardContains`) の節を、公式サンプル 4 本との突き合わせとして追加。`indexingKey:` と `attributeSet` で同じキーを二重に埋めていたのを訂正。検証ブランチが `main` にマージされたことを反映。重複していた 1 行を削除
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: `TodoEntityStore` の登録について「`App.init()` で 1 回登録すれば足りる」と書いていたのを訂正 (Widget Extension 側でも登録が要る)

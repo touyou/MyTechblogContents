@@ -24,7 +24,7 @@ CloudKit 互換にするためには次を満たす必要がありました。
 5. `@Attribute(.unique)` / `DeleteRule.deny` は使わない
 6. 旧スキーマで作られた既存ストアは削除する
 
-ハマりどころは 3 と 4 と 6。順に書きます。
+ハマりどころは 3 と 4 と 6。順に書きます。あわせて、CloudKit とは直接関係ないけれど同じ「モデルに何を置けるか」の話として踏んだものも 2 つ足しました。
 
 ## entitlements とコード設定
 
@@ -222,6 +222,65 @@ public static var configuration: ModelConfiguration {
 
 テストを緑にするために production の分岐をいじると、いちばん守りたかった「production では確実に落とす」が壊れるので、テスト側を諦める方が筋がいいなと思っています。
 
+## ハマりどころ 5: そもそも属性にできない型がある
+
+CloudKit 互換の話とは別に、**SwiftData の属性にできない型** でも 1 回転びました。7/N で書く reminders スキーマ適合のために、Todo に繰り返しルールを持たせようとしたときです。
+
+```swift
+@Model
+public final class TodoItem {
+    public var recurrenceRule: Calendar.RecurrenceRule?   // ← コンパイルは通る
+}
+```
+
+`Calendar.RecurrenceRule` は `Codable` なので、素直に置けそうに見えます。**コンパイルも通ります**。ところがアプリを起動すると落ちます。
+
+```
+EXC_BREAKPOINT (SIGTRAP) / libswiftCore _assertionFailure
+  SwiftData ... x10
+  IntentTodo one-time initialization function for schema
+```
+
+落ちる場所が `ModelContainer` 生成 **より前** の、schema の一度きりの初期化なので、症状がかなり分かりにくいです。自分の場合は UI テストが全ケース「起動直後にクラッシュ」になって、原因の当たりが全然つきませんでした。フィールドを外して単一の `testAppLaunches` を通すことで、ようやく切り分けています。
+
+対処は、この記事でずっと書いている **CloudKit 互換 primitive + 境界で組み立て** と同じ形にすることでした。`recurrenceFrequency: String?` + `recurrenceInterval: Int = 1` で保存して、Entity の境界で `Calendar.RecurrenceRule` に組み直します。場所 (`locationName` + 緯度経度) や担当者と同じパターンです。
+
+CloudKit 互換のために primitive に落とす、という制約が結果的にこっちの地雷も避けてくれていた、というのはちょっと面白いところでした。「モデルは枯れた primitive、リッチな型は境界で作る」を守っていれば、そもそも踏まなかったやつです。
+
+## ハマりどころ 6: 削除済みオブジェクトの配列属性を読むと trap する
+
+これはさらに分かりにくかったので、詳しく書いておきます。
+
+`tags: [String]` のような **配列の属性** をモデルに足して、それを Entity や View から読むようにしたら、**削除のテストだけ** がアプリのクラッシュで落ちるようになりました。
+
+```
+libswiftCore _assertionFailure
+  SwiftData x3
+  TodoItem.tags.getter
+  TodoAppEntity.init(from:)
+```
+
+**SwiftData は削除済みオブジェクトの配列属性を読むと trap します**。スカラーの属性は最後の値を返すので耐えるんですが、配列は駄目でした。
+
+なぜ削除済みのオブジェクトを読むのかというと、詳細画面が削除直後にもう 1 度 body を評価するからです。そのとき `@Query` の結果にはまだ削除済みのオブジェクトが入っていて、そこで配列を読んで落ちます。
+
+厄介なのが、**`!todoItem.isDeleted` のガードが効かない** ことでした。同じトレースで再発します。この時点で `isDeleted` はまだ `false` なんです。
+
+効いたのは **その場のオブジェクトを読まずに、id から引き直す** 形でした。Entity 側は `@Property` をやめて `@DeferredProperty` にして (消えた Todo は「見つからない」に落ちるだけになります)、View 側は `body` の中で読まずに `@State` のスナップショットへ写して、`.task(id: todo.modifiedAt)` で更新します。契機に `modifiedAt` を使えるのは **スカラーだから** で、削除済みでも読めます。
+
+```swift
+// ❌ body の中でモデルの配列属性を読む
+if !todo.tags.isEmpty { TagRow(tags: todo.tags) }
+
+// ✅ スナップショットに写す。更新は id から引き直す
+@State private var tags: [String] = []
+// ...
+.task(id: todo.modifiedAt) { tags = await loadTags(id: todo.id) }
+```
+
+いちばんの教訓は、**この trap は「1 回直した」では終わらない** ことでした。自分は Entity 側で直した数日後に、View 側で同じ罠を新しく作り込んでいます。読む場所を増やすたびに再発するので、**`@Model` の配列属性は `body` から読まない** をルールとして決めました。シートに渡すときも値渡しにしています (content クロージャは提示中に再評価されうるので、そこで読むと同じ口が残ります)。
+
+
 ## エラーログを早めに仕込む
 
 ModelContainer の作成失敗は `SwiftDataError(_error: .loadIssueModelContainer, _explanation: nil)` のような top-level 型しか出ず、原因が見えません。
@@ -268,6 +327,8 @@ public func incompleteCount() throws -> Int {
 - 全属性に default value、全リレーションを Optional `[T]?` にする
 - 旧スキーマのストアは削除して作り直す (開発中)
 - production の fallback は silently 壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく。ただし macOS は entitlement 無しでも `containerURL` がパスを返すので、この分岐自体が効かない
+- `Calendar.RecurrenceRule` のように **コンパイルは通るのに schema 初期化で trap する型** がある。CloudKit 互換のために primitive へ落としていると、結果的にこれも避けられる
+- **削除済みオブジェクトの配列属性は読めない** (スカラーは耐える)。`isDeleted` のガードでは防げないので、`body` から `@Model` の配列属性を読まず、id から引き直す
 - ModelContainer の失敗ログは `String(reflecting:)` + `NSError.userInfo` まで吐く
 
 次回は [App Intents 運用で踏んだ落とし穴 (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Live Activity の entity 解決クラッシュ / Control Widget の結果表示 / Spotlight 統合の実装漏れ / 無音で失敗する経路) をまとめて書きます。
@@ -276,6 +337,7 @@ public func incompleteCount() throws -> Int {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-31**: ハマりどころ 5 (`Calendar.RecurrenceRule` は SwiftData 属性にできない — コンパイルは通るが schema 初期化で trap する) と 6 (削除済みオブジェクトの配列属性を読むと trap する。`isDeleted` では防げず、id から引き直す) を追加。どちらも 7/N の reminders スキーマ適合でモデルにフィールドを足したときに踏んだもの
 - **2026-08-28**: macOS では entitlement 無しでも `containerURL` がパスを返すため DEBUG フォールバックが働かない、という話を追加 (テスト側は `withKnownIssue` / in-memory コンテナへ)
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-11**: SwiftData Group Lab のマイグレーション指針について、出典 (セッション 8017) が一次資料で確認できなかったため、伝聞である旨に書き換え

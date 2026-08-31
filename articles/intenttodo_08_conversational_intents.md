@@ -14,7 +14,7 @@ published: true
 WWDC 2026 編の 3 本目です (この編の前提は 6/N 冒頭を見てください)。
 
 今回は、Intent を **対話的・予測的に賢くする** ための新 API をまとめて試した話です。
-具体的には `requestConfirmation` / `requestChoice` で perform() を一旦止めてユーザーに聞く話、`IntentDialog(full:supporting:)` で返事を出し分ける話、Interactive Snippet でその場で操作させる話、`IntentDonationManager` で寄付する話の 4 本立てです。
+具体的には `requestConfirmation` / `requestChoice` で perform() を一旦止めてユーザーに聞く話、`IntentDialog(full:supporting:)` で返事を出し分ける話、Interactive Snippet でその場で操作させる話、そして `IntentDonationManager` で寄付する話 (結論としては「しない」) の 4 本立てです。
 
 ## perform() を止めてユーザーに聞く
 
@@ -186,43 +186,57 @@ Button(intent: ToggleTodoCompletionIntent(todo: entity)) {
 
 なお、このスニペットは **app プロセスで提示される** ので、本編 5/N で書いた entity 解決クラッシュは該当しません。ここでは entity ベースの Intent を素直に使っています (そのクラッシュ自体、後日 iOS 27 では再現しないと分かって回避策ごと撤去しました)。
 
-## 予測のために寄付する: IntentDonationManager — と思っていたら規約違反だった
+## 寄付はしない — ただし理由は途中で入れ替わった
 
 最後が寄付です。アクションを `IntentDonationManager` に寄付しておくと、システムが「この人はこの時間帯によく Todo を追加するな」みたいに学習して、先回りで提案してくれるようになります。
 
-自分は `AddTodoIntent` の `perform()` の中で `try? await donate()` を呼ぶ形で入れていました。**これは間違いだったので、今は撤去しています。**
+結論から書くと、**IntentTodo の明示的な寄付はゼロ** です。ただしその理由は 2 段階で入れ替わっていて、後の方が本題なので順に書きます。
 
-公式ドキュメント (Donations and discovery) はこう書いています。
+### 第 1 段階: `perform()` の中で donate するのは規約違反だった
+
+自分は `AddTodoIntent` の `perform()` の中で `try? await donate()` を呼ぶ形で入れていました。これは間違いです。公式ドキュメント (Donations and discovery) がこう書いています。
 
 > Restrict your donations to direct interactions with your app's interface, and **not to interactions started by Siri or the Shortcuts app**.
 
-CosmoTunes の `DonationManager` にも同じことがコメントで書いてあります (*"Avoid issuing donations from inside an intent's `perform()`, because the framework already donates intents invoked through Siri or Shortcuts."*)。システムは自分が走らせた Intent をすでに寄付しているので、`perform()` の中で寄付すると二重計上になる、ということでした。
+CosmoTunes の `DonationManager` にも同じことがコメントで書いてあります (*"Avoid issuing donations from inside an intent's `perform()`, because the framework already donates intents invoked through Siri or Shortcuts."*)。システムは自分が走らせた Intent をすでに寄付しているので、二重計上になる、ということでした。
 
-そして、**`perform()` は呼出元を判別できません**。`IntentSystemContext` が持っているのは `currentMode` と `isVoiceOnly` だけで、invocation source を知る API はありません。つまり `perform()` 内の寄付は **必ず Siri / Shortcuts 経由でも走る** ので、上のガイダンスに違反することが確定しています。分岐しようがない、という話です。
+そして **`perform()` は呼出元を判別できません**。`IntentSystemContext` が持っているのは `currentMode` と `isVoiceOnly` だけで、invocation source を知る API はありません。つまり `perform()` 内の寄付は必ず Siri / Shortcuts 経由でも走るので、分岐しようがない。撤去しました。
 
-### 3 つの案を検討して、全部やらないことにした
+### 第 2 段階: `Button(intent:)` の実行は、そもそもシステムが寄付していた
 
-じゃあどこで寄付すればいいのか。サンプルが取っている形は 2 通りありました。
+じゃあ寄付する層はどこかというと「呼出元を知っている層」= UI です。ところが IntentTodo は 1/N に書いたとおり **UI も `Button(intent:)` で同じ Intent を走らせる** ので、サービス層に届いた時点で常に Intent 経由だし、`Button(intent:)` はタップのコールバックも渡してくれません。差す隙が無い。
 
-1. **サービス層に `donateIntent:` フラグ** (CometCal): `CalendarManager.createEvent(..., donateIntent: true)` が既定で寄付して、Intent 側は `donateIntent: false` を明示して抜ける
-2. **UI のタップ地点から専用マネージャ経由で寄付** (CosmoTunes の `DonationManager`)
+ここで「App Intents 中心設計の趣旨なら `callAsFunction(donate:)` に切り替えるべきでは。あるいは `Button(intent:)` の内部で donate されている可能性は?」という問いが出てきて、**後者でした**。
 
-どちらも「UI からは Intent を通さずサービスを直接呼ぶ」設計でだけ成立します。IntentTodo は 1/N に書いたとおり **UI も `Button(intent:)` で同じ Intent を走らせる** ので、サービス層に届いた時点で常に Intent 経由です。しかも `Button(intent:)` はタップのコールバックを渡してくれないので、タップ地点に寄付を差す隙もありません。
+観測には公開 API がありません (`deleteDonations` はあるのに列挙が無い) ので、シミュレータのデータコンテナにある Biome ストリームを直接読みました。スナップショットを取って、操作を 1 つだけして、差分を見る、という形です。
 
-そこで 3 案目として「Intent に呼出元フラグを持たせる」(`shouldDonate` のようなプロパティを UI 側で立てる) を考えたんですが、これは成立しませんでした。理由が 2 つとも機械的です。
+| 呼出元 | Donation | Intent 実行ログ |
+|---|---|---|
+| 何もしない (negative control) | +0 | +0 |
+| アプリ内 `Button(intent: AddTodoIntent)` ×1 | **+1** | +1 |
+| アプリ内 `Button(intent: ToggleTodoCompletionIntent)` ×3 | **+3** | +3 |
+| Spotlight の App Shortcut から (positive control) | **+2** | +2 |
 
-- **素のプロパティは実行側のプロセスに届きません**。Intent のシリアライズ面は `@Parameter` だけで、システムは実行プロセスで `init()` してからパラメータを流し込みます。Widget / Control のように別プロセスで走る経路では必ずデフォルト値に戻ります。一方でアプリ内の `Button(intent:)` では運ばれうるので、**「アプリ内だけ通って、他の呼出元で静かに落ちる」** という一番たちの悪い形になります
-- **`@Parameter` にすると Siri / Shortcuts から立てられます**。`ParameterSummary` から外せば Shortcuts エディタには出ませんが、公式ドキュメントいわく「summary に無いパラメータはエディタに出ないだけで、存在するし解決もされる」ので、統合メタデータには残ってモデルが値を埋められます。避けたかった「Siri 起点の寄付」がむしろ起きます。おまけに保存済みのショートカットはパラメータ込みで replay されるので、後から消せない契約になります
+アプリは `donate()` をどこからも呼んでいないのに記録されています。つまり **アプリ内 `Button(intent:)` の実行は、システムが donation として記録している**。
 
-そもそも Apple のガイダンスは「呼出元で分岐せよ」ではなく **「`perform()` の中では寄付するな」** です。フラグをどこに置くかの問題ではなくて、置き場所が `perform()` ではない、という話でした。寄付する層は「呼出元を知っている層」= UI で、タイミングは操作が成功した後、ということになります。
+これで結論の理由が入れ替わりました。「規約違反になるから寄付しない」ではなく、**アプリ内 UI が全部 `Button(intent:)` である限り、寄付すべき「Intent を通らない UI 操作」が存在しないから** です。公式サンプル 4 本が明示 donate を必要とするのは、UI が Manager を直接呼んでいるからで (`Button(` 94 件のうち `Button(intent:)` は **0 件** でした)、前提が違います。セッション 343 の "Apple Intelligence can't learn from actions people take through your app's UI without your help" も、**UI の操作が intent の実行になっていない** アプリの話だと読むのが自然でした。
 
-もう 1 つコストとして効いたのが、**寄付には観測用の公開 API が無い** ことでした。`deleteDonations` はあるのに列挙は無いので、AppIntentsTesting で押さえられません。「効いているか確認できないコードを Intent の公開スキーマに足す」形になるのは、10/N で書いた検証の梯子を作ったあとだと結構抵抗があります。
+設計の核 (Intent を唯一の実行経路とする) を寄付のために崩す必要は無かった、というのが今の理解です。むしろ核を守っていたから寄付が要らなかった、という順序でした。
 
-というわけで **現状 IntentTodo の寄付はゼロ** です。残っている選択肢は `AppIntent.callAsFunction(donate:)` で一部の UI 経路だけ `Button(intent:)` から直接実行に切り替えることなんですが、それは **設計の核 (Intent を唯一の実行経路とする) を寄付のために崩す** ことになるので採りませんでした。再訪する条件だけ決めてあって、Siri の予測 / 提案 (`PredictableIntent` は寄付ゼロだとそもそも提案が出ません) を機能として欲しくなったときです。そのときは「原則の例外を作る」対価が目的に見合います。
+### 測り方を 2 回間違えた
+
+この結論に至る前に、**逆の判断を 2 回書いています**。どちらも読み方の問題で、覚えておく価値があるので残しておきます。
+
+1. **`mtime` を信じた**。ストリームのセグメントは mtime が 1 か月以上前なのに、中身は当日まで入っています (mmap 書き込みで mtime が更新されない)。→ **中身の時刻を見る**
+2. **`+0` を「書かれていない」と読んだ**。donation は派生ストリームなので **生成が遅れます**。実測で 4 分後は未反映、80 分後は反映済みでした。→ **`+0` を見たら待つ**。intent が走ったかどうかは即時反映される別のストリームで見る
+
+5/N に書いた「まず既知の良い面 (positive control) で動かしてから疑わしい面に持っていく」は今回もやったんですが、**「待つ」が抜けていると positive control 自体が偽陰性になる** ので、そこだけでは足りませんでした。
+
+なおこの観測パスは非公開で、OS 更新で消えます。**検証専用** であって、出荷コードから依存してよいものではありません。
 
 ### 消す側は呼出元に関係なく正しい
 
-一方で **`deleteDonations(matching:)` の方は残しています**。消えた entity への提案を残さないための後片付けなので、誰が呼んだかに関係なく正しい処理です。
+一方で **`deleteDonations(matching:)` の方は残しています**。消えた entity への提案を残さないための後片付けなので、誰が呼んだかに関係なく正しい処理です。しかも今はシステム側が寄付しているので、消す対象は実際にあります。
 
 ```swift
 try? await IntentDonationManager.shared.deleteDonations(
@@ -230,7 +244,10 @@ try? await IntentDonationManager.shared.deleteDonations(
 )
 ```
 
-CosmoTunes も削除経路には必ずこれを入れていて、IntentTodo も削除系 3 Intent はこの形です。今は寄付する側がゼロなので消すものも無いんですが、システム側が自動で寄付している分に対しては効きます。「追加で寄付、削除で寄付を消す」をペアで持つ、と前は書いていましたが、**ペアのうち片方だけが自分の責任だった** というのが今の理解です。
+「追加で寄付、削除で寄付を消す」をペアで持つ、と前は書いていましたが、**ペアのうち片方だけが自分の責任だった** というのが今の理解です。
+
+まだ残っている宿題は、**Widget / Control 起点が同じように記録されるか** です。シミュレータでは合成タップでコントロールが発火せず (Intent 自体が走らない)、ホームウィジェットの行は公式推奨どおり `Link` なので `Button(intent:)` がありません。ここは実機で見るしかなさそうです。
+
 
 ## 「消して」と「言ってない」を区別する: IntentParameter.valueState
 
@@ -343,10 +360,10 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 今回は以下です。
 
-- **ビルド成立 (型レベル)**: `requestConfirmation` / `requestChoice` / `IntentDialog(full:supporting:)` / `SnippetIntent` / `IntentDonationManager` はすべて OK。
-- **実機 (Siri が実際に確認 UI / 選択 UI を出すか、スニペットが応答に出るか、寄付で提案が変わるか)**: 未確認です。このへんは Siri を実際に喋らせて確認する必要があるので、端末で触れたら追記します。
-
-特に寄付の効果 (提案が賢くなるか) は、しばらく使い込まないと体感できない種類のものなので、ここは長めに寝かせてから書くことになりそうです。
+- **ビルド成立 (B)**: `requestConfirmation` / `requestChoice` / `IntentDialog(full:supporting:)` / `SnippetIntent` / `UndoableIntent` / `CustomAppIntentErrorConvertible` はすべて OK。
+- **単体 (U)**: `valueState` の三状態と `UndoableIntent` の復元は AppIntentsTesting で確認済みです (10/N)。`requestChoice` を使う Intent だけはテストから run できません。
+- **観測 (シミュレータ)**: `Button(intent:)` の実行がシステムの donation に記録されることは実測しました。ただし Widget / Control 起点は測れていません。
+- **実機 (R)**: Siri が実際に確認 UI / 選択 UI を出すか、スニペットが応答に出るかは未確認です。端末で触れたら追記します。
 
 ## まとめ
 
@@ -354,7 +371,8 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 - `requestChoice` の `IntentChoiceOption` は安定 id を持たないので、選択肢生成と逆引きを enum に一元化してタイトル照合 + フォールバックでドリフトを防ぐ
 - `IntentDialog(full:supporting:)` で「音声単独」と「視覚併用」のメッセージを出し分ける
 - Interactive Snippet はボタンを押すたびにシステムが `SnippetIntent` を再 perform するので、perform で毎回最新 entity を取り直す。app プロセス提示なので entity 解決クラッシュは無関係
-- **`perform()` の中で `donate()` を呼ぶのは規約違反**。呼出元を判別する API が無いので Siri / Shortcuts 経由でも走ってしまう。寄付する層は「呼出元を知っている層」= UI で、`Button(intent:)` を唯一の実行経路にしている設計とは両立しないため、いまは寄付ゼロ。`deleteDonations(matching:)` の方は呼出元に関係なく正しいので残す
+- **`perform()` の中で `donate()` を呼ぶのは規約違反**。呼出元を判別する API が無いので Siri / Shortcuts 経由でも走ってしまう
+- そのうえで **アプリ内 `Button(intent:)` の実行はシステムがすでに donation として記録している** (実測)。UI が全部 `Button(intent:)` である限り、自分で寄付すべき操作が残らない。明示的な寄付はゼロのままでよい。`deleteDonations(matching:)` の方は呼出元に関係なく正しいので残す
 - `UndoableIntent` は「確認と取り消しの住み分け」ではなく、`undoManager` を用意する呼出元でだけ効く仕組み。復元は **同じ id で・冪等に**、完了トグルの取り消しは逆トグルではなく元の値へ戻す
 - Siri に読ませるエラー文言は `CustomAppIntentErrorConvertible` で決める。サービス層が AppIntents を import せずに済む
 
@@ -364,6 +382,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-31**: 寄付の節を書き換え。`donate()` をどこからも呼んでいないのに **`Button(intent:)` のタップがシステムの donation に記録されている** ことを実測したので、「寄付しない」の理由を「規約違反だから」から「**Intent を通らない UI 操作が存在しないから**」へ差し替え。観測の過程で 2 回逆の結論を出した (mtime を信じた / `+0` を「書かれていない」と読んだ) 経緯も追加
 - **2026-08-28**: 寄付の節を全面的に書き換え。`perform()` 内の `donate()` は公式ガイダンス違反なので撤去し、代わりの 3 案も検討のうえ「入れない」で決着した経緯に差し替え (`deleteDonations` は残す)。`UndoableIntent` と `CustomAppIntentErrorConvertible` の節を追加
 - **2026-08-13**: 呼出元に対話を提示する面が無い制約は `requestChoice` でも同じ、という点を明記
 - **2026-08-12**: 呼出元に確認を出す面が無いと `requestConfirmation` が失敗する話を追加。FromExtension 撤去に追随

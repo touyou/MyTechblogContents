@@ -86,8 +86,8 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 #endif
 ```
 
-7/N で reminder 本体スキーマに苦しんだので身構えていたんですが、こっちのスキーマは `@Parameter var semanticContent: SemanticContentDescriptor` だけを持つ形を要求してくるだけで、**entity プロパティを持たない** ので、あの `EntityProperty` init 地雷を踏みませんでした。
-同じ「スキーマ適合」でも、entity プロパティを要求するかどうかで難易度が全然違う、というのが対比で見えたのは収穫でした。
+7/N で reminder 本体スキーマに手こずったので身構えていたんですが、こっちは `@Parameter var semanticContent: SemanticContentDescriptor` を持つ形を要求してくるだけで、**entity プロパティを 1 つも要求しません**。
+7/N のスキーマが重かったのは、要求プロパティの型がまた別のスキーマ entity で、**適合がサブグラフ全体に及ぶ** からでした。同じ「スキーマ適合」でも、entity プロパティを要求するかどうかで難易度が全然違う、というのが対比で見えたのは収穫です。
 
 なお `VisualIntelligence` は **iOS 専用** のフレームワークです。このパッケージは macOS / watchOS / visionOS / Widget Extension でもビルドするので、Visual Intelligence 関連のファイルは丸ごと **`#if canImport(VisualIntelligence)`** でガードしています。
 
@@ -207,9 +207,9 @@ func testAddThenShowChain() async throws {
 
 ファイルのターゲット所属については、この UI テストターゲットも synchronized folder になっていたので、ファイルを置くだけで入ります (テストを分割したときに普通に認識されました)。
 
-### 22 テストまで広げて分かったこと
+### テストを広げて分かったこと
 
-公開時点では 3 テストで、しかも `buildForTesting` + live diagnostics 0 件までしか見ていませんでした。その後 **22 テストまで広げて、実際に run してグリーンにする** ところまでやったので、そこで出てきたものをまとめておきます。
+公開時点では 3 テストで、しかも `buildForTesting` + live diagnostics 0 件までしか見ていませんでした。その後 **23 テストまで広げて、実際に run してグリーンにする** ところまでやったので、そこで出てきたものをまとめておきます。
 
 まず何を足したかというと、**「落ちても他のテストでは捕まらない」経路** を優先しました。
 
@@ -252,12 +252,66 @@ watch アプリの UI から前提データを作る道もあるんですが、w
 
 なので「App Shortcut のフレーズが Siri で正しくルーティングされるか」だけは、どうやっても手で確認するしかない領域ということになります。自動化できないのが自分の怠慢に思えていたんですが、**Apple の想定どおりの分担** だと分かってちょっと安心しました。この梯子は 3/N で書いた `AppIntentsPackage` の検証でもそのまま使っています。
 
+## テストを増やしたら、テスト基盤の方が壊れていた
+
+AppIntentsTesting の話とは別に、テストを増やしたり日本語を入れたりする過程で **テスト基盤そのものの壊れ方** をいくつか踏んだので、そっちもまとめておきます。どれも「赤くならない」形なのが共通点でした。
+
+### テストが「落ちる」のではなく「存在しないことになる」
+
+いちばん効いたのがこれです。`TodoAppEntity.dueDate` の型を変えたとき、SPM パッケージ側のユニットテスト 4 箇所がコンパイルできない状態のまま `main` にマージされていました。
+
+原因は Xcode のスキームで、テストアクションに入っている `TestableReference` が **UI テストバンドル 1 つだけ** で、SPM パッケージのテストターゲットが 1 つも入っていなかったことでした。**137 テストが `xcodebuild test` からも CI からも走らない** 状態です。テストは「落ちる」のではなく「存在しないことになる」ので、赤くなりません。
+
+スキームに 4 ターゲットを足したら、その瞬間に 11 件落ちました (後述)。「テストがある」と「テストが走っている」は別で、後者は明示的に確かめないと分からないんだなと思います。
+
+追加のコストは +32.5 秒 / +11% でした。見立てでは「パッケージのユニットテストは 0.2 秒程度」と書いていたんですが、それは `swift test` の数字で、Xcode のテストアクション経由だと **バンドルごとのインストールと起動** が 1 本あたり 5 秒前後乗ります。実行そのものは 241 件で 1.08 秒、残りの 19 秒は全部オーバーヘッドでした。それでも 241 件が常時走る対価としては安いので、テストプランを分けたりはしていません。
+
+### 並列実行は速くしていなかった
+
+UI テストが 307 秒かかっていたので、`parallelizable = "YES"` を疑って測ったら、**外した方が速い** という結果でした。
+
+| スイート | 並列 | 直列 |
+|---|---|---|
+| Intent 実行テスト (10 件) | 11.98 秒 | **2.00 秒** |
+| システム統合テスト (5 件) | 17.42 秒 | **6.33 秒** |
+| UI テスト (16 件) | 274.6 秒 | 256.7 秒 |
+
+UI テストのクラスが 1 つしかないので、並列にしても **クラス内は分割されません**。シミュレータのクローン起動コストと取り合いだけが乗っていた、ということでした。ついでに「重いテストを並列で回してシミュレータがウォッチドッグで落ちる」という別の問題も消えています。
+
+ちなみに「単体 114 秒かかる」と記録していた Spotlight のテストは、直列で測ったら **0.99 秒** でした。114 秒はクローンを取り合っていたときの数字だったわけで、**遅いテストだと思っていたものが遅かったのは環境の方** だった、という落ちです。timeout の見直しもテストプランの分離もやらずに済みました。
+
+### 直列にしたら、隠れていた待ちの甘さが出た
+
+固定の `sleep(1)` を `waitForNonExistence(timeout: 5)` に置き換えた直後、直列の通しで 1 件だけ落ちるようになりました。単体では通ります。
+
+原因は **テスト間でストアが積み上がること** でした。共有ストア (App Group) はプロセスを跨いで残るので、通しで走らせると後半のテストは数十件の Todo を抱えた一覧の上で動きます。シートを閉じたあとの再描画が遅くなって 5 秒に収まらない。しかも `sleep(1)` の時代は「たまたま通っていた」のではなく、**シート閉じを待つ assert 自体が無かった** ので落ちようがなかっただけでした。
+
+timeout を伸ばすのではなく原因を消す方を採って、`-uitest-ephemeral-store` を渡したときだけ in-memory コンテナを使う分岐 (DEBUG 限定) を入れました。これで空状態が保証されるので、5/N に書いた「条件付き assert」で誤魔化していたテストも無条件にできます。AppIntents 側のテストにはこの引数を渡していません。実運用と同じ共有ストアの上で entity 解決と Spotlight index を見たいからです。
+
+### 日本語を入れたら、緑だったテストが 2 つの理由で落ちた
+
+アプリに ja を入れた瞬間、UI テストが 2 件落ちました。ホストの macOS が `ja-JP` なのでシミュレータのアプリも ja で起動するようになり、英語ラベルで引いていた箇所が外れたためです。
+
+```swift
+app.navigationBars["Todos"]        // 実際は「やること」
+app.buttons["Delete todo"]         // 実際は「やることを削除」
+```
+
+これ自体は素直な回帰なんですが、**落ちた 2 件より、落ちなかった 3 件の方が問題でした**。条件付き assert (`if element.waitForExistence(...) { XCTAssert... }`) で書かれていて、ラベルが引けないと中身が一度も実行されないまま緑になります。5/N に書いた壊れ方がそのまま再現した形です。
+
+対処はテスト対象アプリの言語を `-AppleLanguages (en)` で固定することにしました。ラベル引きが 7 箇所あって、個別に直すより言語を固定する方が確実だったので。
+
+同じ「ホスト言語が ja」の事故は、上のスキーム修正でユニットテストを入れた瞬間にも 11 件出ています。`String(localized: TodoFilter.all.displayName) == "All"` の形で書かれていて、コメントには「en では key がそのまま返る」とあったんですが、**シミュレータ上では ja で解決される** ので `"すべて"` が返ります。`swift test` では通るので、スキームに入れるまで表に出ませんでした。こちらは `resource.locale = Locale(identifier: "en")` でソース言語に固定しています。
+
+**ローカライズを入れる作業は、テストの前提を静かに変えます**。しかも壊れ方が「落ちる」と「何も検証しなくなる」の 2 種類あって、後者は自分から探しに行かないと見つかりません。
+
+
 ## 検証できた深さ
 
 今回は以下です。
 
 - **ビルド成立 (型レベル)**: `IntentValueQuery` / `SemanticContentDescriptor` / `semanticContentSearch` スキーマ適合 / AppIntentsTesting の記述は OK。
-- **AppIntentsTesting**: 公開時点では buildForTesting + live diagnostics 0 件まで (型・登録レベル) でした。その後 22 テストまで広げて **実 run でグリーン** にしたので、上に挙げた entity query / valueState / バルク処理 / ValueRepresentation まわりは単体 (U) 深度に上がっています。
+- **AppIntentsTesting**: 公開時点では buildForTesting + live diagnostics 0 件まで (型・登録レベル) でした。その後 23 テストまで広げて **実 run でグリーン** にしたので、entity query / valueState / バルク処理 / ValueRepresentation まわりは単体 (U) 深度に上がっています。スキームにパッケージのユニットテスト 4 ターゲットを入れたので、通しでは 281 件が走ります。
 - **実機 (実際に visual search で Todo が候補に出るか)**: 未確認です。Visual Intelligence の visual search は端末での手動確認が要るので、できたら追記します。
 
 ## WWDC 2026 編をふりかえって
@@ -273,19 +327,21 @@ watch アプリの UI から前提データを作る道もあるんですが、w
 
 - `IntentValueQuery` はカメラ / スクショの visual search にアプリのコンテンツを返す入口。`AppEntity` と違い `@Dependency` が使え、`@UnionValue` で複数型を返せる。`SemanticContentDescriptor` を受ける query は **アプリに 1 つだけ** なので、複数型を返したいなら `@UnionValue` に寄せる
 - `SemanticContentDescriptor` の `labels` は一般英語ラベル。`values(for:)` は nonisolated なので MainActor へホップして fetch する
-- `@AppIntent(schema: .visualIntelligence.semanticContentSearch)` は entity プロパティを持たないので reminder スキーマの init 地雷を踏まない。`VisualIntelligence` のガードは `#if canImport(VisualIntelligence) && !os(visionOS)` (beta 2 で Mac にも import 可能になり、`canImport` だけだと visionOS 実機ビルドが落ちたため)
+- `@AppIntent(schema: .visualIntelligence.semanticContentSearch)` は entity プロパティを要求しないので、reminder スキーマのように適合がサブグラフ全体へ広がらない。`VisualIntelligence` のガードは `#if canImport(VisualIntelligence) && !os(visionOS)` (beta 2 で Mac にも import 可能になり、`canImport` だけだと visionOS 実機ビルドが落ちたため)
 - visual search が返す entity は全部 openable でないといけない。ルールは全プラットフォーム共通で、**macOS ビルドだけがコンパイル時に弾いてくる**
 - 結果タップ (`OpenTodoIntent`) / 複数結果型 (`@UnionValue`) は既存部品を再利用できた
 - AppIntentsTesting は実経路で intent を動かせるが **UI テストバンドル必須**、かつテストランナーとアプリの署名チームを揃える必要がある。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
 - `entity.id` は `NSNull` で、id は `entity.identifier.instanceIdentifier` から取る。`makeIntent(x: nil)` は `.unset` になるので明示クリアは型付き nil で渡す。`requestChoice` を使う Intent は run できない
 - `viewAnnotations()` で画面が publish している entity を検証できる。ただし **watchOS では `run()` が code 4025 で落ちて前提データを作れない** ので、そこは手動確認に回す。`forSelectionType:` も「`List` なら効く」ではなく「**selection のある `List` なら効く**」
 - Apple が示す検証の順番は **AppIntentsTesting → Shortcuts → Spotlight → Siri**。フレーズのルーティングだけは手動確認の領域と割り切ってよい
+- テスト基盤も壊れる。**スキームに入っていないテストは「落ちる」のではなく「存在しないことになる」**。並列実行は速いとは限らず、共有ストアはテスト間で積み上がる。ローカライズを入れるとテストの前提が静かに変わる
 - WWDC 2026 編全体を通して、Entity / Intent を丁寧に設計しておくほど新サーフェスへの適合が安くなる、というのが一番の実感だった
 
 ## 更新履歴
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-31**: 「テストを増やしたら、テスト基盤の方が壊れていた」の節を追加 (スキームに SPM のテストターゲットが入っておらず 137 テストが走っていなかった / 並列実行が速くなかった / 共有ストアがテスト間で積み上がる / ホスト言語が ja だと英語ラベル引きと `String(localized:)` が外れる)。テスト件数を現状に更新
 - **2026-08-28**: `viewAnnotations()` による画面ごとの検証と、watchOS では `run()` が code 4025 で落ちて自動化できない話を追加。`forSelectionType:` が効く条件を「selection のある `List`」に訂正。Visual Intelligence のラベル照合も `localizedStandardContains` に揃えたことを反映。更新履歴をまとめの後ろへ移動 (他の記事と順序を揃えた)
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: AppIntentsTesting を 22 テストまで広げて実 run でグリーンにした知見を追加 (型消去 API の落とし穴 / テスト不可な経路 / 検証の梯子)。「UI テストターゲットは synchronized folder ではない」という記述が誤りだったので訂正

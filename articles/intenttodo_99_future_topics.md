@@ -111,13 +111,14 @@ macOS native はビルドが通って起動してデータ操作までは動い�
 
 結果は、probe 用の Intent を Live Activity のボタンに直結して iOS 27 で試したら **3 パターンとも再現しない**、でした。entity の事前解決も `perform()` もメインアプリプロセスで走っていて、`LiveActivityIntent` 準拠の有無でも変わりません。Feedback の材料を作るつもりの検証が、そもそも現行 SDK では起きないという結論になった格好です。これを受けて Primary / FromExtension 分離ごと撤去しました → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 
-### F. App Schema の reminder 本体適合
+### F. App Schema の reminder 本体適合 (決着済み)
 
-WWDC 2026 編 (7/N) で `Category` を `@AppEntity(schema: .reminders.list)` に適合させた話は書けたんですが、**Todo 本体を `@AppEntity(schema: .reminders.reminder)` に適合させるのは保留** しています。
+**適合しました。** ここは長らく「保留」で、しかも据え置きの理由を 2 回書き換えています。最初は「マクロ生成 init と自前 init が噛み合わない」、次に「`locationTrigger` が `PlaceDescriptor` を強制するので SSU training のバグに正面衝突する」。**どちらも誤診でした**。
 
-長らく「マクロ生成 init と自前 init が噛み合わない」のが理由だと思っていたんですが、probe で要求プロパティを洗い出したら、それは誤診でした。本当の障害は `list` が非 optional 必須 / `dueDate` が `DateComponents` / `locationTrigger` が `PlaceDescriptor` を強制して SSU training のバグに正面衝突、の 3 点です。3 つ目のせいで **SDK 側が直るまで着手できない** と確定したので、ここは待ちのタスクになりました。詳しい経緯は [7/N](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents) に書いています。
+決着したのは、SSU バグの発火条件を最小プロジェクトで切り分けたときです。バグが出るのは App Shortcut に登録した Intent の `@Parameter` だけで、entity の `@Property` は踏みません。それが分かった時点で据え置きの理由がゼロになったので、コストを測り直して適合しました。
 
-list 適合で App Schema の仕組み自体は検証できていますし、Group Lab の「新 Siri 連携は App Schema 採用が前提」という話も、list 適合 + 自前 Intent 群 + system intent で足りている感触なので、優先度としてもそこまで高くありません。
+代わりに出てきた本当の壁は watchOS でした。App Schema の **23 ドメイン全部が watchOS / tvOS で unavailable** で、しかも iOS アプリは watch アプリを埋め込むので、共有 entity を持つアプリは型を二重定義しないとどのスキーマにも適合できません。詳細は [7/N](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents) に書き直しました。
+
 
 ### G. `.foreground(.deferred)` の細部
 
@@ -135,14 +136,14 @@ list 適合で App Schema の仕組み自体は検証できていますし、Gro
 
 WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 345 / Group Lab) を読み直したら「これは IntentTodo に入れて検証したら記事になりそう」という候補がいくつか出てきました。その後 `xcode27` ブランチでひととおり実装・検証まで進んだので、候補と結果をまとめて置いておきます (詳細はそれぞれの記事に反映済みです)。
 
-- **`@Property(indexingKey:)` でセマンティック Spotlight インデックス** (セッション 240) → **採用**。`\.title` / `\.contentDescription` にマップしました。`indexingKey:` のオーバーロードは iOS / macOS でしか vend されないので `#if` ガードが要ります → [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
+- **`@Property(indexingKey:)` でセマンティック Spotlight インデックス** (セッション 240) → **採用**。`\.title` / `\.contentDescription` にマップしました。`indexingKey:` のオーバーロードは watchOS / tvOS では vend されないので `#if` ガードが要ります → [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
 - **`Transferable` + `ValueRepresentation` で構造化値エクスポート** (セッション 345) → **採用**。担当者を `IntentPerson`、場所を `PlaceDescriptor` へ export → [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
 - **`IntentParameter.valueState` で UpdateTodoIntent** (セッション 344) → **採用**。「新しい値 / 明示クリア / 据え置き」の三値を `FieldUpdate` というサービス層の enum に写像しました → [8/N](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)
 - **コレクション onscreen + 通知 / AlarmKit への entity アノテーション** (セッション 343) → **採用**。一覧に `.appEntityIdentifier(forSelectionType:)` (大きなリストで id を遅延マップする版)、通知に `UNMutableNotificationContent.appEntityIdentifiers` を付与しています。通知側は **永続 AppEntity が必須** で `TransientAppEntity` は不可、というのが引っかかりどころでした。これはどの記事の主題ともずれるので、記録はここだけです
 - **`.system.searchInApp` 適合** (セッション 343) → **採用**。`SearchEverythingIntent` への適合ではなく、遷移専用の別 Intent (`ShowTodoSearchResultsIntent`) を新設する形になりました → [7/N](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents)
 - **`TransientAppEntity`** (セッション 344) → **採用**。集計値を返す `TodoListSummaryEntity` + `GetTodoSummaryIntent` を新設して、Shortcuts で「未完了が N 件以上なら通知」のような条件分岐を組めるようにしました → [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)。上の「通知の entity アノテーションは永続 `AppEntity` 必須」という制約とちょうど裏表で、id で名指しされる名詞と、その場で計算して返すだけの値が型で分かれている、という整理に落ち着きました
 - **`allowedExecutionTargets` の再検証** (セッション 345) → **「FromExtension は畳めない」で確定**。制御できるのは perform のプロセスであって entity 解決の有無ではない、が理由です。なおその FromExtension 分離自体、後日クラッシュが再現しないと分かって撤去したので、宿題ごと消えました → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
-- **reminder 本体スキーマ適合の優先度** (Group Lab) → **据え置き継続**。詳細は上の F
+- **reminder 本体スキーマ適合の優先度** (Group Lab) → **適合済み**。詳細は上の F
 - **`EntityPropertyQuery`** → **不採用**。当初は「既存の `TodoEntityQuery` (`EntityStringQuery`) で足りている」と書いていましたが、理由の方が不正確でした。正しくは `TodoEntityQuery` が `EnumerableEntityQuery` に適合しているので **Shortcuts の Find アクションと絞り込みが自動生成される** からです。`EntityPropertyQuery` が要るのは全件ロードが重くなる規模のときで、件数が増えたら再評価します → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 
 ついでの話として、SDK 27 の SwiftUI 新 API (ドラッグ並べ替えの `reorderable()` / `reorderContainer`) に追従したときも、並べ替えの永続化は `ReorderTodosIntent` という Intent として定義しました。ドラッグ確定は `Button(intent:)` に載せられないので View からは Intent と同じ `TodoService.reorderTodos(orderedIDs:)` を直接呼ぶんですが、ロジックの置き場を Intent 側の語彙に寄せておくことで、「アクションはまず Intent として定義する」という 1/N の原則は崩れていません。
@@ -162,18 +163,28 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 
 あわせて、**API は把握したうえでこのアプリには入れないと決めたもの** も記録しておきます。`DynamicOptionsProvider` と `IntentParameterDependency` (WWDC 2022 / 2023) は、パラメータの選択肢を動的に出したり、別パラメータの現在値に依存させたりするための道具ですが、IntentTodo にはそもそも **パラメータ間の動的依存が発生するユースケースが無い** です。フィルタや並び順は `AppEnum` の静的リストで足りていて、Todo やカテゴリの選択は `EntityQuery` が引き受けています。「使える API だけど要らない」というのも判断の記録なので、ここに残しておきます。
 
-### J. `PlaceDescriptor` をネイティブ型に戻す
+### J. `PlaceDescriptor` をネイティブ型に戻す (半分決着)
 
-これは自分の検証待ちというより SDK 待ちのタスクです。
-6/N で「`PlaceDescriptor` をネイティブ型のまま `@Parameter` / `@Property` で受ける」と書いた部分、Xcode 27 beta 3 から `AppIntentsSSUTraining` が `GeoToolbox.PlaceDescriptorEntity` という型名をそのまま SSU の variable 名に使ってしまい、ドット入りの名前が正規表現に落ちてビルドエラーを emit するようになったので、暫定で場所名の `String` に退避しています (beta 4 でも未修正、**beta 5 でも未修正**)。
-ローカルの `xcodebuild` は exit 0 で返ってくるのに Xcode Cloud だけ失敗する、という気付きにくい壊れ方をするのも含めて、経緯は [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) に書きました。
-SDK が更新されたら退避コミットを revert してクリーンビルドし直す、というのを毎回の beta 追従のチェック項目にしています。緯度経度を Intent 経由で受け取る口が閉じたままなので、ここは早く戻したいところです。
+SSU training のバグで `PlaceDescriptor` を `String` に退避していた件は、**発火条件が分かったので entity 側だけ戻しました**。バグが出るのは App Shortcut に登録した Intent の `@Parameter` だけで、entity の `@Property` は SSU の variable にならないので踏みません。
+
+残っているのは `AddTodoIntent.location` の `@Parameter` だけで、これは SDK 待ちです。Feedback (FB24548956) は出しました。バグが `PlaceDescriptor` 固有でもベータ特有でもない (リリース版の Xcode 26.6 でも再現する = iOS 26 世代から出荷されている) ことまで確かめてあります。詳細は [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)。
 
 ### K. `UndoableIntent` で取り消しに対応する (採用済み)
 
 セッションを 2022 から洗い直していて、まだ手を付けていないのに気付いたのが `UndoableIntent` (iOS 26 / セッション 275) でした。その後、削除 3 種と完了トグルに入れています。
 
 宿題にしていた「実行前の確認と実行後の取り消しをどう住み分けるか」は、**住み分けるものではありませんでした**。`undoManager` は Intent を走らせた面が用意するもので、用意されない呼出元では登録がまるごと no-op になるので、こちらが場合分けする話ではなかったです。実装の要点 (同じ id で戻す / 冪等にする / 完了トグルの取り消しは逆トグルではなく元の値へ) は [8/N](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents) に書きました。
+
+### L. 日本語対応で分かった、Intent のコピーの引かれ方
+
+新しく片付いたトピックとして 1 つ足しておきます。アプリを日本語化したら、**Intent のコピーだけ英語のまま残る** という壊れ方をしました。
+
+読みは「`IntentDialog` と `IntentDescription` だけが抽出から漏れている」だったんですが、実測したら 134 件中 113 件が漏れていて、**`title` すら抽出されていません** でした。しかも「パッケージ側に String Catalog を置けば直る」も半分だけ正しくて、抽出は直るのに **解決先が main bundle 固定** (コンパイラがそれを強制する) なので引かれません。
+
+結局、リンク先ターゲットの catalog に手動キーで持ってスクリプトで漏れを見る、という形になりました。あわせて Siri のフレーズが「訳」ではなく「言い方」を並べるものだという話も含めて、[3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) に書いています。
+
+**「英語しか無いうちは何も起きない」種類の壊れ方** で、多言語化に着手した瞬間にまとめて出てくるのが厄介でした。UI コピー側も同じ形で 2 回転んでいます。
+
 
 ## 制約を全部洗い直した
 
@@ -223,9 +234,21 @@ Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話
 
 3/N に書いた「iOS アプリの出荷メタデータからスキーマが消えていた」件で、自分は最初「マクロが `@Property` を生成してくれていないのでは」と疑っていました。実際には生成されていて、全バンドルを並べたら **落ちているのは iOS アプリの 1 つだけ** だと分かります。macOS も visionOS も、パッケージ側も正常でした。見ていたのが 1 つだったから、原因の候補がぜんぶ「マクロ側の問題」に見えていたわけです。
 
-同じ形は前にもありました。`@Property(indexingKey:)` が iOS / macOS でしか vend されていない件は iOS destination のビルドだけ通していて気付かなかったし、`AppShortcutsProvider` がパッケージから集約されない件はパッケージ側のメタデータだけ見て「出ている」と判断していました。**片側しか見ていないと、別の原因に見えます。**
+同じ形は前にもありました。`@Property(indexingKey:)` が一部のプラットフォームでしか vend されていない件は iOS destination のビルドだけ通していて気付かなかったし (しかもその後、除外する面を 1 つ広く書いていたことも分かりました)、`AppShortcutsProvider` がパッケージから集約されない件はパッケージ側のメタデータだけ見て「出ている」と判断していました。**片側しか見ていないと、別の原因に見えます。**
 
 なので運用としては「entity やメタデータまわりを触ったら複数 destination を回す」に加えて、**確かめるときは正常なはずの側も一緒に並べる** ことにしました。差分が 1 行で出るので、そもそも仮説を立てる必要がなくなります。5/N の「呼出元だけを変えて同じ Intent を走らせる」と同じで、比較対象を作ると一発なんだよなと思います。
+
+### 6 つ目の型: 「できない理由」を測り直さない
+
+もう 1 つ、今回いちばん高くついたのがこれでした。**一度「できない」と結論したものの理由を、そのまま持ち越す** というやつです。
+
+`.reminders.reminder` の本体適合は、据え置きの理由を 2 回書いています。最初が「マクロ生成 init と自前 init が噛み合わない」、次が「`locationTrigger` が `PlaceDescriptor` を強制するので SSU バグに正面衝突する」。**どちらも誤診で、SDK は最初から塞いでいませんでした**。しかも 2 回目の方は、理由を差し替えたときに「前より正確になった」という手応えがあったぶん、余計に疑いにくくなっています。
+
+実際に測り直したら、`@ComputedProperty` で名前を合わせられるのでリネームすら要らず、強制的な変更は機械的置換 12 箇所だけでした。**かつて見積もっていたより実装コストはずっと小さかった** わけです。
+
+同じ形は `PlaceDescriptor` の退避でも起きていて、「`@Parameter` でも `@Property` でも落ちる」と書いていたのが、切り分けたら `@Parameter` だけでした。片方は probe 同士が同居していたせいで、実質 **測っていないものを測ったことにしていた** ことになります。
+
+なので「できない」「重い」と書くときのルールを増やしました。**理由は再現可能な形で書き、SDK が上がったら理由の方を測り直す**。結論だけを持ち越すと、塞がっていない扉の前で待ち続けることになります。上の `[measured]` ラベルを打つ運用は、まさにここに効くはずです。
 
 ### 実機検証待ちに積み増しになったもの
 
@@ -234,10 +257,12 @@ Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話
 - **App Shortcut のフレーズ**: `AppIntentsPackage` を公式手順どおり宣言する形に切り替えたので (3/N)、残っているのは **フレーズのルーティングだけ** です。しかも今はフレーズにパラメータを埋めた (「Complete 〜 in IntentTodo」) ので、候補の解決まで含めて実機で見たいところが増えました。AppIntentsTesting は型名で intent を引くのでこの経路を通りません
 - **`allowedExecutionTargets` 未指定の読み取り系 Intent**: 書き込み系は全部 `[.main]` に固定したので (2/N / 9/N)、残るのは読み取り系です。実際どちらのプロセスで perform され、entity 解決がどこで走るのかを実機ログで見たい
 - **Control をアプリ完全終了状態で叩いたときの体感**: 書き込み系を `[.main]` に固定したことで、アプリのバックグラウンド起動が挟まるようになりました。dialog も snippet も出ない面なので、遅延が実用上どうかは実機で見るしかありません
-- **`.reminders.list` 適合が実機の Siri / Apple Intelligence で効くか**: 統合メタデータに載っていることまでは確定しました (3/N)。AppIntentsTesting は型名で intent / entity を引くのでスキーマ経路を通らず、ここから先は手動確認の領域です
+- **スキーマ適合が実機の Siri / Apple Intelligence で効くか**: `.reminders.list` に加えて `.reminders.reminder` 本体も適合したので (7/N)、見たい範囲がむしろ広がりました。統合メタデータに載っていることまでは確定していますが、AppIntentsTesting は型名で intent / entity を引くのでスキーマ経路を通らず、ここから先は手動確認の領域です
+- **Widget / Control 起点の donation**: アプリ内 `Button(intent:)` の実行がシステムに寄付されていることは実測できたんですが (8/N)、別プロセス起点は測れていません。シミュレータでは合成タップでコントロールが発火せず、ホームウィジェットの行は `Link` なので `Button(intent:)` がありません
 - **`UISceneAppIntent`**: `#if canImport(_AppIntents_UIKit) && !os(watchOS)` という **ガードの形さえ間違えなければ Package スコープでも置ける** ことを確認したうえで、その後 `LaunchAppIntent` / `OpenTodoIntent` に採用しました。狙いはマルチウィンドウではなく cold start です (5/N)。実機で cold start の遷移を確かめるのが残りです
-- **reminder 本体スキーマ適合** (上の F): probe で要求仕様は確定したものの、`locationTrigger` が `PlaceDescriptor` を強制して SSU バグに当たるため **SDK 待ち**。実機検証というより待ちのタスク
 - **`.onAppIntentExecution` の cold start 問題**: そもそも今のコードベースでは `.onAppIntentExecution` をどこでも使っていない (`@Dependency` + `perform()`、それに `AppIntentSceneDelegate` に移行済み) ので、現時点では検証対象が無い状態です。再導入するときに「`@State` の path が未構築」「シーンの activation conditions 未設定」「`supportedModes` に foreground が無い」の 3 仮説を潰す、というメモだけ残しました
+
+待ちのタスクとして 1 つ増えたのが **App Schema と watch ターゲットの両立** です。iOS アプリが watch アプリを埋め込む構成だと、共有 entity は型を二重定義しない限りどのスキーマにも適合できません (7/N)。回避策は入れましたが、公開の解決手段が無いので Apple 側の対応待ちで、Feedback (FB24570185) を出しました。
 
 このうち **Control まわりは実機で決着しました**。dialog も snippet も Control では提示されないこと、Control のフィードバックは `perform()` 完了時の自動リロードによるコントロール自身の再描画であること、それにともなって `.controlWidgetStatus(_:)` を撤去したことまで含めて [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書き直しました。実機の Control Center を触って初めて分かったことが多くて、シミュレータのビルドが通ったところで満足していると、到達不能なコードにも気付けないんだなというのは反省点です。
 
@@ -256,9 +281,10 @@ Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話
 - 本編は「実機で詰まった話」、WWDC 2026 編は「採用していいか / 設計判断」と、軸を分けて書いている
 - 最初に並べた将来トピックのうち、Visual Intelligence / Interactive Snippets / Intent Modes の一部は WWDC 2026 編で片付いた
 - FoundationModels (端末内 LLM) と `SpotlightSearchTool`、それに寄付 (`IntentDonationManager`) は「やらないと決めた」もの。主眼から外れるか、設計の核と両立しないため
-- 残りの検証待ち (watchOS / visionOS の実機 / Spotlight ラグ / macOS 細部 / reminder 本体適合 / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の復帰) は、手元の機材と検証コストで順番が決まる予定
+- 残りの検証待ち (watchOS / visionOS の実機 / Spotlight ラグ / macOS 細部 / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の `@Parameter` 復帰) は、手元の機材と検証コストで順番が決まる予定。SDK 側の対応待ちが 2 件 (FB24548956 / FB24570185)
 - 書き溜めた「制約」をセッション書き起こしと全数突き合わせたら、断定しすぎ・理由付けの誤り・出典の取り違えがまとめて出てきた。「セッションで説明されていたこと / API ドキュメントで知ったこと / 自分がビルドして観測したこと」、それに「そこから推論したこと」は、後から見分けられる形で分けて書いておかないと直せなくなる
 - 確かめるときは **正常なはずの側も一緒に並べる**。片側だけ見ていると、同じ現象がぜんぜん違う原因に見える
+- **「できない理由」は結論だけ持ち越さない**。SDK が上がったら理由の方を測り直す。塞がっていない扉の前で待ち続けることになる
 
 書ける段階になり次第、ここから本編へ昇格させていきます。
 
@@ -266,6 +292,7 @@ Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-31**: トピック F (reminder 本体スキーマ適合) を **決着済み** に変更 (据え置きの理由 2 つがどちらも誤診で、SDK は塞いでいなかった)。トピック J も entity 側は復帰済みに更新。トピック L (日本語対応で分かった Intent のコピーの引かれ方) を追加。**「6 つ目の型: 『できない理由』を測り直さない」** を追加。実機検証待ちを現状に更新し、SDK 側の対応待ち 2 件 (FB24548956 / FB24570185) を明記
 - **2026-08-28**: 決着したものを反映 (`.foreground(.dynamic)` は当て先なしで終了 / `UndoableIntent` は採用 / 寄付と `SpotlightSearchTool` は「入れない」/ `UISceneAppIntent` は cold start 目的で採用 / watch の追加が無音で失敗していたのを修正)。実機検証待ちの一覧を現状に合わせて書き直し。「5 つ目の型: 片側しか見ていないのに確かめた気になる」と、公式サンプル 4 本との突き合わせの節を追加
 - **2026-08-13**: `#Predicate` の Optional 制約はマクロ固有と確定 (toolchain 差ではない)。`UISceneAppIntent` は Package スコープが障壁ではないと確定し、正しいガード (`&& !os(watchOS)`) を反映。知見に根拠ラベルを付ける運用に触れた
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)

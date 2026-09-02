@@ -413,6 +413,32 @@ if deleteButton.waitForExistence(timeout: 3) {
 
 `if` で包んであるうえ、探していたラベルが `"Delete"` (実際は `"Delete todo"`) だったので、**中身が一度も実行されないまま緑** でした。要素が見つからないときに素通りするテストは、テストが無いのと同じどころか「テストがある」という誤った安心感がある分たちが悪いなと思います。`if` を外して正しいラベルで assert し直して、詳細画面用のケースも足しました。
 
+### 逃げ先の SwiftUI 側にも罠があった
+
+「確認は SwiftUI 側で出す」と決めたので、その延長で **編集シートを閉じる前の確認** も SwiftUI でやろうとして、もう 1 回転びました。
+
+SDK 27 に `dismissalConfirmationDialog(_:shouldPresent:actions:message:)` という、まさにそれ用の modifier があります。ドキュメントにも "On iOS, the dialog appears when someone swipes down on the sheet or taps outside it" と書いてあって、`@available` でも弾かれません。ところが **シミュレータで一度も発火しませんでした**。
+
+置き場所や条件を疑って、順に潰しています。
+
+- フォームの内側 (`Form` + toolbar) に付ける → スワイプ下げでそのまま閉じる
+- シート content の根 (`presentationDetents` と同じ位置) に、`shouldPresent: true` を **固定** で付ける → それでもそのまま閉じる
+- 同じ固定条件で「キャンセル」の `dismiss()` を踏む → 確認なしで閉じる
+
+「置き場所が悪い」と「dirty 判定が false になっている」の両方を潰しても出ないので、少なくとも iOS のシートでは実装が来ていないと判断しました。macOS のウィンドウでは動く可能性が残りますが、このアプリの追加・編集はどのプラットフォームでもシートなので使い道がありません。**ビルドが通って何も起きない** という、この記事で何度も出てくる形です。
+
+代わりに 2 段構えにしました。
+
+- `interactiveDismissDisabled(hasChanges)` で、**変更があるときだけ** スワイプ下げと外側タップを塞ぐ (detent 間のリサイズは残るので、シートが固まったようには見えません)
+- 「キャンセル」ボタンは、変更があれば `.confirmationDialog`、無ければそのまま閉じる
+
+つまり **スワイプ下げそのものには確認を出せません**。SwiftUI には「dismiss しようとした」を観測する公開 API が無いので、塞ぐところまでが限界でした。`dismissalConfirmationDialog` はまさにその穴を埋めるための API に見えるので、動くようになったら乗り換えたいところです。
+
+実装で 1 つ気を付けたのが、**保存経路は塞がないこと** でした。`AddTodoIntent` / `UpdateTodoIntent` は `NavigationModel` のフラグを倒してシートを閉じていて、これは presenter 側の状態なので `interactiveDismissDisabled` の対象外です。ここが噛み合っていないと「保存したのに閉じない」になるので、実機で「保存 → 閉じる」まで見ました。
+
+dirty 判定にも地味な罠があって、フォームの下書き型を「開いた時点の値」と比較するとき、**両方を同じ値から `init` で作らないと常に dirty になります**。こちらの下書き型は既定の `init` が `dueDate` に現在時刻を入れるので、別々に作ると生成した瞬間に差が出ていました。
+
+
 ## 落とし穴 5: 失敗が「無音」になる経路が 3 つあった
 
 最後は毛色の違う話で、**失敗しているのにどこにも出てこない** 経路をまとめて塞いだときの話です。クラッシュしてくれれば気付けるんですが、App Intents まわりは「静かに何も起きない」で終わる形が結構あります。
@@ -497,6 +523,7 @@ IntentTodo は長らく `SiriTipView`（「"やることを追加" と言って�
 - `StaticControlConfiguration(kind:provider:)` + `ControlValueProvider` パターンで body を薄く保つ。provider のエラーは `try?` で潰さず throw する
 - **Spotlight は IndexedEntity だけでは index されない** → `indexAppEntities(...)` の明示登録が必要。index は名前付きにして、受け側の `IndexedEntityQuery` もセットで実装する。起動時の全件 index は client state で省けるが、**省略と fire-and-forget を組み合わせると壊れたまま復旧しない** ので連続失敗を数える
 - **アプリ内の `Button(intent:)` から `requestConfirmation` は失敗する** → 確認を提示する面が無いため。Siri / Shortcuts / AppIntentsTesting では通るので気付きにくい。確認なし版を分けて、UI 側は `.confirmationDialog` で確認する
+- ただし **逃げ先の SwiftUI 側にも罠がある**。`dismissalConfirmationDialog(_:shouldPresent:)` は iOS のシートでは発火しない (ビルドは通る)。「dismiss しようとした」を観測する公開 API が無いので、`interactiveDismissDisabled` で塞ぐところまでが限界
 - **失敗が無音になる経路を塞ぐ** → `@Dependency` の登録漏れはクラッシュせず「何も起きない」で終わる。通知の許可が無いと Control の失敗報告は消える (`add` は error を返さない)。伝える手段が 1 つしか無いところは、塞がれたときの記録と設定誘導までセットで作る
 - **`SiriTipView` / `ShortcutsLink` は置き場を間違えると邪魔になる**。「使えるか」だけでなく「今も推奨されているか」「自分の使い方が推奨に沿っているか」まで見る
 
@@ -506,6 +533,7 @@ IntentTodo は長らく `SiriTipView`（「"やることを追加" と言って�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-31 (2)**: 落とし穴 4 に「逃げ先の SwiftUI 側にも罠があった」を追加 (`dismissalConfirmationDialog` が iOS のシートで空振りする / 代わりの 2 段構え / 保存経路は塞がない / dirty 判定の初期値)
 - **2026-08-31**: 落とし穴 1 を圧縮 (撤去済みのワークアラウンドの実装詳細を落として、実測で消えるまでの流れだけ残した)。おまけとして `SiriTipView` を一覧の一等地から降ろし `ShortcutsLink` を設定に置いた話を追加
 - **2026-08-28**: 落とし穴 5 (失敗が無音になる 3 経路 — `@Dependency` 登録漏れ / 通知拒否 / ライブアクティビティ無効) を追加。Spotlight の節を名前付き index + `IndexedEntityQuery` + client state による省略と自己修復まで書き直し (「自己修復ループは今後の改善ポイント」だったものを実装済みに)。cold start でシーン経由の遷移を取りこぼす話 (おまけ 3) を追加
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)

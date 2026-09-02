@@ -301,6 +301,10 @@ public static var parameterSummary: some ParameterSummary {
 
 「`@Parameter` を足した」は「書き込む経路ができた」を意味しない、というのがここでの学びでした。今は **Intent が変えられるものは全部 `parameterSummary` に載せる** をルールにしています。
 
+そして、この非対称はちょうど裏返しの形でも起きていました。**場所 (`location`) は `AddTodoIntent` では受け取れるのに、`UpdateTodoIntent` にはパラメータが無く、アプリの編集画面にも欄がありませんでした**。作成時に付けた場所を後から直す手段がまったく無かったわけです。詳細画面は「値のあるフィールドだけ」を出す作りなので、**見えるのに直せない** という状態で残っていました。
+
+`parameterSummary` の方が「Shortcuts から書けない」で、こちらは「アプリから書けない」。どちらも **どこか 1 つの経路で書けているのを見て、書けると思い込んでいた** のが原因でした。書き込み経路は、Intent・`parameterSummary`・サービス層・UI の 4 つが揃って初めて通るので、属性を足したら 4 つ並べて確認するのが確実そうです。
+
 
 ## @ComputedProperty と @DeferredProperty
 
@@ -592,7 +596,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 - `@Property` でモデル属性をシステムに公開し、関連 (`category`) も Entity として持てる
 - `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する
 - SSU training のバグが出るのは **App Shortcut に登録した Intent の `@Parameter` に system value 型を置いたとき** だけ。entity の `@Property` は SSU の variable にならないので踏まない。`PlaceDescriptor` 固有でもベータ特有でもなく、iOS 26 世代から出荷されている (FB24548956)
-- **`parameterSummary` は Shortcuts 編集画面の allowlist**。載せ忘れたパラメータは黙って編集できなくなる (ビルドは緑、Siri から名指しすれば動く)
+- **`parameterSummary` は Shortcuts 編集画面の allowlist**。載せ忘れたパラメータは黙って編集できなくなる (ビルドは緑、Siri から名指しすれば動く)。裏返しに「Shortcuts からは書けるのにアプリからは書けない」属性も生まれる。書き込み経路は Intent・`parameterSummary`・サービス層・UI の 4 つが揃って初めて通る
 - `@ComputedProperty` (同期・軽い導出) と `@DeferredProperty` (非同期・要求時フェッチ、Spotlight 非 index) を使い分ける。どちらも出自は iOS 26 で、2026 の新 API ではない。**スナップショットに値を持たない** という性質は、スキーマ要求名の付け替えや、削除済みオブジェクトを読まないための逃がしにも効く
 - Entity は `@Dependency` を使えないので、共有コンテナは `TodoEntityStore` に置いて参照する。`AppDependencyManager` とは別々の登録なので、アプリと Widget Extension の両プロセスで登録する
 - プロパティマクロは `Hashable` 自動合成を壊すので `==` / `hash(into:)` を明示実装する
@@ -607,6 +611,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-08-31 (2)**: `parameterSummary` の節に、裏返しの非対称 (場所が `AddTodoIntent` では受け取れるのに `UpdateTodoIntent` とアプリの編集画面には無く、後から直せなかった) を追加
 - **2026-08-31**: `PlaceDescriptor` の節を全面的に書き換え。SSU バグの発火条件は **App Shortcut 登録済み Intent の `@Parameter` だけ** と切り分けられたので、entity の `@Property` は `PlaceDescriptor?` に戻した (退避中に落ちていた座標も export されるようになった)。バグが `PlaceDescriptor` 固有でもベータ特有でもないこと、Apple へ報告済み (FB24548956) を追記。`indexingKey:` のガードに visionOS を追加 (以前の「visionOS でも落ちる」という記述は、当時どの SDK で何が落ちたかを書き残していなかったため真偽を判別できず)。`parameterSummary` が Shortcuts 編集画面の allowlist である話を新設
 - **2026-08-28**: 表示表現の作法 (補間形式 / Siri が読む subtitle / `synonyms:` と遅延クロージャ / `displayRepresentations(for:)` / `localizedStandardContains`) の節を、公式サンプル 4 本との突き合わせとして追加。`indexingKey:` と `attributeSet` で同じキーを二重に埋めていたのを訂正。検証ブランチが `main` にマージされたことを反映。重複していた 1 行を削除
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)

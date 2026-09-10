@@ -281,6 +281,26 @@ if !todo.tags.isEmpty { TagRow(tags: todo.tags) }
 いちばんの教訓は、**この trap は「1 回直した」では終わらない** ことでした。自分は Entity 側で直した数日後に、View 側で同じ罠を新しく作り込んでいます。読む場所を増やすたびに再発するので、**`@Model` の配列属性は `body` から読まない** をルールとして決めました。シートに渡すときも値渡しにしています (content クロージャは提示中に再評価されうるので、そこで読むと同じ口が残ります)。
 
 
+## ハマりどころ 7: `ModelContainer` の init は、ストアのロードを待たずに返る
+
+これは提出用のスクリーンショットを撮る仕込み (テスト用のフィクスチャを流し込んでから撮る、というやつ) を書いていて踏んだんですが、SwiftData の素の性質の話なので、ここに入れておきます。
+
+**`ModelContainer(for:configurations:)` は、ストアのロードが終わる前に返ります**。init 直後の `mainContext` は、まだ触れる状態とは限りません。
+
+`App.init()` の中でフィクスチャを流し込む形にしたら、アプリが起動直後に落ちるようになりました。
+
+```
+NSInternalInconsistencyException: No eligible connection available
+```
+
+しかも落ちるのは **インストール直後の初回起動だけ** です。UI テストは毎回インストールし直すので毎回落ちるんですが、手元で `simctl launch` して確かめると (すでにインストール済みなので) 再現しません。UI テストからは「アプリがクラッシュしました」としか見えないので、フィクスチャの中身を疑ってずいぶん遠回りしました。シーンの `.task` に移したら解決です。
+
+同じ根で、もう 1 つ静かな壊れ方もしていました。フィクスチャは「全部消してから 6 件入れる」形なんですが、**実行のたびにリストが 6 件ずつ増えていきます**。init 直後の fetch は、行があっても空で返るからです。削除が空振りして、挿入だけが効いていました。ここは 1 秒待ってから fetch → delete する形にしています。`deleteAllData()` で済ませるのは駄目で、こちらはコンテキストごと無効化するので、直後に `mainContext` を触ると SwiftData の中で trap します。
+
+ついでに、まとめて消すつもりで書いた `context.delete(model: TodoItem.self)` も落ちました。バッチ削除は `NSBatchDeleteRequest` を通るので、失敗が Objective-C 例外で出てきて Swift 側の `do` / `catch` では拾えません。こちらも fetch して 1 件ずつ `delete` する形に変えています。
+
+症状は 3 つともバラバラ (初回起動だけ落ちる / 毎回増える / まとめ削除で落ちる) なんですが、**「init が返った = 使える」ではない** という 1 点に集約されます。`@Query` と `.modelContainer(_:)` に任せている限りは SwiftUI が面倒を見てくれるので表に出てこなくて、自分でコンテナを作って直後に触る形にしたときだけ顔を出す、という性格のものでした。
+
 ## エラーログを早めに仕込む
 
 ModelContainer の作成失敗は `SwiftDataError(_error: .loadIssueModelContainer, _explanation: nil)` のような top-level 型しか出ず、原因が見えません。
@@ -329,6 +349,7 @@ public func incompleteCount() throws -> Int {
 - production の fallback は silently 壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく。ただし macOS は entitlement 無しでも `containerURL` がパスを返すので、この分岐自体が効かない
 - `Calendar.RecurrenceRule` のように **コンパイルは通るのに schema 初期化で trap する型** がある。CloudKit 互換のために primitive へ落としていると、結果的にこれも避けられる
 - **削除済みオブジェクトの配列属性は読めない** (スカラーは耐える)。`isDeleted` のガードでは防げないので、`body` から `@Model` の配列属性を読まず、id から引き直す
+- **`ModelContainer` の init はストアのロードを待たない**。直後の `mainContext` は初回起動だけ落ちるし、直後の fetch は行があっても空で返る
 - ModelContainer の失敗ログは `String(reflecting:)` + `NSError.userInfo` まで吐く
 
 次回は [App Intents 運用で踏んだ落とし穴 (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Live Activity の entity 解決クラッシュ / Control Widget の結果表示 / Spotlight 統合の実装漏れ / 無音で失敗する経路) をまとめて書きます。
@@ -337,6 +358,7 @@ public func incompleteCount() throws -> Int {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-09-11**: ハマりどころ 7 (`ModelContainer` の init はストアのロードを待たずに返る — 初回起動だけ `mainContext` で落ちる / init 直後の fetch は空で返る / バッチ削除は Objective-C 例外で abort) を追加
 - **2026-08-31**: ハマりどころ 5 (`Calendar.RecurrenceRule` は SwiftData 属性にできない — コンパイルは通るが schema 初期化で trap する) と 6 (削除済みオブジェクトの配列属性を読むと trap する。`isDeleted` では防げず、id から引き直す) を追加。どちらも 7/N の reminders スキーマ適合でモデルにフィールドを足したときに踏んだもの
 - **2026-08-28**: macOS では entitlement 無しでも `containerURL` がパスを返すため DEBUG フォールバックが働かない、という話を追加 (テスト側は `withKnownIssue` / in-memory コンテナへ)
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)

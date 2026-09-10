@@ -162,6 +162,23 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationC
 
 Xcode の UI からは見えにくい設定なので、pbxproj を直接いじることになります。
 
+## 増えるのはコードだけじゃない: `PrivacyInfo.xcprivacy` は executable ごとに要る
+
+App Store に出す準備をしていて気付いたんですが、**プライバシーマニフェストもターゲットの数だけ要ります**。IntentTodo は `UserDefaults` を 3 箇所 (通知やライブアクティビティの失敗記録 / Focus フィルタ / Spotlight の client state) で使っていて、これは required reason API なので申告が要ります。無いとアップロードしたあとに ITMS-91053 の警告メールが来ます。
+
+Apple のドキュメントは「required reason API を使う executable や dynamic library ごとに、それを含むバンドルが manifest を持つ」と書いているので、アプリ本体に 1 つ置くだけでは足りませんでした。
+
+```
+IntentTodo.app/PrivacyInfo.xcprivacy
+IntentTodo.app/PlugIns/IntentTodoWidgetExtension.appex/PrivacyInfo.xcprivacy
+IntentTodo.app/PlugIns/IntentTodoLiveActivityExtension.appex/PrivacyInfo.xcprivacy
+IntentTodo.app/Watch/IntentTodoWatchApp.app/PrivacyInfo.xcprivacy
+```
+
+理由コードも 1 つでは足りなくて、素の `UserDefaults.standard` は `CA92.1` (アプリ自身からしか見えない情報の読み書き)、App Group の `suiteName:` 付きは `1C8F.1` (同じ App Group のアプリ / Extension からしか見えない情報の読み書き) と使い分けます。この記事でずっと書いている「Extension は別プロセスだけど同じ App Group のストアを見る」という構成が、そのまま申告の形にも出てくる感じでした。
+
+置き場所の判定に使える小技も 1 つあって、**`project.pbxproj` に差分が出たら置き場所を間違えています**。4 ターゲットのフォルダは全部 file-system-synchronized group なので、正しい場所に置けばファイルを足すだけでリソースとして焼かれて、pbxproj は 0 行しか動きません。自分は最初リポジトリ直下に置いてしまって、そこは同期グループの外なので `PBXFileReference` だけが増えて、ターゲットには入っていない、という形になりました。すぐ上の `platformFilter` みたいに「pbxproj を直接触らないと解決しない」場面と、「触ったなら間違い」の場面が両方あるのがややこしいところです。
+
 ## ターゲット依存と TodoService ファクトリ
 
 前回 (2/N) で触れた `TodoService.swiftDataBacked(container:)` ファクトリの背景もここに繋がります。
@@ -421,6 +438,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 - パッケージに View を置いたら、`defaultLocalization` + String Catalog + `Bundle.module` を通す口 (`LocalizedStringResource.copy(_:)`) をセットで用意する
 - **Intent のコピーは仕組みが別**。メタデータ経由の文言は main bundle 一択で、コンパイラがそれを強制する。パッケージ側の catalog は使えないので、リンク先ターゲットに手動キーで持ってスクリプトで漏れを見る
 - Siri のフレーズ (`AppShortcuts.xcstrings`) は訳ではなく **言い方** を並べる。語彙を意図的に散らさないと、助詞違いを並べただけになる
+- 提出物側も同じ形で増える。`PrivacyInfo.xcprivacy` は **required reason API を使うバンドルごと** に要る (本アプリは 4 つ)。同期グループに正しく置けていれば pbxproj は 1 行も動かない
 
 次回は [SwiftData + CloudKit 同期で踏んだスキーマ要件と落とし穴の話 (4/N)](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) を書きます。
 
@@ -428,6 +446,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-09-11**: `PrivacyInfo.xcprivacy` は required reason API を使うバンドルごとに要る、という節を追加 (理由コードの使い分けと、pbxproj の差分で置き場所の誤りが分かる話)
 - **2026-08-31**: 統合メタデータのマージ規則を訂正。「情報が少ない方が勝つ」は推論で、実際は **入力ファイルリストの後勝ち** (watchOS が構造的に必ず最後)。失われるのはスキーマだけでなくエントリ全体で、突き合わせキーはモジュール名を含まない型名。Apple のビルドシステム側の制約と確定し、Feedback (FB24570185) を出したことを追記。「Intent のコピーは、リンク先ターゲットの main bundle にしか置けない」の節を新設 (自動抽出されるのは `parameterSummary` だけ / パッケージ側 catalog は解決されない / `IntentDialog` で英語の屈折を組み立てない / フレーズは語彙を散らす / `AppEnum` の表示名は UI からも引ける)
 - **2026-08-28**: 統合メタデータで watchOS フォールバックがスキーマを消していた話 (型名を分けて解消) を追加。コンテナ生成失敗の扱い (`try!` を使わない / コンプリケーションだけ落とさない) と、SPM パッケージの UI コピーと String Catalog の節を追加。App Shortcut のフレーズをパラメータ化するときの候補件数の注意を追加
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)

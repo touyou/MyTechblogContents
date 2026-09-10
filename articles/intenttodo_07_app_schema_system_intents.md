@@ -59,7 +59,7 @@ public enum TodoListType: String {
 気付いたことがいくつか。
 
 - **`.reminders` ドメインは iOS 27+ 限定** でした。採用するには deployment を 27 世代へ上げる必要があって、この引き上げごと `main` にマージしたので、今はアプリのベースラインが iOS 27 です。
-- スキーママクロが `typeDisplayRepresentation` を生成してくれるので、自分で書いていた分は **削除** しました。
+- スキーママクロが `typeDisplayRepresentation` を生成してくれるので、自分で書いていた分は **削除** しました。スキーマ適合の entity で上書きすると `typeDisplayRepresentation should not be overridden in an AppEntity that conforms to a schema` という警告になります。ただし「マクロがスキーマ由来の名前を入れてくれる」わけではなくて、生成されるのは **空の `TypeDisplayRepresentation`** でした。出荷メタデータを覗いてみると、スキーマに適合している entity は **上書きの有無にかかわらず `displayTypeName` が空** です。この上書きは、システムが読むメタデータには最初から載っていなくて、プロセス内で Swift として読んだときだけ値が変わる、という状態だったわけです。外しても挙動は変わりませんでした。
 - 6/N で書いたプロパティマクロのときと同じで、スキーママクロも非 `Hashable` な backing を生やすので、`Hashable` の自動合成が壊れます。`==` / `hash(into:)` を明示実装で補いました。
 - listType には `standard` という **case の存在が要求されます** (`conforming to 'reminders.listType' requires enum case 'standard'`)。`.reminders.list` の `type` も非 optional 必須です。
 
@@ -118,7 +118,7 @@ error: Property 'locationTrigger' type does not match required AppSchemaEntity p
 
 これまで自分は「`reminders` ドメインの assistant schema は watchOS で unavailable」と書いてきました。嘘ではないんですが、読んだ人が「じゃあ別ドメインなら?」と考えてしまう書き方でした。
 
-SDK の swiftinterface を全数走査したら、**23 ドメイン全部** が watchOS / tvOS で `unavailable` です。`audio` `books` `browser` `calendar` `camera` `clock` `files` `journal` `mail` `maps` `messages` `notes` `phone` `photos` `presentation` `reader` `reminders` `spreadsheet` `system` `whiteboard` `wordProcessor`、それに `assistant` (iOS 限定) と `visualIntelligence` (visionOS も除外)。**例外ゼロ** でした。
+SDK の swiftinterface を全数走査したら、**23 ドメイン全部** が watchOS / tvOS で `unavailable` です (Xcode 27 が RC まで来たので測り直しましたが、変わっていません)。`audio` `books` `browser` `calendar` `camera` `clock` `files` `journal` `mail` `maps` `messages` `notes` `phone` `photos` `presentation` `reader` `reminders` `spreadsheet` `system` `whiteboard` `wordProcessor`、それに `assistant` (iOS 限定) と `visualIntelligence` (visionOS も除外)。**例外ゼロ** でした。
 
 理由も裏が取れていて、Apple Intelligence Group Lab (35:34) が「新しい Siri は iPhone / iPad / Mac / visionOS で使える。HomePod では使えない」と言っています。App Schema は **その Siri に語彙を渡す仕組み** なので、Siri の提供範囲がそのまま availability になっている、という構造でした。`assistant` が iOS だけ・`visualIntelligence` が visionOS を外す、という細かい差まで一致するので、取りこぼしではなく意図的で一貫した線引きだと思います。
 
@@ -313,6 +313,7 @@ UI 側では **絞り込み中であることの表示と、その場での解�
 - **親のスキーマ適合は子のスキーマ適合も要求する**。適合はサブグラフ全体に及ぶ
 - **App Schema の 23 ドメイン全部が watchOS / tvOS で unavailable**。新しい Siri の提供範囲がそのまま availability になっているので、ドメインを変えても自前スキーマにしても回避できない
 - watchOS 用のフォールバックは **型名も分ける**。同じ型名だと統合メタデータで後勝ちのマージが起きて、iOS の出荷メタデータからエントリごと消える (→ 3/N)
+- スキーマ適合の entity では `typeDisplayRepresentation` を上書きしない (警告になる)。マクロが生成するのは **空** の表現で、出荷メタデータ側は上書きの有無にかかわらず最初から空
 - `__appSchemaEntity` の手書きは「動くけれど採ってはいけない」形。プロトコル要求ですらない非公開の申し合わせで、名前が変われば無言で壊れる
 - system intent (`OpenIntent` / `DeleteIntent` / `.system.searchInApp`) はプロトコル直適合でよく、AppShortcuts 無しでも意味解釈される
 - `SetFocusFilterIntent` は「実行先を選べない Intent」。`notificationFilterPredicate` を返すと **criteria の無い通知が全部消える** ので、自分の失敗通知は許可リストに常置する
@@ -323,6 +324,7 @@ UI 側では **絞り込み中であることの表示と、その場での解�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-09-11**: スキーマ適合 entity の `typeDisplayRepresentation` について、上書きが警告になること・マクロが生成するのは空の表現で、出荷メタデータでは元から空だったことを追記。App Schema の watchOS / tvOS unavailable は Xcode 27 RC でも変わらないことを反映
 - **2026-08-31**: `.reminders.reminder` 本体適合が成立したので「保留」の節を全面的に書き換え。据え置きの理由だった SSU バグは発火条件が違い、本体適合は踏まないことが判明。App Schema の制約を「reminders が watchOS で使えない」から「**23 ドメイン全部が watchOS / tvOS で unavailable**」に拡張 (理由は新しい Siri の提供範囲)。親の適合が子の適合を要求すること、`__appSchemaEntity` を手書きして撤去した経緯、`Transferable` を `typealias` 越しに書くと watchOS スライスで落ちること、Apple への報告 (FB24570185) を追加
 - **2026-08-28**: watchOS フォールバックの型名を分ける話 (同名だと iOS の出荷メタデータからスキーマが消える) を追加。`SetFocusFilterIntent` の節を追加。`.reminders` の iOS 27 要件が `main` のベースラインになったことを反映
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)

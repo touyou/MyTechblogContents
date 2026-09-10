@@ -255,6 +255,26 @@ final class SceneDelegate: NSObject, UIWindowSceneDelegate, AppIntentSceneDelega
 
 `performNavigation(forScene:)` はプロトコル要件が nonisolated なので、`@MainActor` を付けずに実装して中で `MainActor.assumeIsolated` しています。呼び出し元をシーンデリゲート (= メインスレッド) に限っているから成立する形です。
 
+### おまけ 4: Mac のメニューバーからも `Button(intent:)` は走る
+
+Mac 版を人に触ってもらったら、「削除が大変」「ショートカットが 1 つも無い」と言われました。実際、一覧から削除する手段が存在していなくて (Mac にはスワイプアクションが無い)、詳細を開いて Delete を押すしか無い状態でした。ここを直したときに分かったことを 3 つ。
+
+まず、**メニューバーの項目も `Button(intent:)` で書けます**。`Commands` の中でも intent が走ることは手で 8 項目確認しました。画面上のボタンとメニューとコンテキストメニューが、全部同じ Intent を指す形にできます。
+
+```swift
+// Commands 側
+@FocusedValue(\.selectedTodo) private var selectedTodo
+// ...
+Button(intent: ToggleTodoCompletionIntent(todo: selectedTodo)) { Text("完了にする") }
+    .keyboardShortcut(.return)
+```
+
+2 つめが、**対象の Entity をコマンド側で capture しないこと**。`NavigationModel` を `TodoCommands(navigationModel:)` で渡せば `selectedTodo` は読めるんですが、`Commands` の body が `@Observable` の変更で必ず組み直される保証を自分は確認できていません。組み直されなかったら **古い選択に対して Intent が走る** = 別の Todo が消える、という壊れ方なので、読み違えたときの代償が大きすぎます。選択は `focusedSceneValue(\.selectedTodo, ...)` で publish して `@FocusedValue` で受ける形にしました。これは「フォーカスに依存するメニュー項目」のために用意されている仕組みなので、更新は SwiftUI 側の保証です。シートを出すだけの項目 (⌘N の追加 / ⌘E の編集) はクリック時に `NavigationModel` を読むので、そもそも陳腐化しません。
+
+3 つめが削除で、これは上の落とし穴 4 とまったく同じ形になりました。⌫ を隠しボタンの `keyboardShortcut(.delete, modifiers: [])` で拾う案は駄目で、メニューのキー等価はフィールドエディタより先に評価されるので **検索フィールドの backspace まで奪います**。`List` の `.onDeleteCommand` はレスポンダチェーン経由なので、テキスト入力中は入力側が先に食ってくれます。
+
+ただし `.onDeleteCommand` はクロージャなので `Button(intent:)` にできません。ここで `TodoService` を直接呼ぶと、スナップショットの保存も undo の登録も donation の後始末も全部写経することになって、「削除」の意味が 2 か所に分かれます。なので **クロージャは「確認を出して」と頼むだけ** にして、実行は `.confirmationDialog(_:item:)` の中の `Button(role: .destructive, intent: DeleteTodoImmediatelyIntent(todo:))` に任せました。⌫ / 行の右クリック / メニューの ⌘⌫ の 3 経路が、1 つの確認と 1 つの Intent に収束します。経路は 3 つに増えたけど Intent は増えていない、というのが気持ちいいところでした。確認を挟んでも詳細を開くより速いし、削除は `UndoableIntent` なので ⌘Z でも戻せます (8/N)。
+
 ## 落とし穴 3: `IndexedEntity` 準拠だけでは Spotlight に検索されない
 
 `TodoAppEntity` を `IndexedEntity` に準拠させ、`attributeSet` も実装したのに **Spotlight で検索しても何も出てこない**、という現象に出会いました。
@@ -525,6 +545,7 @@ IntentTodo は長らく `SiriTipView`（「"やることを追加" と言って�
 - **アプリ内の `Button(intent:)` から `requestConfirmation` は失敗する** → 確認を提示する面が無いため。Siri / Shortcuts / AppIntentsTesting では通るので気付きにくい。確認なし版を分けて、UI 側は `.confirmationDialog` で確認する
 - ただし **逃げ先の SwiftUI 側にも罠がある**。`dismissalConfirmationDialog(_:shouldPresent:)` は iOS のシートでは発火しない (ビルドは通る)。「dismiss しようとした」を観測する公開 API が無いので、`interactiveDismissDisabled` で塞ぐところまでが限界
 - **失敗が無音になる経路を塞ぐ** → `@Dependency` の登録漏れはクラッシュせず「何も起きない」で終わる。通知の許可が無いと Control の失敗報告は消える (`add` は error を返さない)。伝える手段が 1 つしか無いところは、塞がれたときの記録と設定誘導までセットで作る
+- **メニューバーの項目も `Button(intent:)` で走る** (Mac で手で確認済み)。ただし対象の Entity は capture せず `@FocusedValue` から取る。クロージャしか受けない口 (`.onDeleteCommand`) は「確認を出す」だけにして、実行は確認ダイアログの中の `Button(role:intent:)` に寄せる
 - **`SiriTipView` / `ShortcutsLink` は置き場を間違えると邪魔になる**。「使えるか」だけでなく「今も推奨されているか」「自分の使い方が推奨に沿っているか」まで見る
 
 これで本編 (1〜5) は一区切りです。ここから先は [WWDC 2026 編 (6/N)](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros) で、新しい App Intents の API を試してみて分かった設計判断をまとめていきます。検証待ち・将来書く予定のトピックは [番外編 (99/N)](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) に並べてあります。
@@ -533,6 +554,7 @@ IntentTodo は長らく `SiriTipView`（「"やることを追加" と言って�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-09-11**: おまけ 4 (Mac のメニューバーからも `Button(intent:)` が走る / 対象は `@FocusedValue` から取る / `.onDeleteCommand` は確認ダイアログ経由で Intent に収束させる) を追加
 - **2026-08-31 (2)**: 落とし穴 4 に「逃げ先の SwiftUI 側にも罠があった」を追加 (`dismissalConfirmationDialog` が iOS のシートで空振りする / 代わりの 2 段構え / 保存経路は塞がない / dirty 判定の初期値)
 - **2026-08-31**: 落とし穴 1 を圧縮 (撤去済みのワークアラウンドの実装詳細を落として、実測で消えるまでの流れだけ残した)。おまけとして `SiriTipView` を一覧の一等地から降ろし `ShortcutsLink` を設定に置いた話を追加
 - **2026-08-28**: 落とし穴 5 (失敗が無音になる 3 経路 — `@Dependency` 登録漏れ / 通知拒否 / ライブアクティビティ無効) を追加。Spotlight の節を名前付き index + `IndexedEntityQuery` + client state による省略と自己修復まで書き直し (「自己修復ループは今後の改善ポイント」だったものを実装済みに)。cold start でシーン経由の遷移を取りこぼす話 (おまけ 3) を追加

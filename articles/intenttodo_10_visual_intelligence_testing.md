@@ -137,7 +137,7 @@ WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテス
 [Apple のドキュメント](https://developer.apple.com/documentation/AppIntentsTesting/testing-your-app-intents-code) が明記していて、AppIntentsTesting は intent を **ライブのアプリプロセスで実行** するので、テストは unit test ではなく **UI テスティングバンドル** に置く必要があります。
 アプリプロセスと、登録済みの `AppDependencyManager` が要るからで、SPM の Testing パッケージでは動きません。IntentTodo は既存の `IntentTodoUITest` (UI テストターゲット) に追加しました。
 
-もう 1 つ、セッション 295 (2:54) が明言している要件があって、**テストランナーとアプリ本体が同じ development team で code signing されている必要があります**。自分は同一 Apple ID でしか触っていないので踏んでいないんですが、CI や複数アカウントを切り替える環境でここがずれると、原因の見当がつきにくい失敗になりそうです。テストを足すときは最初に署名チームを揃えておくのが良さそうだなと思っています。
+もう 1 つ、セッション 295 (2:54) が明言している要件があって、**テストランナーとアプリ本体が同じ development team で code signing されている必要があります**。同一 Apple ID でしか触っていないので「自分には関係ない要件」だと思っていたんですが、後で別の形でまともに踏みました (後述)。ランナーとアプリの紐付けを署名で確かめている、という仕組みの方を覚えておくのが正解でした。
 
 ```swift
 import AppIntents
@@ -306,12 +306,104 @@ app.buttons["Delete todo"]         // 実際は「やることを削除」
 **ローカライズを入れる作業は、テストの前提を静かに変えます**。しかも壊れ方が「落ちる」と「何も検証しなくなる」の 2 種類あって、後者は自分から探しに行かないと見つかりません。
 
 
+### `CODE_SIGNING_ALLOWED=NO` を流用して、SDK の退行だと誤診した
+
+この節の締めに、いちばん最近やらかしたやつを書いておきます。**「SDK が退行した」と 1 日書いていたら、壊れていたのは自分のコマンドラインでした。**
+
+Xcode 27 が RC まで来たので SDK 側の制約を測り直していて、その途中の話です。SSU training のバグ (6/N) が直っているかを見るのに、こういうビルドを回していました。
+
+```
+xcodebuild -project IntentTodo.xcodeproj -scheme IntentTodo \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max,OS=27.0' \
+  -derivedDataPath /tmp/ITRCProbeDD CODE_SIGNING_ALLOWED=NO build
+```
+
+`build` にこのフラグを付けるのは正しくて、署名なしでもメタデータ抽出も SSU training も走ります。**間違えたのは、そのままコマンドラインを使い回して `test` を走らせたこと** でした。
+
+```
+Error Domain=AppIntentsServicesSecurityErrorDomain Code=803
+"Unable to run internal tests on a Customer build"
+```
+
+AppIntentsTesting の 23 件が全部これで死にます。文面が "Customer build" で、しかもちょうどシミュレータのランタイムがベータ版から出荷版に切り替わった直後だったので、自分は **「RC で AppIntentsTesting が退行した」と読みました**。
+
+理屈はこうでした。`CODE_SIGNING_ALLOWED=NO` は **UI テストランナーの再署名ごと飛ばします**。すると `XCTRunner.app` テンプレートの素性がそのまま残ります。
+
+| | 通常のビルド | `CODE_SIGNING_ALLOWED=NO` |
+|---|---|---|
+| ランナーの `Identifier` | `dev.touyou.IntentTodo.IntentTodoUITest.xctrunner` | **`com.apple.XCTRunner`** |
+| ランナーの署名 | ad-hoc | **未署名** |
+
+AppIntentsTesting はテスト対象アプリの App Intents をアプリのプロセス経由で叩くので、**「このランナーはそのアプリのテストランナーである」ことを署名で確かめています**。ランナーが `com.apple.XCTRunner` のままだと紐付けが成立せず、拒否されます。上で「自分には関係ない要件」と思っていた署名チームの話が、こういう形で返ってきた格好でした。
+
+同じデバイス・同じテストで、フラグの有無だけを変えたら一発でした。
+
+| ビルド | 結果 |
+|---|---|
+| フラグなし | **23 件 passed** |
+| `CODE_SIGNING_ALLOWED=NO` | 全件 skip + 803 |
+
+自分でも情けないのが切り分けのやり方で、並列実行・デバイスの残留状態・dyld キャッシュと順番に潰して「環境ノイズではない」ところまでは確認していました。ただ **どの行でも `CODE_SIGNING_ALLOWED=NO` は付けたまま** だったんです。変数を 1 つも動かしていないので、何回やっても同じ答えしか返ってきません。切り分け表を作ると「たくさん試した」感が出るんですが、**全行に同じ誤った定数が置いてあるなら切り分けになっていない** わけで、ここは表の見た目に自分で騙されていました。同時に出ていた別のクラッシュ (シミュレータでは `XPCPeerRequirement.hasEntitlement(_:)` が未実装で trap する、というやつ) を傍証として採用してしまったのも良くなかったです。署名ありで走らせると 23 件全部通るので、あれは 803 とは無関係でした。
+
+発覚したのは、本人が Xcode から手で実行したログに **803 が 1 件も出ていなかった** からです。教訓は「SDK の退行だ」と結論する前に **自分のコマンドラインと IDE の差分を 1 つずつ潰す**、とくに **他のコマンドから流用したフラグは真っ先に疑う** の 2 つでした。
+
+使い分けとしてはこうです。
+
+| 用途 | `CODE_SIGNING_ALLOWED=NO` |
+|---|---|
+| `build` (SSU / メタデータの確認) | ✅ 付けてよい |
+| `build-for-testing` / `test` / `test-without-building` | 🚫 AppIntentsTesting が 803 で全滅する |
+
+### 誤診が 1 日生き延びたのは、skip が緑になるから
+
+原因が自分側だったこととは別に、**この誤診を 1 日生かしてしまった仕組み** の方が問題でした。
+
+テストの前段に「intent がまだ発見できないなら待つ」というヘルパーを置いていて、タイムアウトしたら `XCTSkip` を投げるようにしていたんです。結果こうなります。
+
+```
+Executed 1 test, with 1 test skipped and 0 failures (0 unexpected)
+Test Suite 'IntentTodoUITest.xctest' passed
+```
+
+**23 件が 1 件も実行されていないのに `TEST SUCCEEDED`** です。「まあ環境依存だし」で流せてしまう見え方なので、原因を追う優先度が上がりませんでした。
+
+直し方として最初に考えた「skip のラベルを分かりやすくする」は意味がありません。**XCTest の skip は名前を何にしても緑** なので、同じ失敗モードがそのまま再現します。なので skip をやめて、どちらも失敗にしました。「環境依存かどうか」は挙動ではなく **原因の分類** の方に使っています。
+
+| エラー | 挙動 |
+|---|---|
+| `AppIntentsServicesSecurityErrorDomain` (803 など) | **待たずに即失敗**。待っても直らない設定ミスだし、23 件 × 30 秒を捨てることになる。メッセージに「`CODE_SIGNING_ALLOWED=NO` を付けていませんか」と対処まで書く |
+| それ以外 (再インストール直後のメタデータ未反映など) | 従来どおり 30 秒ポーリング。タイムアウトしたら **skip ではなく失敗** |
+
+ついでに、自前のエラー型を `LocalizedError` にも適合させました。XCTest は `localizedDescription` 経由でも投げられたエラーを出すので、これが無いと親切に書いたメッセージが「操作を完了できませんでした」に化けます。
+
+変更後は、署名ありなら 23 件 passed のまま、フラグ付きなら 5.6 秒で `TEST EXECUTE FAILED` になります。38 秒待って緑になるより圧倒的にましです。
+
+### 緑になる嘘テストは、増やしたぶんだけ増える
+
+同じ「緑になるけど何も見ていない」形を、スクリプトで全テストに当てて洗い出しました。5 件出てきて、内訳が我ながらひどかったです。
+
+- フォールバックの連鎖の末尾が「ボタンが 2 個より多い」で、**アプリが起動していれば常に true**。メニューが開かなくても緑
+- watch の空状態テストが `if allDoneText.waitForExistence { … }` の中に本体まるごと入っていて、**要素が出なければ何も検証せず緑**
+- watch の完了トグルのテストが「残っていたら分岐」の形で、**そもそも完了トグルを一度も叩いていなかった**
+- 「セクションがある **or** 空状態」という assert。空ストアなら必ず後者で通る
+- `if favoriteToggle.exists { tap }` のせいで、お気に入り付き追加のテストが **お気に入りを一度も検証していなかった**
+- `#expect(x != nil)` が非 Optional 相手で常に true
+
+直したあと、**わざと壊して落ちることまで確認しました**。メニューを開く `tap()` を外す、期待文字列を存在しないものに差し替える、チェックボックスの `tap()` を外す。3 つとも狙ったメッセージで落ちて、戻したら緑になりました。assert に歯が生えているかどうかは、**通ることでは分からなくて、落とせることでしか分からない** んだなと思います。
+
+watch のテストが軒並み条件付きになっていたのには理由があって、**前提データを作る手段が無かった** からでした。watchOS シミュレータの `typeText` が信用できないので、追加シート経由で行を用意できません。フィクスチャが無いから「リストが出た」しか見られなくて、その結果が「トグルを叩かないまま緑」だったわけです。ここは DEBUG 限定の起動引数を 2 つ (in-memory ストア / Todo を 1 件 seed) 足して、iOS 側と同じ土俵に乗せました。テストの言語を `en` に固定するのも、iOS 側だけやって watch 側を忘れていた分です。
+
+その過程で watch について 2 つ分かったことも書いておきます。
+
+- **行のタイトルは `staticText` ではなく `button`** です (`NavigationLink` のラベルなので)。`app.staticTexts["Seeded Todo"]` は永遠に解決しません。`app.debugDescription` を吐かせて確定させました
+- **完了させると行はリストから消えます**。watch の `@Query` が `!isCompleted` で絞っているためで、iOS のように `Mark as incomplete` へ変わるのを待っていると来ません。最初その形で書いて落として、**アプリの挙動が正しくてテストの期待が間違っている** という順番でした
+
 ## 検証できた深さ
 
 今回は以下です。
 
 - **ビルド成立 (型レベル)**: `IntentValueQuery` / `SemanticContentDescriptor` / `semanticContentSearch` スキーマ適合 / AppIntentsTesting の記述は OK。
-- **AppIntentsTesting**: 公開時点では buildForTesting + live diagnostics 0 件まで (型・登録レベル) でした。その後 23 テストまで広げて **実 run でグリーン** にしたので、entity query / valueState / バルク処理 / ValueRepresentation まわりは単体 (U) 深度に上がっています。スキームにパッケージのユニットテスト 4 ターゲットを入れたので、通しでは 281 件が走ります。
+- **AppIntentsTesting**: 公開時点では buildForTesting + live diagnostics 0 件まで (型・登録レベル) でした。その後 23 テストまで広げて **実 run でグリーン** にしたので、entity query / valueState / バルク処理 / ValueRepresentation まわりは単体 (U) 深度に上がっています。スキームにパッケージのユニットテスト 4 ターゲットを入れたので、iPhone / iOS 27 の通しでは 302 件が走ります (Xcode 27 RC でも 23 件そのまま緑です)。
 - **実機 (実際に visual search で Todo が候補に出るか)**: 未確認です。Visual Intelligence の visual search は端末での手動確認が要るので、できたら追記します。
 
 ## WWDC 2026 編をふりかえって
@@ -335,12 +427,16 @@ app.buttons["Delete todo"]         // 実際は「やることを削除」
 - `viewAnnotations()` で画面が publish している entity を検証できる。ただし **watchOS では `run()` が code 4025 で落ちて前提データを作れない** ので、そこは手動確認に回す。`forSelectionType:` も「`List` なら効く」ではなく「**selection のある `List` なら効く**」
 - Apple が示す検証の順番は **AppIntentsTesting → Shortcuts → Spotlight → Siri**。フレーズのルーティングだけは手動確認の領域と割り切ってよい
 - テスト基盤も壊れる。**スキームに入っていないテストは「落ちる」のではなく「存在しないことになる」**。並列実行は速いとは限らず、共有ストアはテスト間で積み上がる。ローカライズを入れるとテストの前提が静かに変わる
+- **`xcodebuild test` に `CODE_SIGNING_ALLOWED=NO` を付けない**。ランナーの再署名ごと飛んで AppIntentsTesting が 803 で全滅する。`build` (SSU / メタデータの確認) に付けるのは正しいので、フラグの流用が事故になる
+- **この層で `XCTSkip` を使わない**。skip は名前を何にしても `TEST SUCCEEDED` なので、23 件が 1 件も走らなくても緑に見える。待っても直らない設定ミスは待たずに失敗させる
+- 直した assert に歯があるかは、**通ることではなく落とせることで確かめる**。わざと壊して、狙ったメッセージで落ちるところまで見る
 - WWDC 2026 編全体を通して、Entity / Intent を丁寧に設計しておくほど新サーフェスへの適合が安くなる、というのが一番の実感だった
 
 ## 更新履歴
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-09-11**: Xcode 27 RC で測り直した分を反映。`CODE_SIGNING_ALLOWED=NO` を `test` に流用して「SDK が退行した」と誤診した経緯、`XCTSkip` をやめて失敗にした話、緑になる嘘テスト 5 件を潰してわざと壊して確かめた話、watch 側のフィクスチャで分かったことを追加。テスト件数を現状 (通し 302 件 / AppIntentsTesting 23 件) に更新
 - **2026-08-31**: 「テストを増やしたら、テスト基盤の方が壊れていた」の節を追加 (スキームに SPM のテストターゲットが入っておらず 137 テストが走っていなかった / 並列実行が速くなかった / 共有ストアがテスト間で積み上がる / ホスト言語が ja だと英語ラベル引きと `String(localized:)` が外れる)。テスト件数を現状に更新
 - **2026-08-28**: `viewAnnotations()` による画面ごとの検証と、watchOS では `run()` が code 4025 で落ちて自動化できない話を追加。`forSelectionType:` が効く条件を「selection のある `List`」に訂正。Visual Intelligence のラベル照合も `localizedStandardContains` に揃えたことを反映。更新履歴をまとめの後ろへ移動 (他の記事と順序を揃えた)
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)

@@ -265,6 +265,8 @@ SSU の variable は「**App Shortcut が参照する Intent のパラメータ�
 
 さらに、**リリース版の Xcode 26.6 でも再現しました**。`PlaceDescriptor` の `_SystemIntentValue` 適合は iOS 26 からなので、ベータ特有の話ではなく **26 世代から出荷されているバグ** だった、ということになります。Apple の公式サンプル (UnicornChat) に 13 行足すだけでも同じエラーが出ます。
 
+そして **Xcode 27 が RC (27A266a) になっても直っていません**。`@Parameter` を `PlaceDescriptor?` に戻した probe を、共有 DerivedData を汚さない別ディレクトリでクリーンビルドし直したんですが、同じ regex のエラーが出て `nlu.appintents` の生成数は 0 のままでした。退避はもうしばらく続きそうです。
+
 #### 分かったので entity 側は戻した
 
 というわけで、**`TodoAppEntity.location` は `PlaceDescriptor?` に戻しました**。退避が要るのは `AddTodoIntent.location` (App Shortcut に登録済み Intent の `@Parameter`) だけです。
@@ -616,6 +618,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 - **2026-08-28**: 表示表現の作法 (補間形式 / Siri が読む subtitle / `synonyms:` と遅延クロージャ / `displayRepresentations(for:)` / `localizedStandardContains`) の節を、公式サンプル 4 本との突き合わせとして追加。`indexingKey:` と `attributeSet` で同じキーを二重に埋めていたのを訂正。検証ブランチが `main` にマージされたことを反映。重複していた 1 行を削除
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12**: `TodoEntityStore` の登録について「`App.init()` で 1 回登録すれば足りる」と書いていたのを訂正 (Widget Extension 側でも登録が要る)
+- **2026-09-11**: `PlaceDescriptor` の SSU バグが Xcode 27 RC でも未修正であることを反映 (`@Parameter` の退避は継続)
 - **2026-08-11**: `\.textContent` は「SDK に露出していない」と書いていたが誤りで、実在する (`contentDescription` を選ぶ理由を型の制約から意味の制約に訂正)。`@ComputedProperty` の出自を 345 → **275** に再訂正 (2026-08-05 の訂正自体が誤りだった)。`PlaceDescriptor` の SSU バグは beta 5 でも未修正、判定は必ずクリーンビルドで行う旨を追加
 - **2026-08-05**: `@ComputedProperty` / `@DeferredProperty` を「WWDC 2026 の新要素」として書いていたのを訂正
 - **2026-07-28**: `TransientAppEntity` (`TodoListSummaryEntity` + `GetTodoSummaryIntent`) の節を追加。beta 3 の SSU バグで `PlaceDescriptor` を `String` に退避した経緯を追加

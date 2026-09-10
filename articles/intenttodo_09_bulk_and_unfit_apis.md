@@ -168,8 +168,8 @@ public func perform() async throws -> some IntentResult & ReturnsValue<[TodoOrCa
 
 `updateEntities(_:for:)` の第二引数は `AppEntityContext` で、これが **ドメイン固有のファクトリしか持っていない** ことが分かりました。
 
-- 提供される context は `.audio(.nowPlaying)` や `.audio(.workout(activityType:))` のような `AudioContext` と、framework overlay (HealthKit など) が定義する domain context だけ。WWDC 2026 (セッション 345) のサンプルも「ランニング開始時にランニング用プレイリストを提案」と、やはり audio ドメインの文脈でした。
-- **汎用 / reminders / todo 向けの context 値が存在しない** んです。
+- **公開 SDK で使える context は `.audio(.nowPlaying)` 1 つだけ** です。`AppEntityContext` のファクトリは `.audio(_:)` の 1 つ、`AudioContext` の値も `.nowPlaying` の 1 つでした (iOS / macOS / watchOS / visionOS の swiftinterface を Xcode 27 RC で確認)。ここは以前 `.audio(.workout(activityType:))` も並べて書いていたんですが、手元の公開 SDK のどこにも見つけられなかったので取り下げます。framework overlay (HealthKit など) が独自の domain context を足す余地はある、という形です。
+- いずれにせよ **汎用 / reminders / todo 向けの context 値が存在しない** んです。
 - かといって `.audio(.nowPlaying)` で Todo を寄付するのは意味的に間違っています (Todo が再生中メディア扱いになる)。
 
 つまり、**reminders ドメインのアプリでは `RelevantEntities` は現状そもそも適合できない** という結論になりました。
@@ -181,7 +181,7 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 
 この結論、SDK が上がるたびに確かめ直しているんですが、今のところ変わっていません。iOS 27 で **寄付を取り消す側** の API (`removeAllEntities(for:)` など) が増えましたが、寄付する側の context が無い以上は出番がありません。`AppEntityContext` のファクトリも `.audio(_:)` 1 つのままです。
 
-ついでに、SDK の公開シンボルを全部並べて「リポジトリのどこにも名前が出てこないもの」を洗ったこともあるんですが、iOS 27 で入っていて記録が無かったのは 4 つだけで、どれも採用する筋がありませんでした (`.requiresGPU` を宣言する `LongRunningTaskOptions`、公開イニシャライザが無くてアプリからは値を作れない `RunSystemShortcutIntent`、下線付きで公開 API として使えない `IntentResponseStream`、`@UnionValue` が生成する裏側のプロトコル)。**「まだ使っていない API」を数えるより、使えない理由を 1 行ずつ書き残す方が後で役に立つ** な、というのがこの棚卸しの感想です。
+ついでに、SDK の公開シンボルを全部並べて「リポジトリのどこにも名前が出てこないもの」を洗ったこともあるんですが、iOS 27 で入っていて記録が無かったのは 4 つだけで (RC で測り直しても増えていません)、どれも採用する筋がありませんでした (`.requiresGPU` を宣言する `LongRunningTaskOptions`、公開イニシャライザが無くてアプリからは値を作れない `RunSystemShortcutIntent`、下線付きで公開 API として使えない `IntentResponseStream`、`@UnionValue` が生成する裏側のプロトコル)。**「まだ使っていない API」を数えるより、使えない理由を 1 行ずつ書き残す方が後で役に立つ** な、というのがこの棚卸しの感想です。
 
 ## 「使えるけど使わない」を決めた API の棚卸し
 
@@ -213,9 +213,11 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 - **`AudioPlaybackIntent`**: 再生機能が無い
 - **`CustomIntentMigratedAppIntent`**: 移行元の SiriKit 資産が無い
 - **`LiveActivityStartingIntent`**: iOS 17 で deprecated で、`LiveActivityIntent` が後継
-- **`PredictableIntent`**: 8/N に書いたとおり寄付がゼロなので、そもそも提案が出ない
+- **`PredictableIntent`**: 提案の前提になる寄付が無い、という理由で外していた
 
-`PredictableIntent` だけは「入れられない」ではなく「別の判断の結果として使えない」なので、寄付を再訪するときに一緒に戻ってくる予定です。
+その `PredictableIntent` だけは、**前提の方が崩れて格下げになりました**。8/N のとおり、アプリ内 `Button(intent:)` の実行はシステムが donation として記録しています。「寄付がゼロだから提案が出ない」がそもそも成立しないので、これは **「入れられない」ではなく「まだ手を付けていない」** です。機能として先回りの提案が欲しくなったら普通に候補に戻ります。
+
+「できない理由」を書いたあと、その理由の前提が別の検証でひっくり返ったのに、結論だけが残っていた形でした。99/N に書いた「できない理由を測り直さない」の実例がまた 1 つ増えた格好です。
 
 ### `SpotlightSearchTool`: 前提は揃ったけどスコープの外
 
@@ -237,9 +239,9 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 - `CancellableIntent` は `onCancel:` + ループ内 `try Task.checkCancellation()`。perform は `@MainActor` にせず、必要なところだけ await でホップする
 - `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ。未指定なら実行プロセスはヒューリスティクスで決まる。制御できるのは perform のプロセスであって、entity 解決を踏むかどうかではない
 - 1 件だけ付けて止まっていた `allowedExecutionTargets` は、**書き込み系は全部 `[.main]` / 読み取り系は未指定** という方針に格上げした。宣言漏れはソース走査のテストで検出する
-- 「使えるけど入れない」も判断として残す。`.foreground(.dynamic)` は当て先が無い、`EntityPropertyQuery` は `EnumerableEntityQuery` で足りている、`PredictableIntent` は寄付ゼロだと動かない
+- 「使えるけど入れない」も判断として残す。`.foreground(.dynamic)` は当て先が無い、`EntityPropertyQuery` は `EnumerableEntityQuery` で足りている。ただし **理由の前提が崩れることがある** ので、結論だけ持ち越さない (`PredictableIntent` は「寄付ゼロだから動かない」が崩れて未着手に格下げ)
 - `@UnionValue` で複数 Entity 型を 1 つの結果に混ぜられる。`public enum` は `: Sendable` 明示が必要
-- `RelevantEntities` は **reminders ドメイン向けの `AppEntityContext` が存在せず適合不能**。実装ミスではなく API 設計上の壁。保留
+- `RelevantEntities` は **reminders ドメイン向けの `AppEntityContext` が存在せず適合不能**。公開 SDK で使える context は `.audio(.nowPlaying)` の 1 つだけ。実装ミスではなく API 設計上の壁で、保留
 
 次回は WWDC 2026 編の最後として、[Visual Intelligence 連携 (`IntentValueQuery` / `SemanticContentDescriptor`) と、AppIntentsTesting で Intent を実経路テストした話 (10/N)](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) を書きます。
 
@@ -247,6 +249,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-09-11**: `AppEntityContext` として使えるのは `.audio(.nowPlaying)` だけだと確定し、`.audio(.workout(activityType:))` の記述を取り下げ (Xcode 27 RC の公開 SDK に無い)。`PredictableIntent` を「寄付がゼロだから使えない」から「前提が崩れたので未着手」に格下げ
 - **2026-08-31**: 撤去済みの FromExtension 分離をめぐる 3 段階の経緯 (畳めるか → 畳めない → そもそも要らなくなった) を 1 節に圧縮。`RelevantEntities` の結論が SDK 更新後も変わっていないことと、SDK の公開シンボル棚卸しの結果を反映
 - **2026-08-28**: `allowedExecutionTargets` を「書き込み系は全部 `[.main]`」という方針に格上げした話を追加。「使えるけど使わないと決めた API」の棚卸し (`.foreground(.dynamic)` / `EntityPropertyQuery` / `PredictableIntent` / `SpotlightSearchTool` ほか) を追加。`ProgressReportingIntent` は `LongRunningIntent` 経由ですでに採用済みだったことを反映
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)

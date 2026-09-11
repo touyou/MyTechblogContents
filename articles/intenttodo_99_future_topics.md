@@ -195,7 +195,7 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 
 **1. 断定を取り下げたもの** (再検証したら根拠が足りなかった)
 
-- 「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を重複宣言してはいけない」→ ビルドとメタデータのレベルでは重複が起きず、むしろセッション 244 / 275 は逆にそのパターンを標準手順として紹介していました → [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
+- 「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を重複宣言してはいけない」→ ビルドとメタデータのレベルでは重複が起きず、むしろセッション 244 / 275 は逆にそのパターンを標準手順として紹介していました。ただ「重複が起きなかった」も正確ではなくて、静的リンクのパッケージなら宣言が無くてもメタデータは集約されていて、宣言はそもそも中身に触っていませんでした → [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
 - 「Widget の `.background` Intent は必ず Widget Extension プロセスで実行される」→ 実際は未指定ならヒューリスティクスで、固定したいなら `allowedExecutionTargets` を明示する → [2/N](https://zenn.dev/touyou/articles/intenttodo_02_todoservice_dependency) / [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 - 「Live Activity Extension プロセスで entity 解決が走ると SwiftData が trap する」→ クラッシュは実在するけれど、事前解決フェーズがどのプロセスで走るかは公式に明記が無いので原因の特定を取り下げ → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 - 「`\.textContent` は SDK に露出していない」→ 普通にありました。`contentDescription` を使う結論は変わらないものの、理由が型の制約ではなく意味の制約だった → [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
@@ -269,6 +269,8 @@ Xcode 27 が RC まで来たので制約を全部測り直したんですが、�
 
 4 つ目〜6 つ目の型は「書いたものの確度を取り違える」話でしたが、これは **測定装置そのものが壊れているのに、対象の変化として読む** 型でした。SDK を追いかけていると出力の変化に敏感になるので、余計に踏みやすいなと思います。
 
+この型は、そのあとすぐにもう 1 回踏みかけました。`persistentIdentifier` を上書きしたら App Shortcut が旧名を指したまま取り残されたように見えて、実際はインクリメンタルビルドでパッケージ側の `*.appintents` が作り直されず、古いメタデータが混ざっていただけ、というやつです (→ [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions))。こちらは「何も見ていなくても緑」ではなく **古いものをそれらしく見せてくる** 壊れ方で、別の `-derivedDataPath` に出し直したら一発で消えました。出力ディレクトリを手で消しても作り直されないので、「消したからクリーンなはず」も道具を信じすぎている側でした。
+
 ### RC まで来たので、書き溜めた制約を全部測り直した
 
 Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書いてきた「SDK の制約」をひととおり測り直しました。結論は **beta 6 から何も動いていない** です。
@@ -324,6 +326,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-09-12**: `AppIntentsPackage` の断定取り下げの項に、静的リンクなら宣言が無くてもメタデータは集約される (宣言は中身に触っていなかった) ことを追記。「7 つ目の型」に、インクリメンタルビルドの古いメタデータで `persistentIdentifier` の追従を読み違えかけた件を追加
 - **2026-09-11**: Xcode 27 RC で制約を全部測り直した節を追加 (結論は「beta 6 から何も動いていない」)。**「7 つ目の型: 測る道具の方を疑わない」** を追加。トピック D (macOS native) の操作導線を決着済みに更新。別プロセス起点の donation を、載せ替えの判断とは独立した問いとして書き直し
 - **2026-08-31**: トピック F (reminder 本体スキーマ適合) を **決着済み** に変更 (据え置きの理由 2 つがどちらも誤診で、SDK は塞いでいなかった)。トピック J も entity 側は復帰済みに更新。トピック L (日本語対応で分かった Intent のコピーの引かれ方) を追加。**「6 つ目の型: 『できない理由』を測り直さない」** を追加。実機検証待ちを現状に更新し、SDK 側の対応待ち 2 件 (FB24548956 / FB24570185) を明記
 - **2026-08-28**: 決着したものを反映 (`.foreground(.dynamic)` は当て先なしで終了 / `UndoableIntent` は採用 / 寄付と `SpotlightSearchTool` は「入れない」/ `UISceneAppIntent` は cold start 目的で採用 / watch の追加が無音で失敗していたのを修正)。実機検証待ちの一覧を現状に合わせて書き直し。「5 つ目の型: 片側しか見ていないのに確かめた気になる」と、公式サンプル 4 本との突き合わせの節を追加

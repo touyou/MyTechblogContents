@@ -277,7 +277,7 @@ SSU の variable は「**App Shortcut が参照する Intent のパラメータ�
 
 #### 判定は必ずクリーンビルドで
 
-検証で 1 つ気を付けることがあって、**SSU のタスクは incremental ビルドだと前回のエラーをそのままログに再表示してきます**。`Metadata.appintents` が変わっていないとタスク自体が再実行されないためで、編集直後のビルドが緑でも、SSU セクションのタイムスタンプが編集前のままだったりします。「直った」とも「まだ落ちてる」とも誤読できる形なので、判定は DerivedData ごと消してからにしないといけません。ビルドログを再現性の判定に使うなら、**そのログがいつ生成されたものか** まで見る、というのは地味に効く教訓でした。
+検証で 1 つ気を付けることがあって、**SSU のタスクは incremental ビルドだと前回のエラーをそのままログに再表示してきます**。`Metadata.appintents` が変わっていないとタスク自体が再実行されないためで、編集直後のビルドが緑でも、SSU セクションのタイムスタンプが編集前のままだったりします。「直った」とも「まだ落ちてる」とも誤読できる形なので、判定は DerivedData ごと消してからにしないといけません。ビルドログを再現性の判定に使うなら、**そのログがいつ生成されたものか** まで見る、というのは地味に効く教訓でした。ログに限らず `Metadata.appintents` そのものも、インクリメンタルビルドだとパッケージ側が作り直されずに古い値が混ざることがあって、`persistentIdentifier` を確かめたときにもう 1 回踏みかけています (→ [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions))。
 
 ## `parameterSummary` は Shortcuts 編集画面の allowlist
 
@@ -613,6 +613,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-09-12**: 「判定は必ずクリーンビルドで」に、ログだけでなく `Metadata.appintents` もインクリメンタルビルドで古い値が混ざる件を 1 文追加 (3/N へリンク)
 - **2026-08-31 (2)**: `parameterSummary` の節に、裏返しの非対称 (場所が `AddTodoIntent` では受け取れるのに `UpdateTodoIntent` とアプリの編集画面には無く、後から直せなかった) を追加
 - **2026-08-31**: `PlaceDescriptor` の節を全面的に書き換え。SSU バグの発火条件は **App Shortcut 登録済み Intent の `@Parameter` だけ** と切り分けられたので、entity の `@Property` は `PlaceDescriptor?` に戻した (退避中に落ちていた座標も export されるようになった)。バグが `PlaceDescriptor` 固有でもベータ特有でもないこと、Apple へ報告済み (FB24548956) を追記。`indexingKey:` のガードに visionOS を追加 (以前の「visionOS でも落ちる」という記述は、当時どの SDK で何が落ちたかを書き残していなかったため真偽を判別できず)。`parameterSummary` が Shortcuts 編集画面の allowlist である話を新設
 - **2026-08-28**: 表示表現の作法 (補間形式 / Siri が読む subtitle / `synonyms:` と遅延クロージャ / `displayRepresentations(for:)` / `localizedStandardContains`) の節を、公式サンプル 4 本との突き合わせとして追加。`indexingKey:` と `attributeSet` で同じキーを二重に埋めていたのを訂正。検証ブランチが `main` にマージされたことを反映。重複していた 1 行を削除

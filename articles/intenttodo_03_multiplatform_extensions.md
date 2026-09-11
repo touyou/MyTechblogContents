@@ -259,7 +259,7 @@ struct IntentTodoWatchApp: App {
 
 切り替えの根拠は 3 つで、10/N に書いた検証の梯子 (AppIntentsTesting → Shortcuts → Spotlight → Siri) の下 3 段をそのまま当てました。
 
-1. **クリーンビルドで metadata の件数が一致**。4 バンドルすべての `actions` / `entities` / `enums` / `queries` / `autoShortcuts` が宣言前の baseline と完全一致。しかも `actions` の 23 件は `Intents/` に置いた intent の型数と一致していて、重複していないことが二重に確かめられます
+1. **クリーンビルドで metadata の件数が一致**。4 バンドルすべての `actions` / `entities` / `enums` / `queries` / `autoShortcuts` が宣言前の baseline と完全一致し、`actions` の 23 件も `Intents/` に置いた intent の型数と一致しました (ただ、これを「重複していない証拠」と読んだのは早とちりでした。下の節で書きます)
 2. **AppIntentsTesting が全部グリーン**。Siri / Shortcuts / Spotlight と同じインフラを通る経路で成立しました
 3. **Shortcuts アプリでの実機確認**。アクション一覧とパラメータ表示が壊れていないことを目で見ました
 
@@ -270,6 +270,30 @@ struct IntentTodoWatchApp: App {
 そして「実機でしか確かめられないから保留」で止めていたものが、**梯子の下 3 段を全部登ってみたら判断できる材料が揃っていた**、というのがもう 1 つの学びです。実機検証が要るからと丸ごと寝かせるのではなくて、自動で確かめられるところまで先に登っておくと、残りの手動確認の範囲がぐっと小さくなります。
 
 一方で、上の `AppShortcutsProvider` の制約の方は **この話とは独立していて、そのまま生きています**。アプリと Extension に `AppIntentsPackage` を足した状態でも、`AppShortcutsProvider` がパッケージ内にある限り `autoShortcuts` は 0 のままで、アプリターゲットへ移した瞬間だけ 0 → 8 になりました。2 つが絡んでいる可能性も疑っていたんですが、別々の話でした。
+
+### 静的リンクなら、宣言が無くてもメタデータは集約される
+
+切り替えの根拠の 1 つ目「件数が一致したから重複していない」は、読み方を間違えていました。人の発表で「静的リンクならメタデータは勝手にマージされて、`AppIntentsPackage` は動的リンク先を参照するためにある」という話を聞いて、手元のビルド生成物で確かめてみたのがきっかけです。
+
+SDK 27 / Xcode 27 RC (27A266a) のビルドで、各バンドルの `Metadata.appintents` はこうなっていました。
+
+| バンドル | `AppIntentsPackage` 宣言 | `extract.packagedata` | `actions` / `entities` / `queries` |
+|---|---|---|---|
+| `TodoAppIntents.appintents` | あり (`includedPackages` 無し) | `{"includes":[]}` | 24 / 5 / 4 |
+| `UI.appintents` | **無い** | **ファイルごと無い** | 24 / 5 / 4 |
+| `WidgetUI.appintents` | 無い | 無い | 24 / 5 / 4 |
+| `IntentTodo.app` | あり (`includedPackages: [TodoIntentsPackage.self]`) | `{"includes":["14TodoAppIntents0aC7PackageV"]}` | 24 / 7 / 4 |
+
+`UI` と `WidgetUI` は `AppIntentsPackage` を 1 つも宣言していないのに、`TodoAppIntents` の 24 actions がそのまま載っています。宣言が書き出しているのは `extract.packagedata` の 1 行だけで、中身は `includedPackages` に並べた型のマングル名でした (`xcrun swift-demangle` にかけると `TodoAppIntents.TodoIntentsPackage` になります)。`extract.actionsdata` の方は、宣言があっても無くても変わりません。
+
+Xcode の SPM は既定で静的リンクなので、`IntentTodo.app` にはそもそも `Frameworks/` が無くて、7 パッケージ全部がアプリのバイナリに取り込まれています。静的リンクならリンカが object を取り込む時点でメタデータのマージも済んでいて、`includes` が要るのは framework や dynamic library のように動的リンクを跨いだ先を名指しするとき、ということみたいです。セッション 244 も、読み返したら条件付きで言っていました。
+
+> "You should use App Intents Package when referencing code not compiled into a static library."
+> (セッション 244 の 24:00)
+
+件数が一致したのも「重複が起きなかった」からではなくて、宣言がはじめから `extract.actionsdata` に触っていなかったからでした。
+
+4 ターゲットの宣言は今も残しています。Apple の手順どおりで害は無いし、どれかのパッケージを動的プロダクトに変えた瞬間に効き始めるので、保険としては持っておきたいです。ただ運用は 1 つ変えて、**「メタデータに型が出てこない」を `includedPackages` の足し引きで直そうとしない** ことにしました。静的リンクの構成でそこを触っても何も変わらないので、見るのはターゲットメンバシップとリンクの形の方です。
 
 ### 統合メタデータのマージは「後勝ち」で、watchOS が必ず最後に来る
 
@@ -310,6 +334,38 @@ iOS だけに効く違いは「iOS アプリは watchOS アプリを `IntentTodo
 教訓は 2 つあります。**統合メタデータは「1 つのバンドルを見て正常だった」を根拠にしてはいけない**。自分は 2 回とも片側しか見ていなくて、並べた瞬間に答えが出ました。そしてもう 1 つ、**メカニズムは「変える要素を 1 つに絞った比較」でしか決まりません**。「スキーマ無しが勝つ」は結果としては合っていたけれど理由が違っていて、順序を逆にする実験を 1 回やれば分かったことでした。理由が違うと、Apple への要望の書き方まで変わります (「union を取れ」ではなく「後のエントリが前を丸ごと消さないこと / 消えるなら診断を出すこと」)。
 
 ついでに年代の整理も 1 つ。「Intent や Entity を Swift Package に置ける」ようになった時期を、自分はなんとなく WWDC 2024 (セッション 10134) 頃だと思っていたんですが、10134 が言っているのはむしろ逆で "Only frameworks are supported at this time. Libraries outside of a framework are not." でした。あの時点で対応していたのは Framework 形態だけで、SPM パッケージや static library に広がったのは 2025 のセッション 244 / 275 です。この記事で書いている「Intent をパッケージに置く」構成は、そんなに昔から成立していたわけではなかったんだなというのは、ちょっと意外でした。
+
+### パッケージを組み替えたら、保存済みのショートカットは迷子になるか
+
+同じ発表で出ていたもう 1 つの疑問が、Intent をパッケージへ切り出したりパッケージ名を変えたりしたら、Shortcuts アプリに保存済みのショートカットが指す先を失うのでは、`persistentIdentifier` で固定できるのでは、というものでした。これも生成物で測れます。
+
+Shortcuts アプリや donation が握っているのは `extract.actionsdata` の `identifier` で、その既定値は `PersistentlyIdentifiable.persistentIdentifier` のデフォルト実装です。`RunCodeSnippet` で印字してみたら、**モジュール名を含まない素の型名** でした (`AddTodoIntent.persistentIdentifier` が `"AddTodoIntent"`。entity / query / enum も同じです)。モジュール名が入るのは `fullyQualifiedTypeName` や `mangledTypeName` の側で、こちらは同じビルドの中で解決されるだけです。
+
+| 変えるもの | 保存済みショートカット |
+|---|---|
+| 型をアプリターゲットからパッケージへ移す | 無事 (`identifier` は型名のまま) |
+| パッケージ名 / モジュール名を変える | 無事 (`identifier` にモジュール名は入らない) |
+| **型名を変える** | **迷子**。旧 `identifier` がメタデータから消えて、誰も指せなくなる |
+
+疑問の直感は当たっていて、トリガが「パッケージ名」ではなく「型名」だった、というのが答えでした。パッケージへ切り出すタイミングってついでに名前も整えたくなるので、体感としては「構成を変えたら壊れた」になるんだと思います。上の後勝ちの節で書いた「別モジュールでも同名の型は衝突する」も、`actions` / `entities` / `queries` がこの素の identifier をキーにした辞書だから、ということになります。
+
+型名を変えるなら、旧名を固定して出します (IntentTodo はまだ型名を変えていないので、これは書き方の例です)。
+
+```swift
+public struct ShowTodoCountIntent: AppIntent {
+    // Keeps the identity of the previous type name for already-saved shortcuts.
+    public static let persistentIdentifier = "ShowTodoCountIntent"
+```
+
+リファレンスもまさにこの用途で書いていて ("useful for maintaining the identity of a type, even when its type name is changed.")、ビルド時に抽出されるので `title` と同じく定数でないといけません。一時的に上書きを入れてクリーンビルドで見たところ、`actions` の辞書キー / `identifier` / 静的リンク先のマージ後メタデータ / `autoShortcuts` の `actionIdentifier` まで一貫して上書き値になりました。App Shortcut が旧 identifier を指したまま取り残される、ということは起きません。
+
+`AppEntity` を指すショートカットにはもう 1 層あって、保存されるのは (型の `persistentIdentifier`, インスタンスの `AppEntity.ID`) の組です。型名を固定しても、ID の作り方を変えたら同じように迷子になるはずです (こちらは実際に壊して確かめてはいません)。
+
+#### インクリメンタルビルドのメタデータは古いまま混ざる
+
+この `autoShortcuts` の追従を確かめたとき、最初は取り残された形に見えていました。アプリの統合メタデータの `actions` に旧 identifier と新 identifier の両方が居て (24 → 26 件)、`autoShortcuts` の `actionIdentifier` は旧名のまま、という結果です。App Shortcut が無音で消えるやつだと思って身構えたんですが、原因はインクリメンタルビルドでした。依存先を変えても `UI.appintents` や `WidgetUI.appintents` といったパッケージ側の抽出結果が作り直されず、古い identifier を持ったまま統合メタデータにマージされていたわけです。しかも出力ディレクトリを手で消してビルドし直しても、ビルドシステムは up-to-date と判断して作り直してくれません。
+
+別の `-derivedDataPath` でクリーンビルドしたら、どのバンドルも新 identifier 1 つだけになって、`autoShortcuts` もちゃんと追従していました。6/N の SSU バグでも「incremental だとログが前回のまま」で読み違えかけているので、これで 2 回目です。IntentTodo では「確認はビルドの成否ではなくメタデータで行う」というルールを置いているんですが、**そのメタデータ自体がインクリメンタルビルドだと古いまま混ざる** という但し書きが要りました。
 
 ## パッケージに View を置くと、UI コピーのローカライズで 2 回転ぶ
 
@@ -433,6 +489,8 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 - pbxproj の `platformFilter = ios;` を見落とすと macOS ビルドで Embed エラーが出る
 - ターゲット依存をなるべく minimum に保つため、`TodoService.swiftDataBacked(container:)` のような薄いファクトリを TodoAppIntents 側に置く
 - `AppShortcutsProvider` をアプリ本体に置く制約は健在。一方「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を書いてはいけない」の方は誤りで、**公式手順どおり各ターゲットで宣言する形に切り替えた**
+- ただし静的リンクのパッケージなら、**宣言が無くてもメタデータは集約される**。宣言が書き出すのは `extract.packagedata` だけで、効くのは動的リンクを跨ぐとき。「メタデータに型が出ない」を `includedPackages` で直そうとしない
+- 保存済みショートカットが握っているのは **モジュール名を含まない素の型名**。パッケージへの切り出しやパッケージ名の変更では迷子にならず、危ないのは型名の変更 (`persistentIdentifier` で旧名を固定する)。確かめるときのメタデータはクリーンビルドで見る
 - 統合メタデータのマージは **同じ型名のエントリがあると後の入力が前を丸ごと置き換える**。iOS アプリは watch アプリを埋め込み、しかも watchOS が構造的に必ず最後に来るので、watchOS 用フォールバックの型名は分けておく
 - コンテナ生成の失敗は `try!` にしない。落とすかどうかは「そのプロセスで表示できるものが残っているか」で決める
 - パッケージに View を置いたら、`defaultLocalization` + String Catalog + `Bundle.module` を通す口 (`LocalizedStringResource.copy(_:)`) をセットで用意する
@@ -446,6 +504,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-09-12**: 「静的リンクなら、宣言が無くてもメタデータは集約される」の節を追加し、`AppIntentsPackage` へ切り替えた根拠 1 (件数の一致) の読み方を訂正 (重複が起きなかったのではなく、宣言が `extract.actionsdata` に触っていなかった)。「パッケージを組み替えたら、保存済みのショートカットは迷子になるか」の節を追加 (`persistentIdentifier` の既定値は素の型名で、迷子になるのは型名を変えたときだけ / 上書きは `autoShortcuts` まで追従する / インクリメンタルビルドのメタデータは古いまま混ざる)
 - **2026-09-11**: `PrivacyInfo.xcprivacy` は required reason API を使うバンドルごとに要る、という節を追加 (理由コードの使い分けと、pbxproj の差分で置き場所の誤りが分かる話)
 - **2026-08-31**: 統合メタデータのマージ規則を訂正。「情報が少ない方が勝つ」は推論で、実際は **入力ファイルリストの後勝ち** (watchOS が構造的に必ず最後)。失われるのはスキーマだけでなくエントリ全体で、突き合わせキーはモジュール名を含まない型名。Apple のビルドシステム側の制約と確定し、Feedback (FB24570185) を出したことを追記。「Intent のコピーは、リンク先ターゲットの main bundle にしか置けない」の節を新設 (自動抽出されるのは `parameterSummary` だけ / パッケージ側 catalog は解決されない / `IntentDialog` で英語の屈折を組み立てない / フレーズは語彙を散らす / `AppEnum` の表示名は UI からも引ける)
 - **2026-08-28**: 統合メタデータで watchOS フォールバックがスキーマを消していた話 (型名を分けて解消) を追加。コンテナ生成失敗の扱い (`try!` を使わない / コンプリケーションだけ落とさない) と、SPM パッケージの UI コピーと String Catalog の節を追加。App Shortcut のフレーズをパラメータ化するときの候補件数の注意を追加

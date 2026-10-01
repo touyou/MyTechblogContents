@@ -24,7 +24,7 @@ CloudKit 互換にするためには次を満たす必要がありました。
 5. `@Attribute(.unique)` / `DeleteRule.deny` は使わない
 6. 旧スキーマで作られた既存ストアは削除する
 
-ハマりどころは 3 と 4 と 6。順に書きます。あわせて、CloudKit とは直接関係ないけれど同じ「モデルに何を置けるか」の話として踏んだものも 2 つ足しました。
+ハマりどころは 3 と 4 と 6。順に書きます。あわせて、CloudKit とは直接関係ないけれど同じ「モデルに何を置けるか」の話として踏んだものや、SwiftData 自体の性質で踏んだものも足しています。
 
 ## entitlements とコード設定
 
@@ -170,7 +170,7 @@ production でユーザーに同じ問題を起こしたくない場合は、本
 
 ただしこの指針、**一次資料で裏を取れていません**。当初はセッション 8017 として書いていたんですが、あとで手元のアーカイブを漁り直したら書き起こしが見つかりませんでした (出てくるのは別テーマの 8011 だけです)。Group Lab はライブ Q&A なので公式の書き起こしが出ないことも多いみたいです。内容自体は SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので方針は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。実際に導入する段になったら API 名と挙動は公式ドキュメントで確認し直すつもりです。
 
-## ハマりどころ 4: フォールバックが silently データを分裂させる
+## ハマりどころ 4: フォールバックが気づかないうちにデータを分裂させる
 
 最初は `SharedModelContainer.configuration` を以下のように書いていました。
 
@@ -185,7 +185,7 @@ public static var configuration: ModelConfiguration? {
 }
 ```
 
-これは「テスト / プレビューで App Group が無い時のための fallback」のつもりだったんですが、production で entitlement が壊れた場合にも同じ経路を通ってしまい、**メインアプリと Widget Extension がそれぞれ別の default ストアを開く** という silently 壊れる状態になります。
+これは「テスト / プレビューで App Group が無い時のための fallback」のつもりだったんですが、production で entitlement が壊れた場合にも同じ経路を通ってしまい、**メインアプリと Widget Extension がそれぞれ別の default ストアを開く** という、エラーも出ずに壊れる状態になります。
 ユーザーには「Widget が壊れている」「データが反映されない」とだけ見えるパターン。
 
 なので、production では明示的に `fatalError` で落とすように変えました。
@@ -266,7 +266,7 @@ libswiftCore _assertionFailure
 
 厄介なのが、**`!todoItem.isDeleted` のガードが効かない** ことでした。同じトレースで再発します。この時点で `isDeleted` はまだ `false` なんです。
 
-効いたのは **その場のオブジェクトを読まずに、id から引き直す** 形でした。Entity 側は `@Property` をやめて `@DeferredProperty` にして (消えた Todo は「見つからない」に落ちるだけになります)、View 側は `body` の中で読まずに `@State` のスナップショットへ写して、`.task(id: todo.modifiedAt)` で更新します。契機に `modifiedAt` を使えるのは **スカラーだから** で、削除済みでも読めます。
+うまくいったのは **その場のオブジェクトを読まずに、id から引き直す** 形でした。Entity 側は `@Property` をやめて `@DeferredProperty` にして (消えた Todo は「見つからない」に落ちるだけになります)、View 側は `body` の中で読まずに `@State` のスナップショットへ写して、`.task(id: todo.modifiedAt)` で更新します。契機に `modifiedAt` を使えるのは **スカラーだから** で、削除済みでも読めます。
 
 ```swift
 // ❌ body の中でモデルの配列属性を読む
@@ -279,6 +279,10 @@ if !todo.tags.isEmpty { TagRow(tags: todo.tags) }
 ```
 
 いちばんの教訓は、**この trap は「1 回直した」では終わらない** ことでした。自分は Entity 側で直した数日後に、View 側で同じ罠を新しく作り込んでいます。読む場所を増やすたびに再発するので、**`@Model` の配列属性は `body` から読まない** をルールとして決めました。シートに渡すときも値渡しにしています (content クロージャは提示中に再評価されうるので、そこで読むと同じ口が残ります)。
+
+実際、そのあとにもう 1 回踏みかけています。一覧をタグで絞り込めるようにしたとき、素直に書くと「`@Query` の結果を回して `tags` を見る」になって、これは **削除したその 1 フレームだけ落ちる** 実装です。ここは `#Predicate` に押し込むより、**fetch 経由なら削除済みのオブジェクトは返ってこない** という性質を使う方が簡単でした。タグやリストの所属は `TodoService` が `fetchAll()` から 1 回で組んだスナップショットで持って、`@Query` は「変わったよ」の合図としてだけ使っています (合図の側はスカラーしか読みません)。
+
+この形には 1 つ落とし穴があって、合図に使うダイジェストに **リスト名と色を入れておく必要** がありました。リストの名前を変えても Todo は 1 件も触られないので、件数と `modifiedAt` の最大値だけだと合図が変わらず、管理画面が古い名前のまま表示されます。
 
 
 ## ハマりどころ 7: `ModelContainer` の init は、ストアのロードを待たずに返る
@@ -295,11 +299,31 @@ NSInternalInconsistencyException: No eligible connection available
 
 しかも落ちるのは **インストール直後の初回起動だけ** です。UI テストは毎回インストールし直すので毎回落ちるんですが、手元で `simctl launch` して確かめると (すでにインストール済みなので) 再現しません。UI テストからは「アプリがクラッシュしました」としか見えないので、フィクスチャの中身を疑ってずいぶん遠回りしました。シーンの `.task` に移したら解決です。
 
-同じ根で、もう 1 つ静かな壊れ方もしていました。フィクスチャは「全部消してから 6 件入れる」形なんですが、**実行のたびにリストが 6 件ずつ増えていきます**。init 直後の fetch は、行があっても空で返るからです。削除が空振りして、挿入だけが効いていました。ここは 1 秒待ってから fetch → delete する形にしています。`deleteAllData()` で済ませるのは駄目で、こちらはコンテキストごと無効化するので、直後に `mainContext` を触ると SwiftData の中で trap します。
+同じ根で、もう 1 つ気づきにくい壊れ方もしていました。フィクスチャは「全部消してから 6 件入れる」形なんですが、**実行のたびにリストが 6 件ずつ増えていきます**。init 直後の fetch は、行があっても空で返るからです。削除が空振りして、挿入だけが通っていました。ここは 1 秒待ってから fetch → delete する形にしています。`deleteAllData()` で済ませるのは駄目で、こちらはコンテキストごと無効化するので、直後に `mainContext` を触ると SwiftData の中で trap します。
 
 ついでに、まとめて消すつもりで書いた `context.delete(model: TodoItem.self)` も落ちました。バッチ削除は `NSBatchDeleteRequest` を通るので、失敗が Objective-C 例外で出てきて Swift 側の `do` / `catch` では拾えません。こちらも fetch して 1 件ずつ `delete` する形に変えています。
 
 症状は 3 つともバラバラ (初回起動だけ落ちる / 毎回増える / まとめ削除で落ちる) なんですが、**「init が返った = 使える」ではない** という 1 点に集約されます。`@Query` と `.modelContainer(_:)` に任せている限りは SwiftUI が面倒を見てくれるので表に出てこなくて、自分でコンテナを作って直後に触る形にしたときだけ顔を出す、という性格のものでした。
+
+## ハマりどころ 8: in-memory のストアも、既定では iCloud と同期する
+
+これもスクリーンショットの仕込みで踏んだものです。撮影や UI テストでは、共有ストアを汚さないように `SharedModelContainer.createInMemoryContainer()` で一時的なストアを作っていました (ハマりどころ 4 のテストの話でも使っているやつです)。撮影を回したあとしばらくして、「同じデータが同期されてきて、Mac の追加画面のスクショに写り込む。消すと同じものがまとめて消える」と言われました。
+
+原因は `ModelConfiguration(schema:isStoredInMemoryOnly:)` だけで作っていたことでした。`cloudKitDatabase` の既定は `.automatic` なので、CloudKit の entitlement を持つアプリのプロセスで作ると、**in-memory でもミラーリングが動きます**。その結果、こういうことが起きていました。
+
+- id が毎回同じフィクスチャが iCloud に上がって、DEBUG ビルドを入れた他の端末に降りる。撮影のたびに同じ id の行が増えるので、1 つ消すと同じ id の行がまとめて消える
+- 逆に本物のデータが撮影中のストアに降りてきて、画面ごとに起動し直す Mac のカットに写り込む
+- フィクスチャは流し込む前に全件を消すので、降りてきた行まで消して、その削除を上げうる
+
+直し方は一時ストアに `cloudKitDatabase: .none` を明示するだけです。
+
+```swift
+ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+```
+
+直ったかは、シミュレータ (iCloud に未サインインでもミラーリングの仕組み自体は立ち上がる) で起動して、`subsystem == "com.apple.coredata" AND category == "CloudKit"` のログの行数を数えて確かめました。修正前の一時ストアで 11 行、修正後の一時ストアで 0 行、修正後の共有ストアは 11 行のままです。影響があったのは開発用の CloudKit 環境だけで、TestFlight / App Store 版が使う本番環境には届いていないはずです。
+
+「in-memory = その場限り」と思い込んでいたんですが、**保存先と同期は別の設定** でした。名前に `InMemory` と付いていると、同期まで止まっている気がしてしまうんですよね。
 
 ## エラーログを早めに仕込む
 
@@ -323,7 +347,7 @@ do {
 
 ## WWDC 2026 の SwiftData レビューを受けて
 
-WWDC 2026 の SwiftData / Widget まわりのセッションと Group Lab を見直したので、この記事に効く差分を反映しておきます。マイグレーション分離は上のハマりどころ 3 に書いたとおりで、ここでは残り 2 つです。
+WWDC 2026 の SwiftData / Widget まわりのセッションと Group Lab を見直したので、この記事に関係する差分を反映しておきます。マイグレーション分離は上のハマりどころ 3 に書いたとおりで、ここでは残り 2 つです。
 
 1 つ目、**CloudKit 互換の制約は 2026 でも据え置き** でした。`@Attribute(.unique)` が enforce されない・リレーションは全部 Optional・プロパティはデフォルト値か Optional 必須、というこの記事の要件はそのまま有効です。新しい回避策が増えたわけではないので、ここで書いたワークアラウンドは引き続き必要、という確認になりました。
 
@@ -346,20 +370,22 @@ public func incompleteCount() throws -> Int {
 - `cloudKitDatabase: .automatic` + entitlements に container + APS + Portal 側の capability 設定が必要
 - 全属性に default value、全リレーションを Optional `[T]?` にする
 - 旧スキーマのストアは削除して作り直す (開発中)
-- production の fallback は silently 壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく。ただし macOS は entitlement 無しでも `containerURL` がパスを返すので、この分岐自体が効かない
+- production の fallback はエラーも出ずに壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく。ただし macOS は entitlement 無しでも `containerURL` がパスを返すので、この分岐自体が効かない
 - `Calendar.RecurrenceRule` のように **コンパイルは通るのに schema 初期化で trap する型** がある。CloudKit 互換のために primitive へ落としていると、結果的にこれも避けられる
-- **削除済みオブジェクトの配列属性は読めない** (スカラーは耐える)。`isDeleted` のガードでは防げないので、`body` から `@Model` の配列属性を読まず、id から引き直す
+- **削除済みオブジェクトの配列属性は読めない** (スカラーは耐える)。`isDeleted` のガードでは防げないので、`body` から `@Model` の配列属性を読まず、id から引き直す。絞り込みのように `@Query` の結果を回したくなる場面は、fetch 越しのスナップショットで読む
 - **`ModelContainer` の init はストアのロードを待たない**。直後の `mainContext` は初回起動だけ落ちるし、直後の fetch は行があっても空で返る
+- **in-memory のストアも既定では iCloud と同期する**。一時ストアには `cloudKitDatabase: .none` を明示する
 - ModelContainer の失敗ログは `String(reflecting:)` + `NSError.userInfo` まで吐く
 
-次回は [App Intents 運用で踏んだ落とし穴 (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Live Activity の entity 解決クラッシュ / Control Widget の結果表示 / Spotlight 統合の実装漏れ / 無音で失敗する経路) をまとめて書きます。
+次回は [App Intents 運用で踏んだ落とし穴 (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Live Activity の entity 解決クラッシュ / Control Widget の結果表示 / Spotlight 統合の実装漏れ / 失敗が伝わらない経路 / Siri が Intent を呼ばずに答える件) をまとめて書きます。
 
 ## 更新履歴
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
-- **2026-09-11**: ハマりどころ 7 (`ModelContainer` の init はストアのロードを待たずに返る — 初回起動だけ `mainContext` で落ちる / init 直後の fetch は空で返る / バッチ削除は Objective-C 例外で abort) を追加
-- **2026-08-31**: ハマりどころ 5 (`Calendar.RecurrenceRule` は SwiftData 属性にできない — コンパイルは通るが schema 初期化で trap する) と 6 (削除済みオブジェクトの配列属性を読むと trap する。`isDeleted` では防げず、id から引き直す) を追加。どちらも 7/N の reminders スキーマ適合でモデルにフィールドを足したときに踏んだもの
+- **2026-10-01**: ハマりどころ 8 (in-memory のストアも既定では iCloud と同期する。一時ストアには `cloudKitDatabase: .none`) を追加。ハマりどころ 6 に、タグの絞り込みで同じ trap を踏みかけた話 (fetch 越しのスナップショットで読む / ダイジェストにリスト名を入れる) を追加。「silently」「静かな」といった言い回しを具体的な書き方に直した
+- **2026-09-11**: ハマりどころ 7 (`ModelContainer` の init はストアのロードを待たずに返る。初回起動だけ `mainContext` で落ちる / init 直後の fetch は空で返る / バッチ削除は Objective-C 例外で abort) を追加
+- **2026-08-31**: ハマりどころ 5 (`Calendar.RecurrenceRule` は SwiftData 属性にできない。コンパイルは通るが schema 初期化で trap する) と 6 (削除済みオブジェクトの配列属性を読むと trap する。`isDeleted` では防げず、id から引き直す) を追加。どちらも 7/N の reminders スキーマ適合でモデルにフィールドを足したときに踏んだもの
 - **2026-08-28**: macOS では entitlement 無しでも `containerURL` がパスを返すため DEBUG フォールバックが働かない、という話を追加 (テスト側は `withKnownIssue` / in-memory コンテナへ)
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-11**: SwiftData Group Lab のマイグレーション指針について、出典 (セッション 8017) が一次資料で確認できなかったため、伝聞である旨に書き換え

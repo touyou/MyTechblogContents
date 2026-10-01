@@ -1,5 +1,5 @@
 ---
-title: "App Intents 中心設計シリーズ — 検証待ち・将来書く予定のトピック (99/N)"
+title: "App Intents 中心設計シリーズの検証待ちと将来書く予定のトピック (99/N)"
 emoji: "📝"
 type: "tech"
 topics: ["AppIntents", "iOS", "watchOS", "visionOS", "TODO"]
@@ -25,7 +25,7 @@ published: true
 公式ドキュメント翻訳系は別の場 ([Liquid Glass の記事](https://zenn.dev/touyou/articles/liquid_glass_apple_doc_overview) のように) でやればいいので、IntentTodo シリーズでは「実機で詰まったところ」か「やってみて分かった設計判断」に価値を絞ろうと思っています。
 
 ただ、WWDC 2026 編については少し方針を緩めました。
-新 API は実機 (Siri / Visual Intelligence) まで通すのに端末や手動確認が要るものが多く、本編のような「実機で詰まった話」の基準だといつまでも書けないので、あちらは **「採用していいか / 設計にどう効くか」という設計判断** を軸に、検証の深さ (ビルド / 単体 / 実機) を各記事に明記する形で書いています。
+新 API は実機 (Siri / Visual Intelligence) まで通すのに端末や手動確認が要るものが多く、本編のような「実機で詰まった話」の基準だといつまでも書けないので、あちらは **「採用していいか / 設計をどう変えるか」という設計判断** を軸に、検証の深さ (ビルド / 単体 / 実機) を各記事に明記する形で書いています。
 
 ## WWDC 2026 編で片付いたもの
 
@@ -36,8 +36,8 @@ published: true
 
 逆に、片付いたというより **「試したけど採用しなかった」「やらないと決めた」** ものもあります。
 
-- **Intent Modes の `.foreground(.dynamic)`** (旧トピック G): `ShowTodosIntent` を一度 `[.background, .foreground(.dynamic)]` + `continueInForeground()` に寄せてみたんですが、これをやると `OpensIntent` (Intent 合成) を外すことになって、それは設計として手放したくなかったので revert しました。今の `ShowTodosIntent` は `.foreground` + `opensIntent:` のままです。そのときは「dynamic 自体は有用なので、もっと適した Intent が出てきたら検討する」と宿題にしていたんですが、その後 **全 21 Intent を見直して「当て先が無い」で閉じました**。詳細は [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis) に書いています。
-- **寄付 (`IntentDonationManager`)**: これは「片付いた」というより **入れないことに決めた** ものです。`perform()` の中で寄付するのは公式ガイダンス違反なので撤去して、代わりに UI のタップ地点で寄付する案を 3 通り検討したんですが、どれも「UI からは Intent を直接呼ぶ」前提で、`Button(intent:)` を唯一の実行経路にしている設計と両立しませんでした。再訪する条件 (Siri の予測 / 提案を機能として欲しくなったとき) だけ決めて閉じています → [8/N](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)
+- **Intent Modes の `.foreground(.dynamic)`** (旧トピック G): `ShowTodosIntent` に一度入れて、`OpensIntent` (Intent 合成) を残したかったので revert し、「当て先が無い」で閉じていました。ところが `.foreground` だけの `ShowTodosIntent` は、ショートカットの「実行時に開く」がオフの経路で拒否されて、Siri からも失敗します。dynamic を入れ直したら今度は Siri から呼ぶたびにアプリが開いたので、最終的には **値を返す Intent は `.background` 専用にして、アプリを開くのはスニペットのボタンに任せる** 形に落ち着きました。dynamic は結局使っていません。詳細は [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis) に書いています。
+- **寄付 (`IntentDonationManager`)**: `perform()` の中で寄付するのは公式ガイダンス違反なので撤去して、そのあと「アプリ内の `Button(intent:)` の実行はシステムが記録している」と実測したので、一度は「明示的な寄付はゼロでいい」で閉じました。ただその前提の「UI が全部 `Button(intent:)`」を確かめていなくて、フィルタの選択と行の選択は Intent を通っていませんでした。今はその 2 つだけ UI 側から寄付しています → [8/N](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)
 - **`SpotlightSearchTool` + `LanguageModelSession`** (セッション 246): 前提の「Spotlight への entity 寄付」は揃ったんですが、残りの作業が FoundationModels 側に寄るので **スコープ外** としました。下の FoundationModels をやらない判断と同じ線引きです → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 - **FoundationModels (端末内 LLM)** (旧トピック F の一部): Todo 自動生成・サマリー・Tool Calling といった端末内 LLM 連携は、検証計画の段階で **本リポジトリの主眼から意図的に外す** ことにしました。App Intents 中心設計の実証という軸からは少しずれるのと、ここに踏み込むと検証範囲が一気に広がるからです。やらない判断をした、というのも 1 つの結論として残しておきます。
 
@@ -58,7 +58,7 @@ WWDC 2026 で `ResultsObserver` / `ModelResultsObserver` という、SwiftUI の
 - **sectioned `@Query` (`sectionBy:`)**: watch 側でやっている手動 partition は「now から 1 時間以内」という **時刻依存の動的な区切り** で、`sectionBy:` が要求する保存済みの String KeyPath では表現できない → 不適合。カテゴリ別グルーピング画面を新設するなら選択肢になります。
 - **`@Attribute(.codable)`**: 複雑な型を rawValue で逃がすようなワークアラウンドが今のモデルには無い (基本型に分解済み) → 出番なし。
 - **`HistoryObserver`**: 自前サーバー同期をしておらず CloudKit ネイティブなので → 該当なし。
-- **external storage**: バイナリ / 画像を保存していないので → 該当なし。
+- **external storage**: ~~バイナリ / 画像を保存していないので該当なし~~ → reminders スキーマの作成 Intent が画像を要求するので添付をモデルに足して、`@Attribute(.externalStorage)` で持つようにしました ([7/N](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents))。
 
 ## まだ検証待ちのトピック
 
@@ -84,7 +84,7 @@ WWDC 2026 で `ResultsObserver` / `ModelResultsObserver` という、SwiftUI の
 - `Button(intent:)` 経由の各アクション (`role:` が引数の先頭に来るシグネチャで動くか)
 
 Vision Pro 持ってないので、シミュレータで動いた範囲だけしか言及できない状態。
-実機は相変わらず無いままなんですが、**実機 SDK 向けのビルドだけが落ちる** という別種の問題は 1 つ潰しました。`#if canImport(VisualIntelligence)` がシミュレータでは false、実機 SDK では true になってビルドが割れる話で、詳しくは [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) に書いています。シミュレータで動いた範囲しか言えない、の前に「実機向けにビルドは通るのか」という段があったんだなと反省しました。
+実機は相変わらず無いままなんですが、**実機 SDK 向けのビルドだけが落ちる** という別種の問題は 1 つ直しました。`#if canImport(VisualIntelligence)` がシミュレータでは false、実機 SDK では true になってビルドが割れる話で、詳しくは [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) に書いています。シミュレータで動いた範囲しか言えない、の前に「実機向けにビルドは通るのか」という段があったんだなと反省しました。
 visionOS でハマった「`NavigationSplitView.selection` の更新を NavigationModel に統合した」話 (本シリーズ 2/N で軽く触れた話) の続きは、実機検証ができたら書きたいです。
 
 ### C. Spotlight の iOS 反映ラグ
@@ -108,7 +108,7 @@ macOS では即座に検索ヒットするのですが、iOS では index 反映
 
 ### E. Live Activity の AppEntity crash 再現条件 (決着済み)
 
-シリーズ 5/N で「Live Activity Extension で `AppEntity` 解決時にクラッシュする」と書いた話は、長らく **workaround が効いている状態なので再現手順を書けない** という宙ぶらりんのままでした。Apple Feedback Assistant に出す材料を作るつもりで、再現コード断片を別ブランチに用意しよう、というところまで考えていました。
+シリーズ 5/N で「Live Activity Extension で `AppEntity` 解決時にクラッシュする」と書いた話は、長らく **workaround で回避できている状態なので再現手順を書けない** という宙ぶらりんのままでした。Apple Feedback Assistant に出す材料を作るつもりで、再現コード断片を別ブランチに用意しよう、というところまで考えていました。
 
 結果は、probe 用の Intent を Live Activity のボタンに直結して iOS 27 で試したら **3 パターンとも再現しない**、でした。entity の事前解決も `perform()` もメインアプリプロセスで走っていて、`LiveActivityIntent` 準拠の有無でも変わりません。Feedback の材料を作るつもりの検証が、そもそも現行 SDK では起きないという結論になった格好です。これを受けて Primary / FromExtension 分離ごと撤去しました → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 
@@ -131,7 +131,7 @@ macOS では即座に検索ヒットするのですが、iOS では index 反映
 シリーズ 5/N で軽く触れた、Spotlight の fire-and-forget エラー扱いと近い話で、IntentTodo 全体に「`LoadResult<T>.success(T) | .unavailable(reason: String)` のような型で『不明』と『ゼロ』を強制区別する」リファクタを入れたい欲があります。
 これがあると Provider / Intent / View 層を通じて『データが無い』と『データが取れなかった』を別の概念として扱えるようになり、ユーザーに嘘の安心感を与える silent failure が減らせるはず。
 
-個別修正の方はその後もいくつか入れました。fetch 失敗を黙って 0 件にせず throw する、コンテナ生成に失敗したコンプリケーションは空白ではなく「不明」を出す ([3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions))、通知やライブアクティビティが設定で塞がれていたら記録して設定へ誘導する、Spotlight の差分反映が続けて失敗したら次回起動でフル再インデックスする ([5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)) あたりです。**どれも「不明」と「ゼロ」を区別するという同じ形** をしているので、型で一発で表現したい気持ちは強くなりました。ただ `LoadResult<T>` を全 layer に通すとなるとコストが大きいので、prototype 程度で試してから記事化する予定です。
+個別修正の方はその後もいくつか入れました。fetch 失敗を何も言わずに 0 件にせず throw する、コンテナ生成に失敗したコンプリケーションは空白ではなく「不明」を出す ([3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions))、通知やライブアクティビティが設定で塞がれていたら記録して設定へ誘導する、Spotlight の差分反映が続けて失敗したら次回起動でフル再インデックスする ([5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)) あたりです。**どれも「不明」と「ゼロ」を区別するという同じ形** をしているので、型で一発で表現したい気持ちは強くなりました。ただ `LoadResult<T>` を全 layer に通すとなるとコストが大きいので、prototype 程度で試してから記事化する予定です。
 
 ### I. WWDC 2026 セッションを読み直して増えた採用候補 (すべて決着済み)
 
@@ -184,7 +184,7 @@ SSU training のバグで `PlaceDescriptor` を `String` に退避していた�
 
 結局、リンク先ターゲットの catalog に手動キーで持ってスクリプトで漏れを見る、という形になりました。あわせて Siri のフレーズが「訳」ではなく「言い方」を並べるものだという話も含めて、[3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) に書いています。
 
-**「英語しか無いうちは何も起きない」種類の壊れ方** で、多言語化に着手した瞬間にまとめて出てくるのが厄介でした。UI コピー側も同じ形で 2 回転んでいます。
+**「英語しか無いうちは何も起きない」種類の壊れ方** で、多言語化に着手したとたんにまとめて出てくるのが厄介でした。UI コピー側も同じ形で 3 回転んでいます (3 回目は、日本語の訳しか持たないパッケージで、英語にするとキーがそのまま出るというものでした)。
 
 
 ## 制約を全部洗い直した
@@ -195,7 +195,7 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 
 **1. 断定を取り下げたもの** (再検証したら根拠が足りなかった)
 
-- 「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を重複宣言してはいけない」→ ビルドとメタデータのレベルでは重複が起きず、むしろセッション 244 / 275 は逆にそのパターンを標準手順として紹介していました。ただ「重複が起きなかった」も正確ではなくて、静的リンクのパッケージなら宣言が無くてもメタデータは集約されていて、宣言はそもそも中身に触っていませんでした → [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
+- 「アプリ側に `includedPackages` 付きの `AppIntentsPackage` を重複宣言してはいけない」→ ビルドとメタデータのレベルでは重複が起きず、セッション 244 / 275 はむしろそのパターンを標準手順として紹介していたので、一度は取り下げて宣言する形に切り替えました。ただ、静的リンクのパッケージなら宣言が無くてもメタデータは集約されていて、しかもその宣言が、配布したアプリで App Intents をまるごと読ませなくしていました。今は 1 つも宣言していません。最初の断定とは別の理由で、結局「書かない」に戻った形です → [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
 - 「Widget の `.background` Intent は必ず Widget Extension プロセスで実行される」→ 実際は未指定ならヒューリスティクスで、固定したいなら `allowedExecutionTargets` を明示する → [2/N](https://zenn.dev/touyou/articles/intenttodo_02_todoservice_dependency) / [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 - 「Live Activity Extension プロセスで entity 解決が走ると SwiftData が trap する」→ クラッシュは実在するけれど、事前解決フェーズがどのプロセスで走るかは公式に明記が無いので原因の特定を取り下げ → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 - 「`\.textContent` は SDK に露出していない」→ 普通にありました。`contentDescription` を使う結論は変わらないものの、理由が型の制約ではなく意味の制約だった → [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
@@ -213,7 +213,7 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 
 以前も一度セッションを洗い直しているんですが、今回は「その API 名が本当にそのセッションの書き起こしに出てくるか」を全文検索で機械的に確かめたので、前回の訂正そのものが間違っていた、というのが何件か出てきました。いちばん大きいのが `.system.searchInApp` で、**343 → 344 に直したのが間違いで、最初の 343 が正しかった** です (→ [7/N に追記](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents))。他にも `AppEntityContext` / `RelevantEntities` は 10133 ではなく 345、`ControlWidgetButton` / `ControlConfigurationIntent` は 10157 ではなく 10210、`@ComputedProperty` / `@DeferredProperty` は 345 ではなく 275、といった具合に、隣接するセッションや API ドキュメントと混ざっているものがまとめて出てきました。8/N の出典訂正 (`requestConfirmation` のラベル指定オーバーロードや `IntentDonationManager` は、セッションではなく API ドキュメント由来だった) も同じ流れです。
 
-一連の作業でいちばん効いたのは、**「セッションで説明されていたこと」「API ドキュメントを読んで知ったこと」「自分がビルドして観測したこと」を、後から見分けられる形で書いていなかった** という反省でした。3 つとも自分の中では同じ「知っていること」なんですが、確度も、後から確かめる手段も全然違います。特に 3 番目の観測は SDK が更新されるたびに賞味期限が来るので、そこを混ぜて書くと、直せるはずのものが直せないまま残ります。
+一連の作業でいちばん大きかったのは、**「セッションで説明されていたこと」「API ドキュメントを読んで知ったこと」「自分がビルドして観測したこと」を、後から見分けられる形で書いていなかった** という反省でした。3 つとも自分の中では同じ「知っていること」なんですが、確度も、後から確かめる手段も全然違います。特に 3 番目の観測は SDK が更新されるたびに賞味期限が来るので、そこを混ぜて書くと、直せるはずのものが直せないまま残ります。
 
 ### 4 つ目の型: 推論を実測と並べて書いてしまう
 
@@ -221,7 +221,7 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 
 Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話なんですが、snippet も出ないという方は、Apple の「Siri, Spotlight, and the Shortcuts app が snippet を表示する」という **肯定リストに Control が載っていない** ことからの推論でした。それを dialog の実測結果と同じ表に並べて書いたので、あとから読むと両方とも実測されたルールに見えます。
 
-厄介だったのは、この推論が **それを反証する実験の可能性ごと潰していた** ことでした。「Control では snippet が出ない」を前提に snippet を返す Intent を全部 Control から外したので、Control 経由で snippet を返す経路が 1 つも無い構成になっていて、「Control Center で snippet が一切出ない」のは当たり前、という検証すらできない状態になっていました。
+厄介だったのは、この推論が **それを反証する実験の可能性ごと消していた** ことでした。「Control では snippet が出ない」を前提に snippet を返す Intent を全部 Control から外したので、Control 経由で snippet を返す経路が 1 つも無い構成になっていて、「Control Center で snippet が一切出ない」のは当たり前、という検証すらできない状態になっていました。
 
 決着させたのは **呼出元だけを変えて、同じ Intent・同じ snippet を走らせる比較** です。結果としては推論のとおり「Control では出ない」だったんですが、そこに至る過程が違います。詳しい経緯と切り分けの表は [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書きました。
 
@@ -249,7 +249,7 @@ Control Widget で `.result(dialog:)` が出ないのは実機で確かめた話
 
 同じ形は `PlaceDescriptor` の退避でも起きていて、「`@Parameter` でも `@Property` でも落ちる」と書いていたのが、切り分けたら `@Parameter` だけでした。片方は probe 同士が同居していたせいで、実質 **測っていないものを測ったことにしていた** ことになります。
 
-なので「できない」「重い」と書くときのルールを増やしました。**理由は再現可能な形で書き、SDK が上がったら理由の方を測り直す**。結論だけを持ち越すと、塞がっていない扉の前で待ち続けることになります。上の `[measured]` ラベルを打つ運用は、まさにここに効くはずです。
+なので「できない」「重い」と書くときのルールを増やしました。**理由は再現可能な形で書き、SDK が上がったら理由の方を測り直す**。結論だけを持ち越すと、塞がっていない扉の前で待ち続けることになります。上の `[measured]` ラベルを打つ運用は、まさにここで役に立つはずです。
 
 ### 7 つ目の型: 測る道具の方を疑わない
 
@@ -261,15 +261,25 @@ Xcode 27 が RC まで来たので制約を全部測り直したんですが、�
 
 自分が引っかかった構造は 3 つあります。
 
-1. **切り分け表が切り分けになっていなかった**。並列実行・デバイスの残留状態・dyld キャッシュと順に潰して「環境ノイズではない」ところまでは確認したんですが、どの行にも同じフラグが付いたままでした。変数を 1 つも動かしていないので、何回やっても同じ答えしか出ません。表の行数が増えると「たくさん試した」感が出るので、そこで満足してしまう
+1. **切り分け表が切り分けになっていなかった**。並列実行・デバイスの残留状態・dyld キャッシュと順に除外して「環境ノイズではない」ところまでは確認したんですが、どの行にも同じフラグが付いたままでした。変数を 1 つも動かしていないので、何回やっても同じ答えしか出ません。表の行数が増えると「たくさん試した」感が出るので、そこで満足してしまう
 2. **無関係な現象を傍証にした**。同時に別のクラッシュログが出ていたので「やっぱり SDK 側だ」と補強してしまいました。署名ありで走らせると 23 件全部通るので、あれは最初から無関係でした
 3. **誤診が生き延びる仕組みがあった**。前段のヘルパーが `XCTSkip` を投げていたので、23 件が 1 件も走らなくても `TEST SUCCEEDED` です。赤くならないので、原因を追う優先度が上がりませんでした
 
-発覚したのは Xcode から手で実行したログにエラーが 1 件も出ていなかったからで、答えは **IDE と自分のコマンドラインの差分** でした。なので自分ルールがまた 2 つ増えました。**「SDK が壊れた」と書く前に、自分の実行コマンドと IDE の差分を 1 つずつ潰す** (とくに他のコマンドから流用したフラグ)。そして **判定に使っている道具が「何も見ていなくても緑になる」形をしていないか、先に確かめる**。
+発覚したのは Xcode から手で実行したログにエラーが 1 件も出ていなかったからで、答えは **IDE と自分のコマンドラインの差分** でした。なので自分ルールがまた 2 つ増えました。**「SDK が壊れた」と書く前に、自分の実行コマンドと IDE の差分を 1 つずつ確かめる** (とくに他のコマンドから流用したフラグ)。そして **判定に使っている道具が「何も見ていなくても緑になる」形をしていないか、先に確かめる**。
 
 4 つ目〜6 つ目の型は「書いたものの確度を取り違える」話でしたが、これは **測定装置そのものが壊れているのに、対象の変化として読む** 型でした。SDK を追いかけていると出力の変化に敏感になるので、余計に踏みやすいなと思います。
 
 この型は、そのあとすぐにもう 1 回踏みかけました。`persistentIdentifier` を上書きしたら App Shortcut が旧名を指したまま取り残されたように見えて、実際はインクリメンタルビルドでパッケージ側の `*.appintents` が作り直されず、古いメタデータが混ざっていただけ、というやつです (→ [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions))。こちらは「何も見ていなくても緑」ではなく **古いものをそれらしく見せてくる** 壊れ方で、別の `-derivedDataPath` に出し直したら一発で消えました。出力ディレクトリを手で消しても作り直されないので、「消したからクリーンなはず」も道具を信じすぎている側でした。
+
+### 8 つ目の型: 手元で正しいことを、配った先でも正しいと思う
+
+App Store に出してから、また 1 つ増えました。**ローカルの生成物が正しいことを、配布したアプリが正しく動く根拠にしてしまう** というやつです。
+
+いちばん大きかったのが [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) に書いた `AppIntentsPackage` の件で、宣言を足したときの「害は無い」は、ビルド生成物の件数を数えて出した判断でした。AppIntentsTesting も Shortcuts の目視も、全部 Xcode からインストールしたアプリの上でやっています。そうして出荷したら、TestFlight / App Store から入れたアプリだけ App Intents がまるごと読まれなくなっていました。原因は TestFlight のビルドを二分して特定しています。
+
+同じ時期に、`ShowTodosIntent` の実行モードでも、配布してから分かることが続きました ([9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis))。こちらは確かめ方の方にも反省があって、「アプリを開かない」と「どのプロセスで走るか」を 1 回の変更で一緒に動かし、しかも実機で確かめる前に審査中のビルドを差し替えていました。失敗したときにどちらが原因か分からないのは、5 つ目の型 (片側しか見ていない) や 7 つ目の型 (切り分け表が切り分けになっていない) と根が同じです。
+
+なので配布まわりのルールを 2 つ足しました。**App Intents の構成を変えたら、TestFlight のビルドで面に出るところまで見る**。そして **配布の段で動かす変数は 1 回に 1 つ**。TestFlight は 1 往復が長いのでまとめて動かしたくなるんですが、そこで分けておかないと、結局もう 1 往復することになります。
 
 ### RC まで来たので、書き溜めた制約を全部測り直した
 
@@ -281,19 +291,27 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 - `@Property(indexingKey:)` / `IndexedEntityQuery` の対応プラットフォームも同じ
 - **27.0 で新しく生えた公開 API はゼロ**。公開型 353 件とそのメンバを availability で仕分けて、記録の無いものが残らないことまで見ました
 
+その後 Xcode 27.1 と 27.2 beta も出たので、同じことを SDK の宣言だけで測り直しました。27.0 → 27.1 は App Intents の差分がゼロで (モジュールのバージョンまで同じ)、27.2 beta で増えた公開 API は 3 つだけです。スキーマ適合の enum の `caseDisplayRepresentations` の既定実装 ([7/N](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents))、`@UnionValue` を受ける `@Parameter` の `default:` と `size:` ([9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis))、AppIntentsTesting の `async` な `get(as:)` ([10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)) で、どれも `anyAppleOS 27.2` からなので、deployment target が 27.0 の IntentTodo ではまだ書けません。RC で出した結論はどれも変わっていませんでした。
+
+測り方の小技も 2 つ書いておくと、swiftinterface は版ごとに宣言の並び順が動くので、素直に `diff` すると 2.3 MB 出て読めません。**行をソートしてから差分を取る** と並び替えが消えて、27.1 → 27.2 は 16,797 行に対して 33 行になりました。もう 1 つ、`xcodebuild -version` は PATH の先にある Xcode を答えるので、`/Applications/Xcode.app` の中身を取り違えかけました。SDK を比べるときは、アプリのバンドルのパスを直接指した方が確実です。
+
+ただし 27.2 は **宣言を比べただけで、ビルドはしていません**。SSU バグ (FB24548956) と watch のメタデータ上書き (FB24570185) が直ったか、スキーマの要求が変わっていないかは、ビルドしないと分からないので未確認のままです。
+
 「変わっていない」の確認に丸一日使うのはもったいなく感じるんですが、**制約の側が古びていないかを定期的に測るのは、新機能を追うのと同じくらい大事** だと思っています (6 つ目の型のとおり、測り直さないと塞がっていない扉の前で待ち続けることになるので)。今回は変わっていなかった代わりに、自分の測り方の方が壊れていました。
 
 ### 実機検証待ちに積み増しになったもの
 
 洗い直した結果、「机上では確からしいけれど実機で確かめないと確定しない」という宿題がむしろ増えました。ここに並べておきます。
 
-- **App Shortcut のフレーズ**: `AppIntentsPackage` を公式手順どおり宣言する形に切り替えたので (3/N)、残っているのは **フレーズのルーティングだけ** です。しかも今はフレーズにパラメータを埋めた (「Complete 〜 in IntentTodo」) ので、候補の解決まで含めて実機で見たいところが増えました。AppIntentsTesting は型名で intent を引くのでこの経路を通りません
-- **`allowedExecutionTargets` 未指定の読み取り系 Intent**: 書き込み系は全部 `[.main]` に固定したので (2/N / 9/N)、残るのは読み取り系です。実際どちらのプロセスで perform され、entity 解決がどこで走るのかを実機ログで見たい
+- **App Shortcut のフレーズ**: TestFlight の実機で "Show todos in Intento" がアプリを開かずに一覧のスニペットを出すところまでは確かめました (9/N)。パラメータを埋めたフレーズ (「Complete 〜 in Intento」) の候補の解決と、日本語のフレーズはまだです。Siri の言語が英語だと日本語のフレーズは照合に使われないので (5/N)、日本語は Siri を日本語にした端末で見る必要があります。AppIntentsTesting は型名で intent を引くのでこの経路を通りません
+- **`allowedExecutionTargets` 未指定の読み取り系 Intent**: アプリが起動していないときは `linkd` が Extension に回すことが、App Shortcut の件の実機ログで見えました (2/N)。残っているのは、アプリが起動しているときにどちらで perform され、entity 解決がどこで走るか、です
 - **Control をアプリ完全終了状態で叩いたときの体感**: 書き込み系を `[.main]` に固定したことで、アプリのバックグラウンド起動が挟まるようになりました。dialog も snippet も出ない面なので、遅延が実用上どうかは実機で見るしかありません
-- **スキーマ適合が実機の Siri / Apple Intelligence で効くか**: `.reminders.list` に加えて `.reminders.reminder` 本体も適合したので (7/N)、見たい範囲がむしろ広がりました。統合メタデータに載っていることまでは確定していますが、AppIntentsTesting は型名で intent / entity を引くのでスキーマ経路を通らず、ここから先は手動確認の領域です
+- **スキーマ適合が実機の Siri / Apple Intelligence でどう使われるか**: entity は `.reminders.reminder` 本体まで、Intent も作成・更新・削除・開くなど 7 本を新たに適合させたので (7/N)、見たい範囲がむしろ広がりました。統合メタデータに載っていることまでは確定していますが、AppIntentsTesting は型名で intent / entity を引くのでスキーマ経路を通らず、ここから先は手動確認の領域です。外部で「`.system.open` を複数宣言すると Siri から動かない」という報告もあって、IntentTodo は 2 本 (`OpenTodoIntent` / `OpenCategoryIntent`) 持っているので、ここも見たいところです
+- **アップデートで配った先の App Intents の登録**: 開発中は、パラメータをリネームするとシミュレータの登録が古いまま残って `simctl erase` が要りました (7/N)。アップデートを受け取った利用者の端末で同じことが起きるのかは分かっていません
+- **Siri が読み上げる文言の日本語**: Shortcuts アプリでアクション名や型名が日本語で出ることは実機で確かめましたが (3/N)、Siri が読み上げる `IntentDialog` の方はまだ推論です
 - **Widget / Control / ライブアクティビティ起点の donation**: アプリ内 `Button(intent:)` の実行がシステムに寄付されていることは実測できたんですが (8/N)、別プロセス起点は測れていません。シミュレータでは合成タップでコントロールが発火せず、ホームウィジェットの行は `Link` なので `Button(intent:)` がありません。`callAsFunction(donate:)` への載せ替えは不採用で決着したので、これは **「別プロセス起点だけ明示的な寄付が要るのか」という独立した問い** として残っています
 - **`UISceneAppIntent`**: `#if canImport(_AppIntents_UIKit) && !os(watchOS)` という **ガードの形さえ間違えなければ Package スコープでも置ける** ことを確認したうえで、その後 `LaunchAppIntent` / `OpenTodoIntent` に採用しました。狙いはマルチウィンドウではなく cold start です (5/N)。実機で cold start の遷移を確かめるのが残りです
-- **`.onAppIntentExecution` の cold start 問題**: そもそも今のコードベースでは `.onAppIntentExecution` をどこでも使っていない (`@Dependency` + `perform()`、それに `AppIntentSceneDelegate` に移行済み) ので、現時点では検証対象が無い状態です。再導入するときに「`@State` の path が未構築」「シーンの activation conditions 未設定」「`supportedModes` に foreground が無い」の 3 仮説を潰す、というメモだけ残しました
+- **`.onAppIntentExecution` の cold start 問題**: そもそも今のコードベースでは `.onAppIntentExecution` をどこでも使っていない (`@Dependency` + `perform()`、それに `AppIntentSceneDelegate` に移行済み) ので、現時点では検証対象が無い状態です。再導入するときに「`@State` の path が未構築」「シーンの activation conditions 未設定」「`supportedModes` に foreground が無い」の 3 仮説を順に確かめる、というメモだけ残しました
 
 待ちのタスクとして 1 つ増えたのが **App Schema と watch ターゲットの両立** です。iOS アプリが watch アプリを埋め込む構成だと、共有 entity は型を二重定義しない限りどのスキーマにも適合できません (7/N)。回避策は入れましたが、公開の解決手段が無いので Apple 側の対応待ちで、Feedback (FB24570185) を出しました。
 
@@ -307,18 +325,19 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 一方で、**サンプルにも古い書き方は残っています**。`openAppWhenRun` のような旧 API を使っているものもあるので、「サンプルにこう書いてあるから正しい」ではなく「今のドキュメントと突き合わせてどうか」まで見る必要がありました。
 
-取り込み方で 1 つ引っかかったのも書いておくと、**サンプルをリポジトリの中に展開してはいけません**。Xcode の同期グループがサンプルの `.xcodeproj` を拾って、追跡下の `project.pbxproj` に project reference として書き込んでしまいます (`.gitignore` は効きません)。リポジトリの外に置くのが安全でした。zip の実 URL は各ドキュメントページの JSON (`https://developer.apple.com/tutorials/data<path>.json` の `sampleCodeDownload.action.identifier`) から引けます。
+取り込み方で 1 つ引っかかったのも書いておくと、**サンプルをリポジトリの中に展開してはいけません**。Xcode の同期グループがサンプルの `.xcodeproj` を拾って、追跡下のプロジェクトファイルに project reference として書き込んでしまいます (`.gitignore` は効きません)。リポジトリの外に置くのが安全でした。zip の実 URL は各ドキュメントページの JSON (`https://developer.apple.com/tutorials/data<path>.json` の `sampleCodeDownload.action.identifier`) から引けます。
 
 ## まとめ
 
 - 本編は「実機で詰まった話」、WWDC 2026 編は「採用していいか / 設計判断」と、軸を分けて書いている
 - 最初に並べた将来トピックのうち、Visual Intelligence / Interactive Snippets / Intent Modes の一部は WWDC 2026 編で片付いた
-- FoundationModels (端末内 LLM) と `SpotlightSearchTool`、それに寄付 (`IntentDonationManager`) は「やらないと決めた」もの。主眼から外れるか、設計の核と両立しないため
-- 残りの検証待ち (watchOS / visionOS の実機 / Spotlight ラグ / macOS の通知と Siri / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の `@Parameter` 復帰) は、手元の機材と検証コストで順番が決まる予定。SDK 側の対応待ちは 2 件 (FB24548956 / FB24570185) で、**Xcode 27 RC でもどちらも未解消**
+- FoundationModels (端末内 LLM) と `SpotlightSearchTool` は「やらないと決めた」もの。主眼から外れるため。寄付は一度「要らない」で閉じたが、前提が崩れて Intent を通らない UI 操作のぶんだけ入れた
+- 残りの検証待ち (watchOS / visionOS の実機 / Spotlight ラグ / macOS の通知と Siri / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の `@Parameter` 復帰) は、手元の機材と検証コストで順番が決まる予定。SDK 側の対応待ちは 2 件 (FB24548956 / FB24570185) で、**Xcode 27 RC でもどちらも未解消** (27.2 beta はビルドでは未確認)
 - 書き溜めた「制約」をセッション書き起こしと全数突き合わせたら、断定しすぎ・理由付けの誤り・出典の取り違えがまとめて出てきた。「セッションで説明されていたこと / API ドキュメントで知ったこと / 自分がビルドして観測したこと」、それに「そこから推論したこと」は、後から見分けられる形で分けて書いておかないと直せなくなる
 - 確かめるときは **正常なはずの側も一緒に並べる**。片側だけ見ていると、同じ現象がぜんぜん違う原因に見える
 - **「できない理由」は結論だけ持ち越さない**。SDK が上がったら理由の方を測り直す。塞がっていない扉の前で待ち続けることになる
 - 疑う順番は対象だけじゃない。**測る道具 (テスト / フラグ / ログ) が壊れていないか** を先に確かめる。「何も見ていなくても緑」になる仕掛けがあると、誤診がそのぶん長生きする
+- **手元で正しいことは、配った先で正しいことを意味しない**。App Intents の構成を変えたら配布ビルドで面に出るところまで見て、配布の段で動かす変数は 1 回に 1 つにする
 
 書ける段階になり次第、ここから本編へ昇格させていきます。
 
@@ -326,6 +345,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-01**: **「8 つ目の型: 手元で正しいことを、配った先でも正しいと思う」** を追加 (`AppIntentsPackage` が配布したアプリでだけ App Intents を読ませなくしていた件と、`ShowTodosIntent` で 2 つの変数を一緒に動かした件)。`.foreground(.dynamic)` と寄付の項を、それぞれの結論の撤回に合わせて書き直し。`AppIntentsPackage` の断定取り下げの項を「今は 1 つも宣言しない」に更新。Xcode 27.1 / 27.2 beta の SDK 棚卸しを RC の節に追加。実機検証待ちを現状に更新 (フレーズ / 未指定の読み取り系 / Intent のスキーマ適合 / 配った先の登録 / 読み上げの日本語)。external storage を採用済みに。タイトルからダッシュを外した
 - **2026-09-12**: `AppIntentsPackage` の断定取り下げの項に、静的リンクなら宣言が無くてもメタデータは集約される (宣言は中身に触っていなかった) ことを追記。「7 つ目の型」に、インクリメンタルビルドの古いメタデータで `persistentIdentifier` の追従を読み違えかけた件を追加
 - **2026-09-11**: Xcode 27 RC で制約を全部測り直した節を追加 (結論は「beta 6 から何も動いていない」)。**「7 つ目の型: 測る道具の方を疑わない」** を追加。トピック D (macOS native) の操作導線を決着済みに更新。別プロセス起点の donation を、載せ替えの判断とは独立した問いとして書き直し
 - **2026-08-31**: トピック F (reminder 本体スキーマ適合) を **決着済み** に変更 (据え置きの理由 2 つがどちらも誤診で、SDK は塞いでいなかった)。トピック J も entity 側は復帰済みに更新。トピック L (日本語対応で分かった Intent のコピーの引かれ方) を追加。**「6 つ目の型: 『できない理由』を測り直さない」** を追加。実機検証待ちを現状に更新し、SDK 側の対応待ち 2 件 (FB24548956 / FB24570185) を明記

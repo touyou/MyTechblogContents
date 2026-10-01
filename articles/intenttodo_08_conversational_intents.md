@@ -1,5 +1,5 @@
 ---
-title: "WWDC 2026: 対話的な Intent — 確認 / 選択 / Snippet / 寄付 (8/N)"
+title: "WWDC 2026: 確認 / 選択 / Snippet / 寄付で Intent を対話的にする (8/N)"
 emoji: "💬"
 type: "tech"
 topics: ["AppIntents", "Siri", "iOS", "WWDC2026"]
@@ -14,7 +14,7 @@ published: true
 WWDC 2026 編の 3 本目です (この編の前提は 6/N 冒頭を見てください)。
 
 今回は、Intent を **対話的・予測的に賢くする** ための新 API をまとめて試した話です。
-具体的には `requestConfirmation` / `requestChoice` で perform() を一旦止めてユーザーに聞く話、`IntentDialog(full:supporting:)` で返事を出し分ける話、Interactive Snippet でその場で操作させる話、そして `IntentDonationManager` で寄付する話 (結論としては「しない」) の 4 本立てです。
+具体的には `requestConfirmation` / `requestChoice` で perform() を一旦止めてユーザーに聞く話、`IntentDialog(full:supporting:)` で返事を出し分ける話、Interactive Snippet でその場で操作させる話、そして `IntentDonationManager` で寄付する話 (結論が何度か動いて、今は Intent を通らない UI 操作だけ寄付しています) の 4 本立てです。
 
 ## perform() を止めてユーザーに聞く
 
@@ -121,21 +121,20 @@ private enum SnoozeDuration: CaseIterable {
 ```swift
 private func dialog(for entities: [TodoAppEntity]) -> IntentDialog {
     let count = entities.count
-    // ... categoryLabel を filter から組む ...
+    let singular = String(localized: categoryNoun.singular)   // "incomplete todo" など
+    let plural = String(localized: categoryNoun.plural)       // "incomplete todos" など
 
     if count == 0 {
-        return IntentDialog(
-            full: "You have no \(categoryLabel)s.",
-            supporting: "No \(categoryLabel)s."
-        )
+        return IntentDialog(full: "You have no \(plural).", supporting: "No \(plural).")
     }
-    let noun = count == 1 ? categoryLabel : "\(categoryLabel)s"
     return IntentDialog(
-        full: "You have \(count) \(noun).",                                  // 音声単独: 件数を完全文で
-        supporting: count == 1 ? "Here is your \(categoryLabel)." : "Here are your \(categoryLabel)s."  // 視覚併用: 一覧に添える一言
+        full: "You have \(count) \(count == 1 ? singular : plural).",                 // 音声単独: 件数を完全文で
+        supporting: count == 1 ? "Here is your \(singular)." : "Here are your \(plural)."  // 視覚併用: 一覧に添える一言
     )
 }
 ```
+
+単数形と複数形を両方ともローカライズ済みの文言で持っているのは、`"\(noun)s"` のように英語の複数形を Swift で組み立てると、その部分が訳せなくなるからです (3/N)。
 
 音声だけのときは「You have 3 incomplete todos.」と件数まで言い切って、画面に一覧が出るときは「Here are your incomplete todos.」と短く添える。
 同じ Intent でも、出力先 (耳か目か) で適切な饒舌さが違う、というのを 1 つの API で表現できるのは結構気が利いてるなと思いました。
@@ -184,13 +183,15 @@ Button(intent: ToggleTodoCompletionIntent(todo: entity)) {
 ボタンが走ると、システムがスニペットを再 perform するので、`perform()` の中で **毎回 entity を取り直して** いれば、ラベルが「Mark Complete」⇄「Mark Incomplete」と正しく切り替わります。
 だから `TodoSnippetIntent.perform()` は `todoId` から `TodoEntityStore` 経由で最新を再フェッチする作りにしています (6/N で出てきた共有コンテナのアクセサです)。
 
+一覧を返す `ShowTodosIntent` にもスニペットを付けました (`ShowTodosSnippetIntent`)。先頭 5 件を完了ボタン付きで出して、最後に「アプリで開く」ボタンを置いています。このボタンが `Button(intent: LaunchAppIntent(...))` で、**値を返す Intent 自身はアプリを開かず、開くのはスニペットのボタンに任せる** という分担です。最初は Intent 自身に開かせようとしてうまくいかなかったので、その経緯は 9/N に書きました。
+
 なお、このスニペットは **app プロセスで提示される** ので、本編 5/N で書いた entity 解決クラッシュは該当しません。ここでは entity ベースの Intent を素直に使っています (そのクラッシュ自体、後日 iOS 27 では再現しないと分かって回避策ごと撤去しました)。
 
-## 寄付はしない — ただし理由は途中で入れ替わった
+## 寄付は、Intent を通らない UI 操作のぶんだけする
 
 最後が寄付です。アクションを `IntentDonationManager` に寄付しておくと、システムが「この人はこの時間帯によく Todo を追加するな」みたいに学習して、先回りで提案してくれるようになります。
 
-結論から書くと、**IntentTodo の明示的な寄付はゼロ** です。ただしその理由は 2 段階で入れ替わっていて、後の方が本題なので順に書きます。
+ここは結論が何度か動いていて、今は **Intent を通らない UI 操作だけを、UI 側から寄付** しています。途中に「明示的な寄付はゼロでいい」と結論していた時期があって、そこに至る理由とそれが崩れた理由の両方が本題なので、順に書きます。
 
 ### 第 1 段階: `perform()` の中で donate するのは規約違反だった
 
@@ -221,7 +222,7 @@ CosmoTunes の `DonationManager` にも同じことがコメントで書いて�
 
 これで結論の理由が入れ替わりました。「規約違反になるから寄付しない」ではなく、**アプリ内 UI が全部 `Button(intent:)` である限り、寄付すべき「Intent を通らない UI 操作」が存在しないから** です。公式サンプル 4 本が明示 donate を必要とするのは、UI が Manager を直接呼んでいるからで (`Button(` 94 件のうち `Button(intent:)` は **0 件** でした)、前提が違います。セッション 343 の "Apple Intelligence can't learn from actions people take through your app's UI without your help" も、**UI の操作が intent の実行になっていない** アプリの話だと読むのが自然でした。
 
-設計の核 (Intent を唯一の実行経路とする) を寄付のために崩す必要は無かった、というのが今の理解です。むしろ核を守っていたから寄付が要らなかった、という順序でした。
+設計の核 (Intent を唯一の実行経路とする) を寄付のために崩す必要は無かった、というのが当時の理解です。むしろ核を守っていたから寄付が要らなかった、という順序でした。ただし、この「全部 `Button(intent:)`」という前提そのものが怪しかったことを、第 4 段階で書きます。
 
 ### 第 3 段階: 載せ替え案の方も畳んだ
 
@@ -236,6 +237,47 @@ donate という動機が上の実測で消えたので、残るのは副次的�
 | `requestConfirmation` / `requestChoice` が使える | 確認あり / なしで Intent を 2 本に分けて回避済み (`DeleteTodoIntent` と `DeleteTodoImmediatelyIntent`、`SnoozeTodoIntent` と `QuickSnoozeTodoIntent`) |
 
 そして決め手が、**別プロセスは載せ替えられない** ことでした。Widget や Control の中では `callAsFunction` は使えないので `Button(intent:)` のまま残ります。載せ替えると「アプリ内は直接呼び出し、それ以外はボタン」で、**呼び出し形が 2 種類に増えます**。1/N に書いた「Intent が唯一の実行経路」という一番おいしいところを、得るものがはっきりしないまま手放す形なので、ここは現状維持が正解だと判断しました。
+
+### 第 4 段階: 「全部 `Button(intent:)`」を確かめていなかった
+
+第 2 段階の結論は「アプリ内 UI が全部 `Button(intent:)` である限り」という前提の上に立っていました。この前提を一度も洗っていなかったのが穴です。
+
+5/N の落とし穴 6 (Siri が一覧の依頼に Intent を使わずに答えていた件) を追っていたときに、「donation が足りていないだけでは」と指摘されて UI の操作経路を全部洗い直したら、`Button(intent:)` を通らない操作が 3 つありました。一覧のフィルタを選ぶ、行を選んで詳細を開く、ドラッグで並べ替える、です。前の 2 つは View の状態を書き換えるだけ、並べ替えは Intent を通らずに `TodoService` を直接呼んでいて、どれもアプリの中でやった分はシステムに 1 回も記録されていませんでした。
+
+前の 2 つは UI 側から寄付するようにしています。
+
+| UI の操作 | 寄付する Intent | 置き場所 |
+|---|---|---|
+| 一覧のフィルタを選ぶ | `ShowTodosIntent(filter:)` | フィルタのピッカーの Binding |
+| 行を選んで詳細を開く | `OpenTodoIntent(target:)` | 一覧の `List(selection:)` の Binding |
+
+```swift
+extension Binding {
+    /// コントロール自身が書き込んだときだけ action を呼ぶ Binding。
+    /// Binding(get:set:) は SDK 27 で @Sendable なクロージャを取るので、MainActor に閉じる
+    @MainActor
+    func onUserSet(_ action: @escaping @MainActor (Value) -> Void) -> Binding<Value> {
+        Binding(
+            get: { @MainActor in wrappedValue },
+            set: { @MainActor newValue, transaction in
+                self.transaction(transaction).wrappedValue = newValue
+                action(newValue)
+            }
+        )
+    }
+}
+
+// 呼び出し側 (フィルタのピッカー)
+Picker(.copy("Filter"), selection: $selection.onUserSet(UIActionDonation.showList)) { ... }
+```
+
+寄付を Binding の setter から呼んでいるのが要点です。setter を通るのはそのコントロール自身の書き込みだけで、Intent (`LaunchAppIntent` / `OpenTodoIntent`) は `NavigationModel` を直接書き換えるので、システムが寄付済みの実行を二重に数えることがありません。第 1 段階の「`perform()` の中で寄付すると Siri / Shortcuts 経由の分と二重になる」を、置き場所で避けた形です。寄付の `Task` は待たずに投げっぱなしにしていて、寄付が失敗しても操作は止めません。
+
+ドラッグの並べ替えは寄付していません。`ReorderTodosIntent` は id の並びを丸ごと受け取る Intent で、Siri が提案に使える形の操作ではないからです。
+
+確かめ方は少し変わりました。シミュレータ (iOS 27.1) でフィルタを 3 回切り替えて行を 1 回開いたら、Intent の実行ログの方 (Transcript) に `ShowTodosIntent` が 3 件、`OpenTodoIntent` が 1 件増えて、比較のために叩いた `Button(intent:)` と同じ形で載りました。一方で Donation のストリームは、その比較用の `Button(intent:)` も含めて今回は書かれていませんでした。第 2 段階の実測はこのストリームで見ていたので、同じ観測点が OS のバージョンで変わりうる、ということは頭に置いておいた方がよさそうです。
+
+「UI が全部 `Button(intent:)` だから要らない」は設計の意図であって、実装を確かめた事実ではありませんでした。99/N に書いた「できない理由を測り直さない」のちょうど裏返しで、**「要らない理由」も測り直さないと穴が開いたままになる** んだなと思います。
 
 ### 測り方を 2 回間違えた
 
@@ -272,11 +314,11 @@ try? await IntentDonationManager.shared.deleteDonations(
 ```swift
 // UpdateTodoIntent.perform() 内
 let entity = try todoService.update(
-    todoId: todo.id,
+    todoId: target.id,
     title: Self.requiredUpdate($title.valueState),
-    todoDescription: Self.optionalUpdate($todoDescription.valueState),
-    dueDate: Self.optionalUpdate($dueDate.valueState),
-    isFavorite: Self.requiredUpdate($isFavorite.valueState),
+    todoDescription: Self.attributedUpdate($note.valueState),
+    dueDate: Self.dueDateUpdate($dueDate.valueState),
+    isFavorite: Self.requiredUpdate($isFlagged.valueState),
     // ...
 )
 
@@ -293,6 +335,8 @@ private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -
 }
 ```
 
+パラメータの名前 (`note` / `isFlagged` / `target`) は 7/N の reminders スキーマ適合で変わったので、サービス層の名前とはずれています。`attributedUpdate` / `dueDateUpdate` は、スキーマが要求する `AttributedString` / `DateComponents` をモデルの型に直す版です。
+
 受け側の `TodoService.update` は `FieldUpdate<Value>` (`.unchanged` / `.set(Value)`) という enum でフィールドごとに受けるようにして、`valueState` の三値をサービス層の語彙に写しています。title のように **モデル上は必須の列** は `.set(nil)` が来ても据え置きにする、という出し分けが必要だったので、上のとおり generic なヘルパーを optional 用と必須用の 2 種に分けました。
 
 この記事の主題 (perform() を止めて聞き返す) とは道具が違いますが、「ユーザーが『消して』と言ったのか、単に何も言わなかったのか」を区別するという意味では同じ方向の話だと思ったので、ここに追記しています。
@@ -301,7 +345,7 @@ private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -
 
 あとからアプリの編集画面をこの Intent に載せたときに分かったんですが、**三状態が必要なのは Siri / Shortcuts から呼ばれる経路だけ** でした。アプリのフォームは開いた時点で全フィールドの現在値を持っているので、保存では **全部を `.set` で送ります**。部分パッチではなく todo 全体の last-write-wins になりますが、現在値から始めているので触らなかった欄には同じ値が書き戻るだけです。
 
-そのうえで 1 つ決めたのが、**`UpdateTodoIntent` の便宜 init は全フィールドを必須にする** ことでした。デフォルト値を与えると引数を省ける分は楽になるんですが、後から Intent にフィールドが増えたときに **フォームが黙って古いままになります** (コンパイルは通るので、増えたフィールドだけ保存で消える、という壊れ方をします)。必須にしておけばコンパイルエラーで気付けるので、面倒な方を採りました。「呼出側を楽にする既定値」が、この手の *後から増える* 契約とは相性が悪いんだなと思います。
+そのうえで 1 つ決めたのが、**`UpdateTodoIntent` の便宜 init は全フィールドを必須にする** ことでした。デフォルト値を与えると引数を省ける分は楽になるんですが、後から Intent にフィールドが増えたときに **フォームが気づかないうちに古いままになります** (コンパイルは通るので、増えたフィールドだけ保存で消える、という壊れ方をします)。必須にしておけばコンパイルエラーで気付けるので、面倒な方を採りました。「呼出側を楽にする既定値」が、この手の *後から増える* 契約とは相性が悪いんだなと思います。
 
 全フィールドを毎回送るようにしたことで、副作用も 1 つ出てきました。6/N に書いたとおり場所は「名前 + 座標」に分解して保存しているんですが、**名前だけ差し替えると座標が前の場所のまま残ります**。座標は解決元の名前に属するので、名前が変わったら落とす、同じなら保つ、という分岐を足しました。フォームが毎回全フィールドを送る以上、これが無いと **場所と無関係な保存で座標が消える** (あるいは古い座標が生き残る) ことになります。3 ケースともテストにしました。
 
@@ -309,7 +353,7 @@ private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -
 
 ## 実行の前に止めるか、後で取り消すか: UndoableIntent
 
-99/N に「検証候補」として置いていた `UndoableIntent` (iOS 26 / セッション 275) も入れました。削除 3 種 (確認あり / 確認なし / バルク) と完了トグルが対象です。実行前の `requestConfirmation` と実行後の取り消しをどう住み分けるのかが分からない、というのが宿題だったんですが、やってみたら **住み分けるものではなくて、呼出元の性質で自動的に決まる** という結論になりました。`undoManager` は Intent を走らせた面が用意するもので、用意しない呼出元 (ウィジェットの `Button(intent:)` など) では `nil` になるので、登録がまるごと no-op になります。これは失敗ではなく想定どおりの分岐なので、`guard let` で静かに抜けます。つまり「確認を出せる面には確認が出るし、取り消せる面では取り消せる」だけで、こちらが場合分けする話ではありませんでした。
+99/N に「検証候補」として置いていた `UndoableIntent` (iOS 26 / セッション 275) も入れました。削除 3 種 (確認あり / 確認なし / バルク) と完了トグルが対象です。実行前の `requestConfirmation` と実行後の取り消しをどう住み分けるのかが分からない、というのが宿題だったんですが、やってみたら **住み分けるものではなくて、呼出元の性質で自動的に決まる** という結論になりました。`undoManager` は Intent を走らせた面が用意するもので、用意しない呼出元 (ウィジェットの `Button(intent:)` など) では `nil` になるので、登録がまるごと no-op になります。これは失敗ではなく想定どおりの分岐なので、`guard let` でそのまま抜けます。つまり「確認を出せる面には確認が出るし、取り消せる面では取り消せる」だけで、こちらが場合分けする話ではありませんでした。
 
 実装で分かったことをいくつか。
 
@@ -341,7 +385,7 @@ static func registerRestore(
 }
 ```
 
-取り消しメニューに出る名前は inflection 付きで書けます (6/N の複数形の話と同じです)。**スナップショットは削除する前に取る** のと、**同じ id で戻す** のが要点で、後者は Spotlight の index や entity の identity を保つために効いてきます。id が変わると「戻した」ように見えて別物になるので。
+取り消しメニューに出る名前は inflection 付きで書けます (6/N の複数形の話と同じです)。**スナップショットは削除する前に取る** のと、**同じ id で戻す** のが要点で、後者は Spotlight の index や entity の identity を保つために必要になります。id が変わると「戻した」ように見えて別物になるので。
 
 ## Siri に読ませるエラー文言を決める
 
@@ -386,7 +430,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 - **ビルド成立 (B)**: `requestConfirmation` / `requestChoice` / `IntentDialog(full:supporting:)` / `SnippetIntent` / `UndoableIntent` / `CustomAppIntentErrorConvertible` はすべて OK。
 - **単体 (U)**: `valueState` の三状態と `UndoableIntent` の復元は AppIntentsTesting で確認済みです (10/N)。`requestChoice` を使う Intent だけはテストから run できません。
-- **観測 (シミュレータ)**: `Button(intent:)` の実行がシステムの donation に記録されることは実測しました。ただし Widget / Control / ライブアクティビティ起点は測れていません。
+- **観測 (シミュレータ)**: `Button(intent:)` の実行がシステムの donation に記録されること、UI 側から寄付したフィルタ選択と行の選択が `Button(intent:)` と同じ形で記録されることは実測しました。ただし Widget / Control / ライブアクティビティ起点は測れていません。
 - **実機 (R)**: Siri が実際に確認 UI / 選択 UI を出すか、スニペットが応答に出るかは未確認です。端末で触れたら追記します。
 
 ## まとめ
@@ -394,12 +438,12 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 - `requestConfirmation` (yes/no) / `requestChoice` (多分岐) は perform() を止めてユーザーに聞ける。拒否 / `.cancel` は throw で中断される
 - `requestChoice` の `IntentChoiceOption` は安定 id を持たないので、選択肢生成と逆引きを enum に一元化してタイトル照合 + フォールバックでドリフトを防ぐ
 - `IntentDialog(full:supporting:)` で「音声単独」と「視覚併用」のメッセージを出し分ける
-- `valueState` の三状態が要るのは **Siri / Shortcuts 側だけ**。アプリのフォームは全フィールドを `.set` で送る last-write-wins にする。便宜 init に既定値を与えると、Intent にフィールドが増えたときフォームが黙って古いままになる
+- `valueState` の三状態が要るのは **Siri / Shortcuts 側だけ**。アプリのフォームは全フィールドを `.set` で送る last-write-wins にする。便宜 init に既定値を与えると、Intent にフィールドが増えたときフォームが気づかないうちに古いままになる
 - Interactive Snippet はボタンを押すたびにシステムが `SnippetIntent` を再 perform するので、perform で毎回最新 entity を取り直す。app プロセス提示なので entity 解決クラッシュは無関係
 - **`perform()` の中で `donate()` を呼ぶのは規約違反**。呼出元を判別する API が無いので Siri / Shortcuts 経由でも走ってしまう
-- そのうえで **アプリ内 `Button(intent:)` の実行はシステムがすでに donation として記録している** (実測)。UI が全部 `Button(intent:)` である限り、自分で寄付すべき操作が残らない。明示的な寄付はゼロのままでよい。`deleteDonations(matching:)` の方は呼出元に関係なく正しいので残す
+- そのうえで **アプリ内 `Button(intent:)` の実行はシステムがすでに donation として記録している** (実測)。ただし「UI が全部 `Button(intent:)`」は確かめていない前提で、実際にはフィルタの選択と行の選択が Intent を通っていなかった。**Intent を通らない UI 操作だけを、Binding の setter から寄付する**。`deleteDonations(matching:)` は呼出元に関係なく正しいので残す
 - 残っていた `callAsFunction(donate:)` への載せ替え案も **不採用**。donate の動機が消えたうえ、別プロセスは `Button(intent:)` のままなので、載せ替えると呼び出し形が 2 種類に増える
-- `UndoableIntent` は「確認と取り消しの住み分け」ではなく、`undoManager` を用意する呼出元でだけ効く仕組み。復元は **同じ id で・冪等に**、完了トグルの取り消しは逆トグルではなく元の値へ戻す
+- `UndoableIntent` は「確認と取り消しの住み分け」ではなく、`undoManager` を用意する呼出元でだけ働く仕組み。復元は **同じ id で・冪等に**、完了トグルの取り消しは逆トグルではなく元の値へ戻す
 - Siri に読ませるエラー文言は `CustomAppIntentErrorConvertible` で決める。サービス層が AppIntents を import せずに済む
 
 次回は、[大量の Todo を一括処理する `EntityCollection` / `LongRunningIntent` / `CancellableIntent` と、「検証してみたら自分のアプリには適合しなかった」`RelevantEntities` の話 (9/N)](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis) を書きます。
@@ -408,6 +452,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-01**: 寄付の節に「第 4 段階」を追加。「UI が全部 `Button(intent:)`」は確かめていない前提で、フィルタの選択と行の選択が Intent を通っていなかったので、その 2 つを Binding の setter から寄付するようにした (明示的な寄付ゼロという結論を撤回)。`ShowTodosIntent` のスニペットと dialog のコードを現行に、`valueState` のコード例を 7/N のリネーム後の名前に更新。タイトルと見出しからダッシュを外した
 - **2026-09-11**: 寄付の節に「第 3 段階: 載せ替え案の方も畳んだ」を追加 (`callAsFunction(donate:)` への載せ替えを不採用にした理由)。`IntentSystemContext` が公開しているメンバを 4 つ (`currentMode` / `isVoiceOnly` / `locale` / `preciseTimestamp`) に数え直した
 - **2026-08-31 (2)**: `valueState` の節に「三状態が要るのは Siri / Shortcuts 側だけ」を追加 (アプリのフォームは全フィールド `.set` の last-write-wins / 便宜 init は全フィールド必須 / 名前だけ変えたときの座標の扱い)
 - **2026-08-31**: 寄付の節を書き換え。`donate()` をどこからも呼んでいないのに **`Button(intent:)` のタップがシステムの donation に記録されている** ことを実測したので、「寄付しない」の理由を「規約違反だから」から「**Intent を通らない UI 操作が存在しないから**」へ差し替え。観測の過程で 2 回逆の結論を出した (mtime を信じた / `+0` を「書かれていない」と読んだ) 経緯も追加

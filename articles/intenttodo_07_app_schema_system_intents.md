@@ -1,5 +1,5 @@
 ---
-title: "WWDC 2026: App Schema と system intents — 意味で適合させる効きどころ (7/N)"
+title: "WWDC 2026: App Schema と system intents で Todo を意味で適合させる (7/N)"
 emoji: "🔗"
 type: "tech"
 topics: ["AppIntents", "Siri", "iOS", "WWDC2026"]
@@ -13,9 +13,9 @@ published: true
 [App Intents 中心設計シリーズ](https://zenn.dev/touyou/articles/intenttodo_01_design_philosophy) の 7 回目です。
 WWDC 2026 編の 2 本目です (この編の前提は 6/N の冒頭を見てください)。
 
-今回は、IntentTodo の Entity を **システムのドメインに意味で適合させる** 話 (App Schema) と、「開く」「削除する」「検索する」を **system intent** に乗せた話です。
+今回は、IntentTodo の Entity と Intent を **システムのドメインに意味で適合させる** 話 (App Schema) と、「開く」「削除する」「検索する」を **system intent** に乗せた話です。
 
-App Schema はしばらく「カテゴリだけ適合できて、Todo 本体は無理」という状態が続いていたんですが、据え置きの理由を測り直したら **塞いでいると思っていたものが塞いでいなかった** ことが分かって、本体も適合できました。代わりに出てきた本当の壁が watchOS だったので、そこも書きます。
+App Schema はしばらく「カテゴリだけ適合できて、Todo 本体は無理」という状態が続いていたんですが、据え置きの理由を測り直したら **塞いでいると思っていたものが塞いでいなかった** ことが分かって、本体も適合できました。代わりに出てきた本当の壁が watchOS だったので、そこも書きます。後半は Intent 側の適合で、セッション 240 の「Siri が実行できるのはスキーマに適合したアクション」という説明と、手元で測ったメタデータの差を受けて、追加・更新・削除・開くなど 7 本を新たに適合させた話です。
 
 ## ドメインに意味で適合させると何が起きるか
 
@@ -25,7 +25,7 @@ App Schema (assistant schema) は、自分の Entity や Intent を `reminders` 
 IntentTodo は Todo アプリなので、いちばん近いのは `reminders` ドメインです。
 カテゴリは reminders で言う「リスト」、Todo 本体は「リマインダー」に対応します。
 
-なお App Schema は **新しい Siri への入場券** であって、既存の経路を格下げするものではありません。適合が無くても、discoverable な自前 Intent 群と後述の system intent、それに Spotlight のセマンティックインデックスで、意味理解・検索・遷移は成立します。実際このアプリは長いこと `list` だけの適合で回っていましたし、スキーマを持てない watchOS でも機能は落ちていません。
+なお App Schema は **新しい Siri への入場券** であって、既存の経路を格下げするものではありません。適合が無くても、discoverable な自前 Intent 群と後述の system intent、それに Spotlight のセマンティックインデックスで、意味理解・検索・遷移は成立します。実際このアプリは長いこと `list` だけの適合で回っていましたし、スキーマを持てない watchOS でも機能は落ちていません。ただし Siri に自然な言い方で頼んでアクションを実行してもらう経路だけは、スキーマに適合した Intent にしか開きません (App Shortcut のフレーズは別です)。これは後半の Intent 側の話で書きます。
 
 ## 小さいスキーマは素直: Category = reminders の list
 
@@ -62,6 +62,7 @@ public enum TodoListType: String {
 - スキーママクロが `typeDisplayRepresentation` を生成してくれるので、自分で書いていた分は **削除** しました。スキーマ適合の entity で上書きすると `typeDisplayRepresentation should not be overridden in an AppEntity that conforms to a schema` という警告になります。ただし「マクロがスキーマ由来の名前を入れてくれる」わけではなくて、生成されるのは **空の `TypeDisplayRepresentation`** でした。出荷メタデータを覗いてみると、スキーマに適合している entity は **上書きの有無にかかわらず `displayTypeName` が空** です。この上書きは、システムが読むメタデータには最初から載っていなくて、プロセス内で Swift として読んだときだけ値が変わる、という状態だったわけです。外しても挙動は変わりませんでした。
 - 6/N で書いたプロパティマクロのときと同じで、スキーママクロも非 `Hashable` な backing を生やすので、`Hashable` の自動合成が壊れます。`==` / `hash(into:)` を明示実装で補いました。
 - listType には `standard` という **case の存在が要求されます** (`conforming to 'reminders.listType' requires enum case 'standard'`)。`.reminders.list` の `type` も非 optional 必須です。
+- Xcode 27.2 beta の SDK で、スキーマ適合の enum には `caseDisplayRepresentations` の既定実装が入りました。ただし `anyAppleOS 27.2` からなので、deployment target が 27.0 の IntentTodo では宣言を外せません。何の文言が入るのかもまだ確かめていません。
 
 「スキーマが要求するプロパティを満たしつつ、独自プロパティは足してもいい」という塩梅は、思っていたより柔らかくて好印象でした。
 
@@ -88,7 +89,7 @@ public var note: String? { todoDescription }
 
 例外は `dueDate` 1 つだけで、スキーマは `DateComponents?` を要求するのに対してアプリは `Date?`、**名前が衝突する** ので computed alias で逃げられません。stored を `dueDateValue: Date?` に改名して `dueDate` を computed にしました。壊れたのは 5 ファイル 12 箇所で、全部 `dueDate` → `dueDateValue` の機械的置換です。
 
-> 測り方でひとつ引っかかったのが、**パッケージ内でコンパイルが止まると下流の consumer が見えない** ことでした。「エラーが `TodoAppEntity.swift` だけ」の時点で「他に consumer は無い」と読みかけたんですが、自ファイルを直したら UI / WidgetUI 側が出てきます。**緑になるまで潰し切ってから件数を数える** のが正しいです。
+> 測り方でひとつ引っかかったのが、**パッケージ内でコンパイルが止まると下流の consumer が見えない** ことでした。「エラーが `TodoAppEntity.swift` だけ」の時点で「他に consumer は無い」と読みかけたんですが、自ファイルを直したら UI / WidgetUI 側が出てきます。**緑になるまで直し切ってから件数を数える** のが正しいです。
 
 ### 足りないフィールドはモデルに足した
 
@@ -124,7 +125,7 @@ SDK の swiftinterface を全数走査したら、**23 ドメイン全部** が 
 
 ちなみに `@AppEntity(schema:)` **マクロ自体** は watchOS SDK でも available です。ただ渡せるドメインが 1 つも無いので、この availability は実質空振りでした。
 
-なので対処は「別ドメインを探す」でも「自前スキーマを作る」でもなく、**watchOS ではスキーマ無しの型を別に持つ** ことになります。マクロ付きの宣言は属性部分だけを `#if` で切り替えられない (属性と本体を分割すると `Expected '}' in struct` になる) ので、型宣言を 2 系統でまるごと書き分けます。
+なので対処は「別ドメインを探す」でも「自前スキーマを作る」でもなく、**watchOS ではスキーマ無しの型を別に持つ** ことになります。マクロ付きの宣言は、`#if` で頭 (属性と宣言行) と本体を分けて書けない (`Expected '}' in struct` になる) ので、型宣言を 2 系統でまるごと書き分けます。そもそも下に書くとおり、entity は型名も分ける必要がありました。
 
 | 型 | 非 watchOS | watchOS |
 |---|---|---|
@@ -167,17 +168,17 @@ extension WatchCategoryAppEntity: AssistantSchemaEntity {
 
 実際これで通って、watch のメタデータにもスキーマが載りました。でも **採ってはいけない形** です。
 
-- **プロトコル要求ですらありません**。`AssistantSchemaEntity` は実質空のプロトコルで、`__appSchemaEntity` はどこにも要求されていない。マクロが生やし、メタデータ抽出器が読むだけの **非公開の申し合わせ** です。名前が変われば **ビルド緑のままスキーマだけ静かに消えます**
+- **プロトコル要求ですらありません**。`AssistantSchemaEntity` は実質空のプロトコルで、`__appSchemaEntity` はどこにも要求されていない。マクロが生やし、メタデータ抽出器が読むだけの **非公開の申し合わせ** です。名前が変われば **ビルド緑のままスキーマだけ消えます**
 - **公開 API での抜け道もありません**。ドメイン名前空間を経由せず `AppSchema.Entity("ListEntity")` を自分で組めれば済むんですが、その `init(_:)` は internal でした
 - **内容としても誤り** で、スキーマという機能が存在しないプラットフォーム向けのメタデータに「この型は `reminders.ReminderEntity` です」と書いていることになります
 
 そして踏んでいたコンパイルエラー (`Property 'list' type does not match…`) は「スキーマに反することをしている」ではなくて、**watchOS で宣言すべきでない適合を宣言したから検証が走っただけ** でした。正しい直し方は「検証を黙らせる」ではなく「watchOS では宣言しない」です。
 
-このアプリで一番恐れている壊れ方が「ビルドは緑なのにメタデータだけ静かに壊れる」なので、それを自分で作り込む形になっていたのは危なかったなと思います。**アンダースコア始まりのシンボルが動いてしまったときこそ疑う**、というのが教訓でした。
+このアプリで一番恐れている壊れ方が「ビルドは緑なのにメタデータだけ壊れる」なので、それを自分で作り込む形になっていたのは危なかったなと思います。**アンダースコア始まりのシンボルが動いてしまったときこそ疑う**、というのが教訓でした。
 
 ### Apple には報告した
 
-「App Schema が watchOS に無い」ことと「埋め込んだ watch アプリのメタデータが iOS アプリにマージされる」ことが組み合わさると、**共有 entity を持つアプリは型を二重定義しない限りどのスキーマにも適合できません**。しかも無言で壊れます。ここは Feedback (FB24570185) を出しました。
+「App Schema が watchOS に無い」ことと「埋め込んだ watch アプリのメタデータが iOS アプリにマージされる」ことが組み合わさると、**共有 entity を持つアプリは型を二重定義しない限りどのスキーマにも適合できません**。しかもエラーも出ずに壊れます。ここは Feedback (FB24570185) を出しました。
 
 裏付けとして、WWDC 2026 の App Intents 系公式サンプル 4 本 (Calendar / Messaging / Music / Photo) は **どれも watch ターゲットを持っていません**。この組み合わせは公式サンプルで一度も踏まれていない、ということみたいです。ドキュメントにも複数ターゲットのメタデータマージについての記述はありませんでした。
 
@@ -185,11 +186,22 @@ extension WatchCategoryAppEntity: AssistantSchemaEntity {
 
 もう 1 つの「意味で適合させる」軸が system intent です。
 App Intents には「開く」「削除する」みたいな共通アクション用に **専用のプロトコル** が用意されていて、適合するとシステムがそのアクションを意味的に理解してくれます (たとえば Spotlight の検索結果をタップ → 開く、という経路)。
-おもしろいのは、スキーママクロを使わず **プロトコルに直接適合するだけ** でいいところです。
 
-「開く」は `OpenIntent` に適合させました。
+長いこと「スキーママクロを使わず、**プロトコルに直接適合するだけ** でいい」と思っていたんですが、これは半分しか合っていませんでした。出荷メタデータを見ると、プロトコルの適合とスキーマの適合では記録されるものが違います。
+
+| 宣言 | `systemProtocols` | `assistantDefinedSchemas` |
+|---|---|---|
+| `OpenIntent` に適合するだけ | `OpenEntity` | `[]` (空) |
+| `+ @AppIntent(schema: .system.open)` | `OpenEntity` + **`AssistantIntent`** | `{system, OpenIntent}` |
+
+SDK を見ると `.system.open` はプロトコルと同じ `OpenIntent` という名前に解決されるので、同じものだと思い込んでいました。でもプロトコルだけだと「開く」の意味は伝わっても、**Siri が実行できる宣言 (`AssistantIntent` と schema のエントリ) は付きません**。セッション 240 (9:41〜15:10) が "actions use schemas to become executable by Siri" と言っているのがこの差で、素の App Intent は Shortcuts / Spotlight / ウィジェットには出るけれど、Siri の自然言語での実行には載らない、ということでした。詳しくは後半の「Intent 側のスキーマ適合」に書きます。
+
+というわけで今は両方付けています。プロトコルの形がスキーマの要求とそのまま一致するので、足したのはマクロの 1 行だけです。
 
 ```swift
+#if !os(watchOS)
+@AppIntent(schema: .system.open)
+#endif
 public struct OpenTodoIntent: OpenIntent {
     public static let supportedModes: IntentModes = [.foreground(.immediate)]
 
@@ -214,6 +226,9 @@ public struct OpenTodoIntent: OpenIntent {
 「削除」は `DeleteIntent` に適合させたんですが、ここで設計判断が要りました。
 
 ```swift
+#if !os(watchOS)
+@AppIntent(schema: .reminders.deleteReminders)
+#endif
 public struct DeleteTodosIntent: DeleteIntent {
     public static var supportedModes: IntentModes { .background }
 
@@ -237,7 +252,7 @@ public struct DeleteTodosIntent: DeleteIntent {
 `DeleteIntent` の契約は `var entities: [Entity]` で、**複数 entity の配列** を要求してきます。
 IntentTodo にはもともと UI から 1 件ずつ消す `DeleteTodoIntent` (単数の `todo: TodoAppEntity`) があったんですが、配列型じゃないので適合できません。
 なので **単体削除はそのまま残して、`DeleteTodosIntent` というバルク削除を別に新設** しました。
-「UI 駆動の単体削除」と「システムが意味的に理解するバルク削除」は、要求するシグネチャが違うので無理に 1 つにしない、という判断です。
+「UI 駆動の単体削除」と「システムが意味的に理解するバルク削除」は、要求するシグネチャが違うので無理に 1 つにしない、という判断です。この配列の形は `.reminders.deleteReminders` の要求 (`entities: [ReminderEntity]`) ともそのまま一致していたので、スキーマの方もマクロ 1 行で済みました。
 
 この 2 つの system intent はどちらも **AppShortcuts には登録していません**。
 本編 5/N で書いたとおり AppShortcuts は 10 件上限なので枠を温存したいのと、system intent は AppShortcut が無くてもシステム側が意味解釈してくれるからです。
@@ -280,9 +295,9 @@ IntentTodo では「カテゴリ / 急ぎのみ / 完了を隠す」の 3 パラ
 
 **1 つ目は `allowedExecutionTargets` を宣言しないこと** です。2/N で「書き込み系はアプリ本体に固定」と書いたばかりですが、Focus filter の実行先は Focus の仕組みが決めます (アプリが動いていればアプリ、そうでなければ AppIntents Extension。セッション 10121 の 9:29)。こちらから固定しても意味がないし、将来 Extension を足したときに噛み合わなくなるので、ここにはあのルールを適用しませんでした。「全部に同じルールを当てる」が正しいとは限らない例です。
 
-**2 つ目は、AppIntents Extension が無いとアプリ未起動中の遷移を取りこぼすこと**。埋め合わせは `SetFocusFilterIntent.current` (同 11:47) で、起動時とフォアグラウンド復帰時に現在値を取り直しています。Focus filter が未設定だと throw するので、その場合は「絞り込みなし」に倒します。
+**2 つ目は、AppIntents Extension が無いとアプリ未起動中の遷移を取りこぼすこと**。埋め合わせは `SetFocusFilterIntent.current` (同 11:47) で、起動時とフォアグラウンド復帰時に現在値を取り直しています。Focus filter が未設定だと throw するので、その場合は「絞り込みなし」として扱います。
 
-**3 つ目がいちばん怖くて、`notificationFilterPredicate` に一致しない通知は黙らされます** (同 13:15)。照合相手は `UNMutableNotificationContent.filterCriteria` なんですが、**criteria を付けていない通知は述語を返した瞬間に全部消えます**。5/N に書いたとおり、このアプリではコントロールの失敗通知が唯一の伝達手段なので、これが消えると「何も起きなかった」と区別できなくなります。なので失敗通知には専用の criteria を付けて、許可リストに常に含めるようにしました。
+**3 つ目がいちばん怖くて、`notificationFilterPredicate` に一致しない通知は出なくなります** (同 13:15)。照合相手は `UNMutableNotificationContent.filterCriteria` なんですが、**criteria を付けていない通知は述語を返した時点で全部消えます**。5/N に書いたとおり、このアプリではコントロールの失敗通知が唯一の伝達手段なので、これが消えると「何も起きなかった」と区別できなくなります。なので失敗通知には専用の criteria を付けて、許可リストに常に含めるようにしました。
 
 ```swift
 public var appContext: FocusFilterAppContext {
@@ -299,11 +314,101 @@ public var appContext: FocusFilterAppContext {
 
 UI 側では **絞り込み中であることの表示と、その場での解除手段をセットで出す** ようにしました (標準のカレンダーが同じ形をしていて、セッションでも 2:04 でそう言っています)。表示だけだと、絞られていることに気付いたユーザーが設定アプリまで行くしかなくなるので。解除は永続化せず、次の Focus 遷移で畳みます。
 
+## Intent 側のスキーマ適合
+
+ここまでの App Schema は entity / enum の話で、Intent 側の適合は `.system.searchInApp` と、10/N に書く Visual Intelligence の 2 本しかありませんでした。上の `.system.open` の表を作ったのをきっかけに Intent 側も見直しました。セッション 240 によると **Intent を Siri から実行できるようにするのはスキーマ適合の方** で、手元で確かめられたのは、適合したときだけメタデータに `AssistantIntent` と schema のエントリが付く、というところまでです。
+
+### 要求はビルドでしか出てこない
+
+まず、要求を洗い出すのに使えない経路がありました。
+
+| 経路 | 結果 |
+|---|---|
+| Xcode のライブ診断 | **形を検証しない**。存在しないスキーマ名は即エラーになるのに、`AddTodoIntent` に `.reminders.createList` を付けても診断 0 件 |
+| ホストの `swift build` (SPM 単体) | 同じく通る。メタデータの抽出を走らせないので |
+| Xcode のビルド | `Missing required parameter 'x' from AppSchemaIntent '...'` などで全部出る |
+
+明らかに間違った適合が 2 つの経路で緑になるので、「ライブ診断が緑」は根拠になりません。しかもビルドで出るエラーは halting error 扱いで、**スキーマ 1 本の形が合わないだけで、そのターゲットの App Intents のメタデータが丸ごと出力されなくなります**。適合を足すのは「Siri に届くかどうか」だけの話ではなく「そのターゲットの App Intents 全部が止まるか」の話なので、1 本ずつ足してビルドを緑に戻しながら進めました。
+
+watchOS の扱いは entity と違いました。Intent は **`#if !os(watchOS)` をマクロの行だけに掛けて、型宣言は 1 本のまま** で済みます (上の `OpenTodoIntent` の書き方です)。iOS のクリーンビルドで、watch スライスがマージされているのに `OpenTodoIntent` のスキーマが残っていることまで確かめたので、entity のように型名を分ける必要もありませんでした。
+
+### 新たに適合させた 7 本
+
+| Intent | スキーマ |
+|---|---|
+| `OpenTodoIntent` / `OpenCategoryIntent` | `.system.open` |
+| `DeleteTodosIntent` | `.reminders.deleteReminders` |
+| `AddTodoIntent` | `.reminders.createReminder` |
+| `UpdateTodoIntent` | `.reminders.updateReminder` |
+| `CreateSectionIntent` | `.reminders.createSection` |
+| `CreateListIntent` | `.reminders.createList` |
+
+上の 2 行は、既存の Intent の形がそのまま要求を満たしていたのでマクロ 1 行でした (`.system.searchInApp` の `ShowTodoSearchResultsIntent` は前から適合済みです)。`CreateSectionIntent` も、初回のビルドで要求と一致しました。重かったのは作成と更新の 2 本で、`AddTodoIntent` に `.reminders.createReminder` を付けたら、こういう要求がまとめて出てきました。
+
+```
+Missing required parameter 'note' / 'isFlagged' / 'images' / 'list' / 'recurrence' /
+                           'locationTrigger' / 'section'
+Required AppSchemaIntent parameter 'tags' must not be optional
+Parameter 'dueDate' does not match required AppSchemaIntent type 'DateComponents'
+Intent parameters must be optional when not defined by the AppSchemaIntent
+```
+
+ここから分かった規則を並べておきます。
+
+- **スキーマに無いパラメータも持てるけれど、optional でないといけません**。所要時間や担当者のようなアプリ固有のパラメータは残せました
+- **entity でやった `@ComputedProperty` の別名は使えません**。パラメータは storage なので、スキーマが要求する名前 (`note` / `isFlagged` / `target`) はリネームで満たすしかありませんでした。entity は「リネームは要らない」だったので、ちょうど逆です
+- **スキーマの非 optional なコレクションには `default: []` を付けます**。`tags` / `urls` / `images` がそうで、付けないと「値が無い」扱いになってシステムが毎回聞き返してきます。ビルドが緑で出荷メタデータにもスキーマが載ったのに、AppIntentsTesting が `The App Intent requested value for parameter 'tags'` で 15 件中 14 件落ちて気付きました。「スキーマに適合した」と「呼べる」は別でした
+- **画像のパラメータは `public.image` の下位の型を列挙します**。`public.image` 自体は上位の型なので弾かれて、`public.png` / `public.jpeg` / `public.heic` のように具体的に並べました
+- **entity 型のパラメータは id 以外でも解決できないといけません**。素の `EntityQuery` だと `requires ... provide a default 'EntityStringQuery', or provide an 'IntentValueQuery'` で落ちるので、場所のトリガーに名前で引ける `EntityStringQuery` を足しました
+
+```swift
+#if !os(watchOS)
+@AppIntent(schema: .reminders.createReminder)
+#endif
+public struct AddTodoIntent: AppIntent {
+    /// 非 optional のコレクション。default: [] が無いと Siri が毎回値を聞き返してくる
+    @Parameter(title: "Tags", description: "Tags to attach to the todo", default: [])
+    public var tags: Set<String>
+    // ...
+}
+```
+
+### 足りない部品はモデルから作った
+
+要求の中には、アプリにそもそも無いものも混ざっていました。ここは entity のときと同じで、空の値を返して形だけ満たすのではなく **モデルに足す** 方を選んでいます。
+
+`section` (リストの中の区切り) を足そうとして、先に気付いたことがありました。**`Category` は entity としても `.reminders.list` としても公開しているのに、Todo にカテゴリを付ける経路がどこにも無かった** んです。`AddTodoIntent` に list のパラメータは無く、UI にもピッカーが無く、`TodoService` で `category` を書いているのは undo の復元だけでした。読み取り専用の関連を entity に出していた状態です。なので list の書き込み経路と、新しい `TodoSection` モデル (`.reminders.section` に適合) を同時に足しました。メタデータで「セクションを持つアプリ」と名乗るなら実体も持つ、という判断です。
+
+list と section は食い違いうる (別のリストのセクションを指定できる) ので、配属の規則は `TodoService` の 1 か所に置いています。セクションを指定したらそのセクションのリストも付く、リストを変えたらそこに属さないセクションは外れる、解決できない id は無視せず throw する、という形で、UI のピッカーもこの規則に従わせました。フォームからは Intent が拒否する配属を作れない、ということです。watch 用の `TodoSection` の entity は、上の entity と同じ理由で型名を分けています。
+
+`images` (添付) もモデルに足しました。ここで困ったのが、**`IntentFile` が識別子を持っていない** ことです。フォームは保存のたびに添付を丸ごと送るので、素直に作り直すと同じ画像を毎回消して入れ直して、CloudKit にも上げ直すことになります。ファイル名とバイト数で既存の添付と突き合わせて、一致したものは残す形にしました。
+
+`CreateListIntent` は、同じ名前を渡されたら新しく作らず **既存のリストを返す** ようにしています。リストはフォームのピッカーでも Siri でも Shortcuts でも名前でしか見分けられないので、同名が 2 つあるとどの面でも区別できないまま Todo が分かれてしまうからです。
+
+### 公開済みの Intent なら、この作り直しはやってはいけなかった
+
+作成と更新の 2 本は、パラメータのリネームや型の変更で Intent の形を作り直しています。これをやったあとで「リリース済みのアプリだと大丈夫なのか」と聞かれて調べたら、Apple のドキュメントに直接の指示がありました。
+
+> Removing or changing the older intent breaks any shortcuts that use it. As a temporary workaround, configure the new intent so that it's only available to Apple Intelligence by setting `isAssistantOnly` to `true`.
+> (Making actions and content discoverable by Apple Intelligence)
+
+なので正しい手順は 2 通りあります。既存の Intent がそのままスキーマの要求を満たすなら、マクロを 1 行足すだけ。満たさないなら、**スキーマに合わせた別の Intent を新しく作って `isAssistantOnly = true` にし**、古い Intent には保存済みのショートカットを担わせ続けます (移行が済んだら古い方を畳む)。3/N に書いたとおり型名を変えるとショートカットが迷子になりますが、パラメータの名前や型を変えても、その値との結び付きが外れます。
+
+IntentTodo が直接作り直せたのは、1.0.0 がまだ公開前だったからです。iOS / visionOS は審査を通って OS の公開待ち、macOS は審査待ちで、保存済みのショートカットを持つ利用者がまだいませんでした。それでも「公開前に確定させるのが一番安い」ので、3 プラットフォームとも取り下げて 1.1.0 として出し直しています。**公開したあとに同じことをしてはいけない**、というのはここで覚えておきたいところです。
+
+### 開発中はシミュレータの登録も古いまま残る
+
+パラメータのリネームではもう 1 つ、1 時間ほどかかってしまったことがあります。
+
+`todo` を `target` に改名したあと、AppIntentsTesting が `The App Intent requested value for parameter 'todo'` で落ち続けます。もうどこにも無いパラメータです。インクリメンタルビルドのメタデータが古かったので (3/N のとおり) クリーンビルドしたら、メタデータは正しく `target` になったのに、テストは同じエラーのままでした。アンインストールしても変わらず、**`xcrun simctl erase` でシミュレータごと消したら** 旧パラメータの参照が消えました。アプリを入れ替えても、App Intents のシステム側の登録は古いまま残ることがある、ということです。
+
+「確認はメタデータで行う」の対象は、出荷メタデータとシステム側の登録の 2 つあったわけです。前者が正しくても後者が古いと、実装のせいに見える失敗が出ます。これは開発中の話で、アップデートで配った先の端末に同じことが起きるのかはまだ確かめられていません。
+
 ## 検証できた深さ
 
-- **ビルド成立 (B)**: `.reminders.reminder` / `.reminders.list` / `.reminders.listType` / `.reminders.locationTrigger` / `.reminders.locationTriggerEvent` の適合、`OpenIntent` / `DeleteIntent` / `.system.searchInApp`、`SetFocusFilterIntent` はすべて OK。iOS / macOS / visionOS / watchOS の 4 destination でクリーンビルド緑。
+- **ビルド成立 (B)**: entity 側の `.reminders.reminder` / `.reminders.list` / `.reminders.listType` / `.reminders.section` / `.reminders.locationTrigger` / `.reminders.locationTriggerEvent`、Intent 側で新たに適合させた 7 本、`OpenIntent` / `DeleteIntent`、`SetFocusFilterIntent` はすべて OK。iOS / macOS / visionOS / watchOS の 4 destination でクリーンビルド緑。
 - **単体 (U)**: 出荷メタデータの検査で、各スキーマを主張する型が 1 つずつ登録されていることまで確認。AppIntentsTesting のスイートも全緑です。
-- **実機 (R)**: 未確認。「スキーマ適合が実際に Siri / Apple Intelligence でどう効くか」は AppIntentsTesting が型名で intent を引く都合上そこを通らないので、手動確認の領域です (10/N)。
+- **実機 (R)**: 一部だけ。TestFlight のビルドで Siri から App Shortcut の一覧表示が通るところまでは見ました (5/N / 9/N) が、「スキーマ適合が Siri / Apple Intelligence でどう使われるか」はまだです。AppIntentsTesting は型名で intent を引くのでスキーマの経路を通らず、ここは手動確認の領域です (10/N)。
 
 ## まとめ
 
@@ -314,8 +419,11 @@ UI 側では **絞り込み中であることの表示と、その場での解�
 - **App Schema の 23 ドメイン全部が watchOS / tvOS で unavailable**。新しい Siri の提供範囲がそのまま availability になっているので、ドメインを変えても自前スキーマにしても回避できない
 - watchOS 用のフォールバックは **型名も分ける**。同じ型名だと統合メタデータで後勝ちのマージが起きて、iOS の出荷メタデータからエントリごと消える (→ 3/N)
 - スキーマ適合の entity では `typeDisplayRepresentation` を上書きしない (警告になる)。マクロが生成するのは **空** の表現で、出荷メタデータ側は上書きの有無にかかわらず最初から空
-- `__appSchemaEntity` の手書きは「動くけれど採ってはいけない」形。プロトコル要求ですらない非公開の申し合わせで、名前が変われば無言で壊れる
-- system intent (`OpenIntent` / `DeleteIntent` / `.system.searchInApp`) はプロトコル直適合でよく、AppShortcuts 無しでも意味解釈される
+- `__appSchemaEntity` の手書きは「動くけれど採ってはいけない」形。プロトコル要求ですらない非公開の申し合わせで、名前が変わればエラーも出ずに壊れる
+- system intent (`OpenIntent` / `DeleteIntent`) は **プロトコルに適合するだけでは Siri が実行できる宣言が付かない**。スキーマのマクロも足す。プロトコルの形が要求と一致していればマクロ 1 行で済む。AppShortcuts への登録は要らない
+- **Siri が実行できるのはスキーマに適合したアクション** (セッション 240。手元で確かめたのはメタデータの差まで)。Intent 側の要求はビルドでしか出ず、ライブ診断と `swift build` は形を検証しない。Intent は `#if` をマクロの行だけに掛ければよく、型名を分けなくていい
+- Intent のスキーマ適合では、スキーマ外のパラメータは optional 必須、名前は `@ComputedProperty` で逃げられずリネームが要る、非 optional のコレクションには `default: []`。要求を満たすためにモデルに足すなら、書き込み経路まで通す (カテゴリは公開していたのに付ける経路が無かった)
+- **公開済みの Intent は形を変えない**。合わないなら別の Intent を作って `isAssistantOnly = true` にする。パラメータをリネームした直後のシミュレータは `simctl erase` しないと古い登録が残ることがある
 - `SetFocusFilterIntent` は「実行先を選べない Intent」。`notificationFilterPredicate` を返すと **criteria の無い通知が全部消える** ので、自分の失敗通知は許可リストに常置する
 
 次回は、[Siri 応答を賢くする対話的な Intent (`requestConfirmation` / `requestChoice` / `IntentDialog(full:supporting:)`) と、Interactive Snippet、寄付 (`IntentDonationManager`) の話 (8/N)](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents) を書きます。
@@ -324,6 +432,7 @@ UI 側では **絞り込み中であることの表示と、その場での解�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-01**: 「Intent 側のスキーマ適合」の節を新設 (Siri が実行できるのはスキーマ適合したアクション / 要求はビルドでしか出ない / 新たに適合させた 7 本と、作成・更新で出た規則 / セクションと添付をモデルに足した話 / 公開済み Intent は形を変えず `isAssistantOnly` で移行する / `simctl erase`)。system intent を「プロトコル直適合でよい」と書いていたのを訂正し、`.system.open` / `.reminders.deleteReminders` のマクロも付けた形に。`#if` で分けられないのは「頭と本体の分割」だと言い直した。27.2 SDK の `caseDisplayRepresentations` 既定実装に触れた。タイトルからダッシュを外した
 - **2026-09-11**: スキーマ適合 entity の `typeDisplayRepresentation` について、上書きが警告になること・マクロが生成するのは空の表現で、出荷メタデータでは元から空だったことを追記。App Schema の watchOS / tvOS unavailable は Xcode 27 RC でも変わらないことを反映
 - **2026-08-31**: `.reminders.reminder` 本体適合が成立したので「保留」の節を全面的に書き換え。据え置きの理由だった SSU バグは発火条件が違い、本体適合は踏まないことが判明。App Schema の制約を「reminders が watchOS で使えない」から「**23 ドメイン全部が watchOS / tvOS で unavailable**」に拡張 (理由は新しい Siri の提供範囲)。親の適合が子の適合を要求すること、`__appSchemaEntity` を手書きして撤去した経緯、`Transferable` を `typealias` 越しに書くと watchOS スライスで落ちること、Apple への報告 (FB24570185) を追加
 - **2026-08-28**: watchOS フォールバックの型名を分ける話 (同名だと iOS の出荷メタデータからスキーマが消える) を追加。`SetFocusFilterIntent` の節を追加。`.reminders` の iOS 27 要件が `main` のベースラインになったことを反映

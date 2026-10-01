@@ -1,5 +1,5 @@
 ---
-title: "App Intents 中心設計とは何か — IntentTodo を題材に整理する (1/N)"
+title: "IntentTodo を題材に App Intents 中心設計とは何かを整理する (1/N)"
 emoji: "🧭"
 type: "tech"
 topics: ["AppIntents", "SwiftUI", "iOS", "設計"]
@@ -12,7 +12,7 @@ published: true
 
 みなさんこんにちは。
 
-最近 [IntentTodo](https://github.com/touyou/IntentTodo) という、`App Intents 中心設計` を実践するためのマルチプラットフォーム Todo アプリを作っています。
+最近 [IntentTodo](https://github.com/touyou/IntentTodo) という、`App Intents 中心設計` を実践するためのマルチプラットフォーム Todo アプリを作っています (App Store には `Intento` という名前で出しています)。
 このアプリで採用している考え方や、実装で見えてきた知見が結構な量になってきたので、自分の整理のためにシリーズとしてまとめていくことにしました。
 
 本記事はその 1 本目で、まず `App Intents 中心設計` という言葉でなにを指しているのか、なぜ採用するのか、を整理します。
@@ -80,7 +80,7 @@ IntentTodo で参考にしている指針は以下です。
 
 ## 何が嬉しいか
 
-実際にこの設計で IntentTodo を作ってきて、いま実感している「効いている」ポイントは:
+実際にこの設計で IntentTodo を作ってきて、いま実感している「良かった」ポイントは:
 
 - **ロジックの単一経路化**: たとえば `toggleCompletion(todoId:)` 1 つを Siri / Shortcuts / UI Button / Widget Button / Live Activity Button / Control Widget の **6 系統が呼ぶ**。UseCase 層をパッケージとして別に立てるアプローチでは得にくい密度
 - **Apple Intelligence との接続が自然**: Intent と Entity を定義しておくと、将来 Apple Intelligence が拡張されたときの恩恵を受けやすい
@@ -91,6 +91,8 @@ IntentTodo で参考にしている指針は以下です。
 - Intent ファイルの数が増えがち
 - 同じアクションでも、呼出元によって別の Intent を用意したくなる場合がある (本シリーズで後述)
 - 1 アクション追加のセレモニー (Repository → Service → Intent → AppShortcut) の段数が多い
+- `perform()` を手で呼べない (`@Dependency` はシステム経由の実行でしか注入されない) ので、確定は `Button(intent:)` を押す形になる (ドラッグの並べ替えのように Button に載せられないものは例外で、`TodoService` を直接呼んでいる)。たとえば「return で確定して次の行へ」というインライン編集は `onSubmit` に確定を載せられないので成立しない
+- `Button(intent:)` は完了を教えてくれないので、シートを出すと閉じる責任の置き場に困る。IntentTodo は `NavigationModel` 経由で Intent に閉じさせるか、どのボタンでも自分で閉じる `.alert` の中に `Button(intent:)` を置く形で逃げている
 
 このトレードオフは、今のところメリット側に振り切れていますが、設計を「とりあえず Intent にする」と機械的に当てはめるのではなく、本質的なアクションだけを Intent 化するという判断は引き続き必要です。
 
@@ -150,9 +152,9 @@ IntentTodo で参考にしている指針は以下です。
 
 Layered の説明が「UseCase と Repository の使い分けが分からない」と言われがちなのは、例として `createTodo()` → `repository.create()` みたいな **素通し** を出してしまうからだと思っていて、差が出るものを並べた方が早いです。`toggleMostUrgentTodo()` は fetch + mutate の 2 呼び出しがユーザーには 1 行為だし、undo 用の `snapshot()` / `restore()` は「**同じ id で**戻す」という不変条件を持っていて、Repository は id の意味論を知りません。いちばん強いのが変更後の後処理 (`dataDidChange()`) で、**「1 行為が完了した」ことを知っているのは UseCase 層だけ** です。Repository の `update()` は自分が行為の途中なのか終端なのかを判別できません。
 
-最後に、Clean Architecture と本質的に反転しているところが 2 つあります。1 つは **凍る方向が逆** なこと。Clean Architecture は「内側 = 安定した方針、外側 = 揺れる詳細」ですが、App Intents 中心だと外周の Intent 型名・parameter 名・`AppEnum` の raw value が **ユーザーのショートカットに永続化されていて、いちばんリファクタできません**。内側の `TodoService` の方がよっぽど自由に触れます。もう 1 つは **依存逆転の目的** で、Clean Architecture の「DB を差し替えられる」はほぼ使われない口実になりがちですが、ここでは `TodoRepositoryProtocol` が **プロセス境界** で効きます (Widget Extension とメインアプリで同じロジックが別プロセスに載る、という 2/N の話です)。層の対価が実際に回収されている感じがあります。
+最後に、Clean Architecture と本質的に反転しているところが 2 つあります。1 つは **凍る方向が逆** なこと。Clean Architecture は「内側 = 安定した方針、外側 = 揺れる詳細」ですが、App Intents 中心だと外周の Intent 型名・parameter 名・`AppEnum` の raw value が **ユーザーのショートカットに永続化されていて、いちばんリファクタできません**。内側の `TodoService` の方がよっぽど自由に触れます。もう 1 つは **依存逆転の目的** で、Clean Architecture の「DB を差し替えられる」はほぼ使われない口実になりがちですが、ここでは `TodoRepositoryProtocol` が **プロセス境界** で意味を持ちます (Widget Extension とメインアプリで同じロジックが別プロセスに載る、という 2/N の話です)。層の対価が実際に回収されている感じがあります。
 
-正直に残る非対称も 1 つ書いておくと、`TodoEntityQuery` のような **読み取り経路は `TodoService` も Repository も飛ばして** ストアに直接到達しています。書き込み経路は必ず `TodoService` を通るので、実態は「書き込み側だけ層が厚い」CQRS 的な非対称です。理由は 9/N で書く「読み取り系 Intent は実行プロセスを固定せず Extension で応答させたい」なので、図でも読みは細い直通線、書きは Service 経由、と分けて描いています。同心円 1 枚だとこの線が引けないのも、砂時計にした理由のひとつでした。
+正直に残る非対称も 1 つ書いておくと、`TodoEntityQuery` のような **読み取り経路は `TodoService` も Repository も飛ばして** ストアに直接到達しています。書き込み経路は必ず `TodoService` を通るので、実態は「書き込み側だけ層が厚い」CQRS 的な非対称です。理由は 9/N で書く「読み取り系 Intent は (App Shortcut に登録したもの以外は) 実行プロセスを固定せず Extension で応答させたい」なので、図でも読みは細い直通線、書きは Service 経由、と分けて描いています。同心円 1 枚だとこの線が引けないのも、砂時計にした理由のひとつでした。
 
 ## 次回以降
 
@@ -161,17 +163,17 @@ Layered の説明が「UseCase と Repository の使い分けが分からない�
 本編 (1〜5) は、IntentTodo で実際に踏んだ落とし穴とその設計判断を 1 トピックずつ取り上げます。
 
 - [(2) TodoService と @Dependency: ビジネスロジックの一元化](https://zenn.dev/touyou/articles/intenttodo_02_todoservice_dependency)
-- [(3) マルチプラットフォーム Extension の構成 — SPM 化と Delegate 分離](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
-- [(4) SwiftData + CloudKit 同期 — 互換 schema と落とし穴](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit)
-- [(5) App Intents 運用の罠 — Live Activity / Control Widget / Spotlight](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
+- [(3) Extension の SPM 化と Delegate 分離で組むマルチプラットフォームの App Intents](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
+- [(4) SwiftData + CloudKit 同期で詰まる schema 互換要件と落とし穴](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit)
+- [(5) Live Activity / Control Widget / Spotlight / Siri で踏んだ App Intents 運用の罠](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 
 WWDC 2026 編 (6〜10) は、新しい App Intents の API を試してみて分かった設計判断をまとめます。
 検証は `xcode27` という別ブランチでやっていましたが、ひととおり終わったので `main` にマージ済みです。
-こちらは本編と違って実機まで通せていないものが多いので、「採用していいか / 設計にどう効くか」を軸に、検証の深さ (ビルド / 単体 / 実機) を各記事に明記して書きます。
+こちらは本編と違って実機まで通せていないものが多いので、「採用していいか / 設計をどう変えるか」を軸に、検証の深さ (ビルド / 単体 / 実機) を各記事に明記して書きます。
 
-- [(6) Todo を「システムが理解できる名詞」にする — ネイティブ型とプロパティマクロ](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
-- [(7) App Schema と system intents — 意味で適合させる効きどころ](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents)
-- [(8) 対話的な Intent — requestConfirmation / requestChoice / IntentDialog](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)
+- [(6) Todo を「システムが理解できる名詞」にするネイティブ型とプロパティマクロ](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
+- [(7) App Schema と system intents で Todo を意味で適合させる](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents)
+- [(8) 確認 / 選択 / Snippet / 寄付で Intent を対話的にする](https://zenn.dev/touyou/articles/intenttodo_08_conversational_intents)
 - [(9) 大量処理・実行制御と「適合しない API」の見極め](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 - [(10) Visual Intelligence 連携と AppIntentsTesting](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)
 
@@ -183,5 +185,6 @@ WWDC 2026 編 (6〜10) は、新しい App Intents の API を試してみて分
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-01**: 払っている税に 2 つ追加 (`onSubmit` に確定を載せられない / `Button(intent:)` は完了を教えてくれない)。CQRS 的な非対称の理由に「App Shortcut に登録した読み取り系は固定する」例外を反映。App Store での名前 (`Intento`) を追記。タイトルと目次の表記からダッシュを外した
 - **2026-08-28**: Layered / Clean Architecture との対比 (同心円ではなく砂時計) の節を追加。「UseCase 層を廃止した」という言い方を「宣言が Intent に、実装が Service に分かれた」へ訂正。WWDC 2026 編の検証ブランチ (`xcode27`) が `main` にマージされたことを反映
 - **2026-08-12**: Primary / FromExtension の 2 系統を持つ話が撤去されたことに追随し、5/N のタイトル表記もあわせて更新

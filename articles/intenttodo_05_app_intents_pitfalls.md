@@ -1,5 +1,5 @@
 ---
-title: "Live Activity / Control Widget / Spotlight / Siri で踏んだ App Intents 運用の罠 (5/N)"
+title: "Live Activity / Control / Spotlight / Siri で踏んだ App Intents 運用の罠 (5/N)"
 emoji: "🪤"
 type: "tech"
 topics: ["AppIntents", "iOS", "WidgetKit", "Spotlight"]
@@ -588,6 +588,7 @@ IntentTodo は長らく `SiriTipView`（「"やることを追加" と言って�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-02**: タイトルが Zenn の上限 (70 文字) を超えてデプロイできなくなっていたので、`Control Widget` を `Control` に縮めた
 - **2026-10-01**: 落とし穴 6 (Siri は Intent を呼ばずに答えることがある。一覧の依頼に OmniSearch が答えていた / Siri の言語が英語だと日本語のフレーズは使われない) を追加。おまけの `SiriTipView` は移設のあと結局降ろしたので、その理由 3 つに書き換え。Spotlight の節に Cascade 索引への donate を確かめた話を、落とし穴 4 にリストやタグの削除には確認を付けなかった判断と `.confirmationDialog` / `.alert` まわりの罠を追加。`ShowTodosIntent` がスニペットを返すようになったことを反映。タイトルと見出しからダッシュを外した
 - **2026-09-11**: おまけ 4 (Mac のメニューバーからも `Button(intent:)` が走る / 対象は `@FocusedValue` から取る / `.onDeleteCommand` は確認ダイアログ経由で Intent に収束させる) を追加
 - **2026-08-31 (2)**: 落とし穴 4 に「逃げ先の SwiftUI 側にも罠があった」を追加 (`dismissalConfirmationDialog` が iOS のシートで空振りする / 代わりの 2 段構え / 保存経路は塞がない / dirty 判定の初期値)

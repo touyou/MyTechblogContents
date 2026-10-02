@@ -94,7 +94,7 @@ IntentTodo で参考にしている指針は以下です。
 
 - Intent ファイルの数が増えがち
 - 同じアクションでも、呼出元によって別の Intent を用意したくなる場合がある (本シリーズで後述)
-- 1 アクション追加のセレモニー (Repository → Service → Intent → AppShortcut) の段数が多い
+- 1 アクションを足すたびに触る場所 (Repository → Service → Intent → AppShortcut) が多い
 - `perform()` を手で呼べない (`@Dependency` はシステム経由の実行でしか注入されない) ので、確定は `Button(intent:)` を押す形になる (ドラッグの並べ替えのように Button に載せられないものは例外で、`TodoService` を直接呼んでいる)。たとえば「return で確定して次の行へ」というインライン編集は `onSubmit` に確定を載せられないので成立しない
 - `Button(intent:)` は完了を教えてくれないので、シートを出すと閉じる責任の置き場に困る。IntentTodo は `NavigationModel` 経由で Intent に閉じさせるか、どのボタンでも自分で閉じる `.alert` の中に `Button(intent:)` を置く形で逃げている
 
@@ -181,7 +181,7 @@ Layered の説明が「UseCase と Repository の使い分けが分からない�
 - [(2) TodoService と @Dependency: ビジネスロジックの一元化](https://zenn.dev/touyou/articles/intenttodo_02_todoservice_dependency)
 - [(3) Extension の SPM 化と Delegate 分離で組むマルチプラットフォームの App Intents](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)
 - [(4) SwiftData + CloudKit 同期で詰まる schema 互換要件と落とし穴](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit)
-- [(5) Live Activity / Control Widget / Spotlight / Siri で踏んだ App Intents 運用の罠](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
+- [(5) Live Activity / Control / Spotlight / Siri で踏んだ App Intents 運用の罠](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 
 WWDC 2026 編 (6〜10) は、新しい App Intents の API を試してみて分かった設計判断をまとめます。
 検証は `xcode27` という別ブランチでやっていましたが、ひととおり終わったので `main` にマージ済みです。
@@ -201,7 +201,7 @@ WWDC 2026 編 (6〜10) は、新しい App Intents の API を試してみて分
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
-- **2026-10-02**: iOSDC Japan 2026 の登壇とその後の登壇ブログを受けて更新。Liquid Glass の話を「見せ方の責任が Apple 側に移るので、操作したときに何をするかは App Intents で保証する」と言い直した。「実プロダクトでどう優先度を上げるか」の節を新設 (アクセシビリティとして説明する / noppe さんとまつじさんのセッションとの接続)。核となる原則の 2 番目と 3 番目は手段であって必須ではない、という補足を追加
+- **2026-10-02**: iOSDC Japan 2026 の登壇とその後の登壇ブログを受けて更新。Liquid Glass の話を「見せ方の責任が Apple 側に移るので、操作したときに何をするかは App Intents で保証する」と言い直した。「実プロダクトでどう優先度を上げるか」の節を新設 (アクセシビリティとして説明する / noppe さんとまつじさんのセッションとの接続)。核となる原則の 2 番目と 3 番目は手段であって必須ではない、という補足を追加。払っている税の「セレモニー」という言い方をやめた。5/N のタイトル変更に追随
 - **2026-10-01**: 払っている税に 2 つ追加 (`onSubmit` に確定を載せられない / `Button(intent:)` は完了を教えてくれない)。CQRS 的な非対称の理由に「App Shortcut に登録した読み取り系は固定する」例外を反映。App Store での名前 (`Intento`) を追記。タイトルと目次の表記からダッシュを外した
 - **2026-08-28**: Layered / Clean Architecture との対比 (同心円ではなく砂時計) の節を追加。「UseCase 層を廃止した」という言い方を「宣言が Intent に、実装が Service に分かれた」へ訂正。WWDC 2026 編の検証ブランチ (`xcode27`) が `main` にマージされたことを反映
 - **2026-08-12**: Primary / FromExtension の 2 系統を持つ話が撤去されたことに追随し、5/N のタイトル表記もあわせて更新

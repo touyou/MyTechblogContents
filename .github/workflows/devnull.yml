@@ -1,0 +1,57 @@
+name: /dev/null
+
+# 記事の公開と、手動で選んだ記事の更新を dev-null.sh/@touyou に投稿する。
+# リポジトリ変数 DEVNULL_ENABLED を true にし、シークレット DEVNULL_SSH_KEY を置くまでは何もしない。
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "articles/**.md"
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 更新を告知する記事の slug(articles/<slug>.md)
+        required: true
+      note:
+        description: 何を更新したか(任意、1〜2 行)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: vars.DEVNULL_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      bodies: ${{ steps.bodies.outputs.bodies }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: bodies
+        env:
+          MODE: ${{ github.event_name == 'push' && 'new' || 'update' }}
+          HAS_KEY: ${{ secrets.DEVNULL_SSH_KEY != '' }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          SLUG: ${{ inputs.slug }}
+          NOTE: ${{ inputs.note }}
+        run: python3 .github/scripts/devnull_zenn.py "$MODE"
+
+  commit:
+    needs: prepare
+    if: needs.prepare.outputs.bodies != '' && needs.prepare.outputs.bodies != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        body: ${{ fromJSON(needs.prepare.outputs.bodies) }}
+    steps:
+      - uses: nunomaduro/dev-null.sh/.github/actions/commit@8bec9b18939ae627b256eec89f83fbb368b0f228 # production
+        with:
+          body: ${{ matrix.body }}
+          ssh-key: ${{ secrets.DEVNULL_SSH_KEY }}

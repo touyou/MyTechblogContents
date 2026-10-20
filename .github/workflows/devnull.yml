@@ -22,10 +22,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: devnull
-  cancel-in-progress: false
-
 jobs:
   prepare:
     if: vars.DEVNULL_ENABLED == 'true'
@@ -39,6 +35,7 @@ jobs:
       - id: bodies
         env:
           MODE: ${{ github.event_name == 'push' && 'new' || 'update' }}
+          HAS_KEY: ${{ secrets.DEVNULL_SSH_KEY != '' }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
           SLUG: ${{ inputs.slug }}

@@ -47,13 +47,16 @@ def is_published(meta: dict) -> bool:
         return False
     # 予約公開 (published_at が未来) はまだ Zenn に出ていないので告知しない
     published_at = unquote(meta.get("published_at", ""))
-    if published_at:
+    if not published_at:
+        return True
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            at = datetime.strptime(published_at, "%Y-%m-%d %H:%M").replace(tzinfo=JST)
+            at = datetime.strptime(published_at, fmt).replace(tzinfo=JST)
         except ValueError:
-            return True
+            continue
         return at <= datetime.now(JST)
-    return True
+    # 読めない日付は公開済みと決めつけない
+    return False
 
 
 def git_show(rev: str, path: str) -> str | None:
@@ -107,7 +110,10 @@ def updated_article(slug: str, note: str) -> list[str]:
 
 def main() -> None:
     mode = sys.argv[1]
-    if mode == "new":
+    if os.environ.get("HAS_KEY") != "true":
+        print("DEVNULL_SSH_KEY が無いので投稿しない")
+        bodies = []
+    elif mode == "new":
         bodies = new_articles(os.environ["BEFORE"], os.environ["AFTER"])
     else:
         bodies = updated_article(os.environ["SLUG"].strip(), os.environ.get("NOTE", "").strip())

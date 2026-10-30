@@ -82,7 +82,7 @@ dialog は素直に実機で分かったんですが、snippet は自分の推�
 
 最初、AppIntents の [Visual presentation](https://developer.apple.com/documentation/AppIntents/visual-presentation) が "Siri, Spotlight, and the Shortcuts app display snippets" と書いていて、セッション 281 (0:29) も同じ 3 つを挙げているのを見て、「列挙に Control が無いから出ないんだろう」と判断しました。**これは肯定リストからの推論で、実測ではありません**。にもかかわらず dialog の実測結果と並べて書いてしまったので、あとから自分で見返したときに実測されたルールのように見えていました。
 
-しかもこの推論、設計にも影響していました。「Control では snippet が出ない」を前提に、snippet を返す Intent を全部 Control から外して Siri 側に寄せてしまったので、**Control 経由で snippet を返す経路が 1 つも無い** 状態になっていたんです。誤った前提が、それを反証する実験の可能性ごと消していた形でした。
+しかもこの推論、設計にも影響していました。「Control では snippet が出ない」を前提に、snippet を返す Intent を全部 Control から外して Siri 側に寄せてしまったので、**Control 経由で snippet を返す経路が 1 つも無い** 状態になっていたんです。誤った前提のせいで、それを反証する実験もできなくなっていました。
 
 疑いを持ったのは、セッション 275 (1:40〜1:59) が「コントロールをタップ → Intent 実行 → snippet 表示 → snippet 内のボタンで即更新」をそのまま実演していたからです。肯定リストと真っ向からぶつかります。
 
@@ -113,7 +113,7 @@ dialog は素直に実機で分かったんですが、snippet は自分の推�
 
 残したのは **失敗時の通知だけ** です。失敗するとコントロールは前の状態のまま再描画されるので、「何も起きなかった」と区別が付きません。ここだけは他に伝える手段がないので通知が要ります。
 
-`controlWidgetStatus(_:)` も一度は入れたんですが、撤去しました。理由が 2 つあって、まず公式ガイダンスが "Use status text sparingly and only in situations where important information isn't conveyed by the control" と言っていて、**コントロールが既に伝えている情報には使うな** という位置づけだからです。もう 1 つが恥ずかしい方の理由で、当時の provider は predicate が `!isCompleted` で絞っていたので `snapshot.isCompleted` が常に false になっていて、`.controlWidgetStatus("Completed")` の分岐は **到達不能なデッドコード** でした。シミュレータでビルドが通ったところで満足して、実機で見ていなかったので気付けていません。
+`controlWidgetStatus(_:)` も一度は入れたんですが、撤去しました。理由が 2 つあって、まず公式ガイダンスが "Use status text sparingly and only in situations where important information isn't conveyed by the control" と言っていて、**コントロールが既に伝えている情報には使うな** という位置づけだからです。もう 1 つが恥ずかしい方の理由で、当時の provider は predicate が `!isCompleted` で絞っていたので `snapshot.isCompleted` が常に false になっていて、`.controlWidgetStatus("Completed")` の分岐は **到達不能なデッドコード** でした。シミュレータでビルドが通ったところで満足して、実機で見ていなかったので気付けませんでした。
 
 読ませたい情報は Control ではなく Siri / Spotlight / Shortcuts 側に寄せる、というのが今の整理です。一覧もそちら側で、`ShowTodosIntent` は値だけでなく dialog とスニペット (先頭 5 件と完了ボタン、「アプリで開く」) を返すようにしました。値だけ返すと、Shortcuts では値の羅列、Siri では dialog だけ、と面ごとに見え方がばらばらになるので。件数コントロールのタップは `LaunchAppIntent.incompleteTodos()` で未完了一覧を開くようにしました。グランスは数字、タップはドリルイン、という分担です。
 
@@ -269,9 +269,9 @@ Button(intent: ToggleTodoCompletionIntent(todo: selectedTodo)) { Text("完了に
     .keyboardShortcut(.return)
 ```
 
-2 つめが、**対象の Entity をコマンド側で capture しないこと**。`NavigationModel` を `TodoCommands(navigationModel:)` で渡せば `selectedTodo` は読めるんですが、`Commands` の body が `@Observable` の変更で必ず組み直される保証を自分は確認できていません。組み直されなかったら **古い選択に対して Intent が走る** = 別の Todo が消える、という壊れ方なので、読み違えたときの代償が大きすぎます。選択は `focusedSceneValue(\.selectedTodo, ...)` で publish して `@FocusedValue` で受ける形にしました。これは「フォーカスに依存するメニュー項目」のために用意されている仕組みなので、更新は SwiftUI 側の保証です。シートを出すだけの項目 (⌘N の追加 / ⌘E の編集) はクリック時に `NavigationModel` を読むので、そもそも陳腐化しません。
+2 つ目が、**対象の Entity をコマンド側で capture しないこと**。`NavigationModel` を `TodoCommands(navigationModel:)` で渡せば `selectedTodo` は読めるんですが、`Commands` の body が `@Observable` の変更で必ず組み直される保証を自分は確認できていません。組み直されなかったら **古い選択に対して Intent が走る** = 別の Todo が消える、という壊れ方なので、読み違えたときの代償が大きすぎます。選択は `focusedSceneValue(\.selectedTodo, ...)` で publish して `@FocusedValue` で受ける形にしました。これは「フォーカスに依存するメニュー項目」のために用意されている仕組みなので、更新は SwiftUI 側の保証です。シートを出すだけの項目 (⌘N の追加 / ⌘E の編集) はクリック時に `NavigationModel` を読むので、そもそも陳腐化しません。
 
-3 つめが削除で、これは上の落とし穴 4 とまったく同じ形になりました。⌫ を隠しボタンの `keyboardShortcut(.delete, modifiers: [])` で拾う案は駄目で、メニューのキー等価はフィールドエディタより先に評価されるので **検索フィールドの backspace まで奪います**。`List` の `.onDeleteCommand` はレスポンダチェーン経由なので、テキスト入力中は入力側が先に食ってくれます。
+3 つ目が削除で、これは後で書く落とし穴 4 とまったく同じ形になりました。⌫ を隠しボタンの `keyboardShortcut(.delete, modifiers: [])` で拾う案は駄目で、メニューのキー等価はフィールドエディタより先に評価されるので **検索フィールドの backspace まで奪います**。`List` の `.onDeleteCommand` はレスポンダチェーン経由なので、テキスト入力中は入力側が先に食ってくれます。
 
 ただし `.onDeleteCommand` はクロージャなので `Button(intent:)` にできません。ここで `TodoService` を直接呼ぶと、スナップショットの保存も undo の登録も donation の後始末も全部写経することになって、「削除」の意味が 2 か所に分かれます。なので **クロージャは「確認を出して」と頼むだけ** にして、実行は `.confirmationDialog(_:item:)` の中の `Button(role: .destructive, intent: DeleteTodoImmediatelyIntent(todo:))` に任せました。⌫ / 行の右クリック / メニューの ⌘⌫ の 3 経路が、1 つの確認と 1 つの Intent に収束します。経路は 3 つに増えたけど Intent は増えていない、というのが気持ちいいところでした。確認を挟んでも詳細を開くより速いし、削除は `UndoableIntent` なので ⌘Z でも戻せます (8/N)。
 
@@ -411,7 +411,7 @@ DeleteTodoIntent failed to execute with error:
 LNPerformActionErrorCodeUnsupportedValueType
 ```
 
-原因は `DeleteTodoIntent.perform()` の中で呼んでいた `requestConfirmation(dialog:)` でした。8/N で書いたとおり、これは `perform()` を止めてユーザーに確認を求める API なんですが、**アプリ内の `Button(intent:)` には確認を提示する面がありません**。要求した時点で失敗して、削除まで到達しない、ということになります。
+原因は `DeleteTodoIntent.perform()` の中で呼んでいた `requestConfirmation(dialog:)` でした。8/N で書くとおり、これは `perform()` を止めてユーザーに確認を求める API なんですが、**アプリ内の `Button(intent:)` には確認を提示する面がありません**。要求した時点で失敗して、削除まで到達しない、ということになります。
 
 厄介なのが、**Siri / Shortcuts / AppIntentsTesting 経由では成功する** ところです。それらには確認を出す面があるので、テストは通ります。壊れているのは UI の削除経路だけ (一覧のスワイプ / iOS 詳細 / visionOS / watchOS の 4 箇所) でした。
 
@@ -456,7 +456,7 @@ SDK 27 に `dismissalConfirmationDialog(_:shouldPresent:actions:message:)` と�
 - `interactiveDismissDisabled(hasChanges)` で、**変更があるときだけ** スワイプ下げと外側タップを塞ぐ (detent 間のリサイズは残るので、シートが固まったようには見えません)
 - 「キャンセル」ボタンは、変更があれば `.confirmationDialog`、無ければそのまま閉じる
 
-つまり **スワイプ下げそのものには確認を出せません**。SwiftUI には「dismiss しようとした」を観測する公開 API が無いので、塞ぐところまでが限界でした。`dismissalConfirmationDialog` はまさにその穴を埋めるための API に見えるので、動くようになったら乗り換えたいところです。
+つまり **スワイプ下げそのものには確認を出せません**。SwiftUI には「dismiss しようとした」を観測する公開 API が無いので、塞ぐところまでが限界でした。`dismissalConfirmationDialog` はまさにそのための API に見えるので、動くようになったら乗り換えたいところです。
 
 実装で 1 つ気を付けたのが、**保存経路は塞がないこと** でした。`AddTodoIntent` / `UpdateTodoIntent` は `NavigationModel` のフラグを下ろしてシートを閉じていて、これは presenter 側の状態なので `interactiveDismissDisabled` の対象外です。ここが噛み合っていないと「保存したのに閉じない」になるので、実機で「保存 → 閉じる」まで見ました。
 
@@ -509,7 +509,7 @@ guard status == .authorized || status == .provisional else {
 
 出す条件は「通知設定が無効なこと」ではなく **実際に取りこぼしたとき** にしています。ユーザーが意図的に切っている設定を毎回蒸し返したくないので、実害が出た 1 回目から出す、という線引きです。逆に経路が使えるようになったら (許可が下りた / 有効に戻った) 記録を消します。古い記録でバナーを出し続けると、それはそれで嘘になるので。
 
-### ライブアクティビティも同じ形だった
+### Live Activity も同じ形だった
 
 同じ構図がもう 1 つあって、`Activity.request` の前に `ActivityAuthorizationInfo().areActivitiesEnabled` を見て抜ける、というのは必須なんですが (無効な端末で毎回 throw させるとエラーが溢れます)、**そこで無言 return すると、ユーザーは「期限が近い Todo がロック画面に出てこない」理由に到達できません**。
 
@@ -536,13 +536,13 @@ guard status == .authorized || status == .provisional else {
 
 落とし穴とは毛色が違うんですが、同じ「動いてはいるのに正しくない」話なので書いておきます。
 
-IntentTodo は長らく `SiriTipView`（「"やることを追加" と言ってください」と教えるバナー）を **一覧の `List` の 1 行目に常設** していました。「最近のアプリで使っているのを見ないし、一等地に居座っているのが気になる」という違和感から棚卸ししたら、**違和感の方が正しかった** です。
+IntentTodo は長らく `SiriTipView` (「"やることを追加" と言ってください」と教えるバナー) を **一覧の `List` の 1 行目に常設** していました。「最近のアプリで使っているのを見ないし、一等地に居座っているのが気になる」という違和感から棚卸ししたら、**違和感の方が正しかった** です。
 
-まず **まだ使えるのか** を確認しました。`SiriTipView` も `ShortcutsLink` も deprecated ではありません（`ShortcutsLink` は macOS / watchOS の SDK に宣言そのものが無いので `@available` ではなく `#if` が要る、という差はあります）。
+まず **まだ使えるのか** を確認しました。`SiriTipView` も `ShortcutsLink` も deprecated ではありません (`ShortcutsLink` は macOS / watchOS の SDK に宣言そのものが無いので `@available` ではなく `#if` が要る、という差はあります)。
 
 次に **推奨が生きているのか**。ローカルの WWDC 控えを全文検索したら、この 2 つに触れているのは 2022 / 2023 のセッションだけで、2024 以降には一度も出てきません。WWDC 2026 の公式サンプル 4 本も両方 0 件使用でした。discoverability の主題は Spotlight インデックスと App Schema 側に移っている、ということみたいです。
 
-そして決定的だったのが、**当時のガイダンスが、当時の自分の実装をすでに否定していた** ことでした。
+そして、**当時の自分の実装は、当時のガイダンスの時点ですでに否定されていました**。
 
 > carefully select moments ... immediately before or after completing an action that they may want to repeat
 
@@ -550,8 +550,8 @@ IntentTodo は長らく `SiriTipView`（「"やることを追加" と言って�
 
 判断は最初、「両方消す」ではなく **「役割どおりの置き場に直す」** にしました。
 
-- `SiriTipView` は一覧の行から外して、上端の `safeAreaInset` へ移設。表示ポリシーも決めて、**アプリ UI 起点の追加を 3 回した後** に出し、通算 2 回まで、閉じたら以後出さない。Siri / Shortcuts / ウィジェット経由の追加は数えません（既にフレーズを使える人に教える意味が無いので）
-- `ShortcutsLink` は設定画面の「Siri & Shortcuts」セクションへ。macOS には出しません（`ShortcutsLink` が無いのでセクションが空になる）
+- `SiriTipView` は一覧の行から外して、上端の `safeAreaInset` へ移設。表示ポリシーも決めて、**アプリ UI 起点の追加を 3 回した後** に出し、通算 2 回まで、閉じたら以後出さない。Siri / Shortcuts / ウィジェット経由の追加は数えません (既にフレーズを使える人に教える意味が無いので)
+- `ShortcutsLink` は設定画面の「Siri & Shortcuts」セクションへ。macOS には出しません (`ShortcutsLink` が無いのでセクションが空になる)
 
 行から外したことの副産物として、10/N に書く onscreen annotation やドラッグ並べ替えの対象に **異物が混ざらなくなりました**。「教育用の行」がデータの行に混ざっていたのは、そもそも構造として無理があったなと思います。
 
@@ -563,7 +563,7 @@ IntentTodo は長らく `SiriTipView`（「"やることを追加" と言って�
 
 `ShortcutsLink` は残しています。探しに来た人に見せるだけで、何にも割り込まないからです。「使えるか」「今も推奨されているか」「自分の使い方が推奨に沿っているか」を見たうえで、最後は **「その面に出す理由を説明できるか」** で決まった感じでした。
 
-移設した直後の切り分けで 1 つ引っかかったことも書いておくと、シミュレータで確かめたら **Tip が出ませんでした**。「配線が壊れている」と早合点しかけたんですが、原因は端末の defaults に常設していた頃のキー（`isVisible = false`）が残っていたことで、**移行ロジックが意図どおり「もう閉じた人」と判定していた** だけでした。ユニットテストが緑でシミュレータで出ないときは、まず端末に残っている永続状態を疑う、というのが正しい順番です。ちなみに `defaults write` や plist の直接編集は `cfprefsd` のキャッシュに勝てないので、状態を作り直すなら `simctl uninstall` してから入れ直す方が確実でした。
+移設した直後の切り分けで 1 つ引っかかったことも書いておくと、シミュレータで確かめたら **Tip が出ませんでした**。「配線が壊れている」と早合点しかけたんですが、原因は端末の defaults に常設していた頃のキー (`isVisible = false`) が残っていたことで、**移行ロジックが意図どおり「もう閉じた人」と判定していた** だけでした。ユニットテストが緑でシミュレータで出ないときは、まず端末に残っている永続状態を疑う、というのが正しい順番です。ちなみに `defaults write` や plist の直接編集は `cfprefsd` のキャッシュに勝てないので、状態を作り直すなら `simctl uninstall` してから入れ直す方が確実でした。
 
 
 ## まとめ
@@ -588,12 +588,13 @@ IntentTodo は長らく `SiriTipView`（「"やることを追加" と言って�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-30**: 校正。Mac のメニューの節で落とし穴 4 を「上の」と書いていたのを「後で書く」に、8/N への参照を「書いたとおり」から「書くとおり」に訂正。あわせて表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃えた
 - **2026-10-02**: タイトルが Zenn の上限 (70 文字) を超えてデプロイできなくなっていたので、`Control Widget` を `Control` に縮めた
 - **2026-10-01**: 落とし穴 6 (Siri は Intent を呼ばずに答えることがある。一覧の依頼に OmniSearch が答えていた / Siri の言語が英語だと日本語のフレーズは使われない) を追加。おまけの `SiriTipView` は移設のあと結局降ろしたので、その理由 3 つに書き換え。Spotlight の節に Cascade 索引への donate を確かめた話を、落とし穴 4 にリストやタグの削除には確認を付けなかった判断と `.confirmationDialog` / `.alert` まわりの罠を追加。`ShowTodosIntent` がスニペットを返すようになったことを反映。タイトルと見出しからダッシュを外した
 - **2026-09-11**: おまけ 4 (Mac のメニューバーからも `Button(intent:)` が走る / 対象は `@FocusedValue` から取る / `.onDeleteCommand` は確認ダイアログ経由で Intent に収束させる) を追加
 - **2026-08-31 (2)**: 落とし穴 4 に「逃げ先の SwiftUI 側にも罠があった」を追加 (`dismissalConfirmationDialog` が iOS のシートで空振りする / 代わりの 2 段構え / 保存経路は塞がない / dirty 判定の初期値)
 - **2026-08-31**: 落とし穴 1 を圧縮 (撤去済みのワークアラウンドの実装詳細を落として、実測で消えるまでの流れだけ残した)。おまけとして `SiriTipView` を一覧の一等地から降ろし `ShortcutsLink` を設定に置いた話を追加
-- **2026-08-28**: 落とし穴 5 (失敗が無音になる 3 経路: `@Dependency` 登録漏れ / 通知拒否 / ライブアクティビティ無効) を追加。Spotlight の節を名前付き index + `IndexedEntityQuery` + client state による省略と自己修復まで書き直し (「自己修復ループは今後の改善ポイント」だったものを実装済みに)。cold start でシーン経由の遷移を取りこぼす話 (おまけ 3) を追加
+- **2026-08-28**: 落とし穴 5 (失敗が無音になる 3 経路: `@Dependency` 登録漏れ / 通知拒否 / Live Activity 無効) を追加。Spotlight の節を名前付き index + `IndexedEntityQuery` + client state による省略と自己修復まで書き直し (「自己修復ループは今後の改善ポイント」だったものを実装済みに)。cold start でシーン経由の遷移を取りこぼす話 (おまけ 3) を追加
 - **2026-08-12**: 日付つきの追記見出しを本文から外し、記述は常に現在形へ統一 (いつ何を直したかはこの更新履歴に一本化)
 - **2026-08-12 (2)**: Live Activity の entity 解決クラッシュが iOS 27 で **再現しない** ことを実測し、Primary / FromExtension 分離を撤去した経緯を追加 (タイトルの「FromExtension」も差し替え)。`WidgetCenter` がコントロールを更新しない件と、落とし穴 4 (アプリ内 `Button(intent:)` から `requestConfirmation` が失敗する) を追加
 - **2026-08-12**: 落とし穴 2 を全面的に書き直し。**Control では snippet も出ない** ことを実機 (呼出元だけを変えた比較) で確定し、切り分けの経緯と教訓を追加。Control を Toggle 化したのに伴い、Button / Toggle の使い分けと `SetValueIntent` を絶対値で受ける話を追加。前日に追記した `.controlWidgetStatus(_:)` は **撤去** した (公式ガイダンスに反していたうえ、当時の provider の predicate のせいで分岐が到達不能なデッドコードだった)。成功通知を全廃し失敗時のみに縮小。`LaunchAppIntent` の遷移先実装漏れの話を追加

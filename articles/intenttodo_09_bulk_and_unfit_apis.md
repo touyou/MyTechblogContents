@@ -99,7 +99,7 @@ public static var allowedExecutionTargets: IntentExecutionTargets { [.main] }
 ```
 
 選べるのは **`.main` (アプリ本体) / `.appIntentsExtension` (App Intents Extension) / `.widgetKitExtension` (WidgetKit Extension)** です。
-IntentTodo は App Intents Extension を持っていないし、バルクの SwiftData 変更はアプリ本体でやるのが一番確実なので、新設のバルク Intent は `[.main]` に固定しました。
+IntentTodo は App Intents Extension を持っていないし、バルクの SwiftData 変更はアプリ本体でやるのがいちばん確実なので、新設のバルク Intent は `[.main]` に固定しました。
 
 ### 1 件だけ試して満足していたのを、方針に格上げした
 
@@ -115,7 +115,7 @@ IntentTodo も共有パッケージが Widget Extension にリンクされてい
 
 ちなみに `ExecutionTargets` は `AppIntent` だけでなく **`EntityQuery` 側にも生えています** (公式が "available on both `AppIntent` and `EntityQuery`" と書いています)。IntentTodo の entity 解決は読み取りしかしないので、こちらは未指定のままです。
 
-では **指定しなかったとき** はどうなるかというと、これが「呼出元に応じて固定的に決まる」ではありませんでした。セッション 345 (15:59〜16:55) によると、未指定の Intent は **システムのヒューリスティクス** でプロセスが選ばれます (アプリが起動中ならアプリを優先、そうでなければ Extension を起こす)。SDK 側でも `IntentExecutionTargets` は `.default` を独立したケースに持つ `OptionSet` になっていて、「既定はシステムに委ねる」が型としてそう表現されていました。2/N の実行プロセスの表もこれを前提に書いています。
+では **指定しなかったとき** はどうなるかというと、これが「呼出元に応じて固定的に決まる」ではありませんでした。セッション 345 (15:59〜16:55) によると、未指定の Intent は **システムのヒューリスティクス** でプロセスが選ばれます (アプリが起動中ならアプリを優先、そうでなければ Extension を起こす)。SDK 側でも `IntentExecutionTargets` は `.default` を独立したケースに持つ `OptionSet` になっていて、「既定はシステムに委ねる」が型としても表現されていました。2/N の実行プロセスの表もこれを前提に書いています。
 
 ### workaround を畳む道具にはならなかった (そして workaround の方が消えた)
 
@@ -128,7 +128,7 @@ IntentTodo も共有パッケージが Widget Extension にリンクされてい
 この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化しています。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、公式に正しい設計だったと裏が取れた格好です。
 
 
-## 複数の型を1つの結果で返す: @UnionValue
+## 複数の型を 1 つの結果で返す: @UnionValue
 
 `@UnionValue` を enum に付けると、`@Parameter` や `ReturnsValue` で **複数の Entity 型を 1 つの値として扱える** ようになります。
 IntentTodo では「Todo とカテゴリの混在検索結果」を返すのに使いました。
@@ -160,11 +160,10 @@ public func perform() async throws -> some IntentResult & ReturnsValue<[TodoOrCa
 
 なお Xcode 27.2 beta の SDK で、`@UnionValue` の型を受ける `@Parameter` に `default:` 付きのイニシャライザと、コレクション用の `size:` が足されました。ただし `anyAppleOS 27.2` からなので、deployment target が 27.0 の IntentTodo ではまだ書けません。戻り値に使っている今の形には影響しません。
 
-セッションを洗い直したら、`@UnionValue` マクロ自体は WWDC 2024 (iOS 18、セッション 10134) からあるものでした。この記事が扱っている 345 は、`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件を提示した回です。実際ハマったのがその細目の方だったので、体感として新機能に見えていたんだと思います。なお上に書いた `public enum` の `: Sendable` 明示は 345 で言われていることではなくて、**自分がビルドを通そうとして踏んだだけ** の話なので、そこは分けて読んでもらえればと思います。
+セッションを洗い直したら、`@UnionValue` マクロ自体は WWDC 2024 (iOS 18、セッション 10134) からあるものでした。この記事が扱っているセッション 345 は、`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件を提示した回です。実際ハマったのがその細目の方だったので、体感として新機能に見えていたんだと思います。なお上に書いた `public enum` の `: Sendable` 明示は 345 で言われていることではなくて、**自分がビルドを通そうとして踏んだだけ** の話なので、そこは分けて読んでもらえればと思います。
 
 ## 検証してみたら「使えなかった」API: RelevantEntities
 
-ここからが今回いちばん書きたかった話です。
 `RelevantEntities` は「いま関連性の高い Entity」をシステムに文脈寄付するための API で、自分は「次の期限 / 緊急の Todo」を寄付して、ロック画面やシステムの提案に出せたらいいなと考えていました。
 `RelevantEntities.shared.updateEntities(_:for:)` を使う想定で調べていったんですが、ここで詰まりました。
 
@@ -275,6 +274,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-01**: `.foreground(.dynamic)` の節を「値を返す Intent にアプリを開かせない」に書き換え。`.foreground` だけの `ShowTodosIntent` が前面に出せない経路で拒否され、dynamic にすると Siri から毎回アプリが開いたので、`.background` + スニペットに分けた経緯と、同じ変更で `[.main]` を外して Siri が失敗した反省を追加 (「当て先が無い」で閉じていた結論を撤回)。`[.main]` の固定数を 20 個に更新し、App Shortcut 登録の読み取り系の例外を反映。27.2 SDK の `@UnionValue` の追加と、27.1 / 27.2 beta でも `AppEntityContext` が変わらないことを追記
 - **2026-09-11**: `AppEntityContext` として使えるのは `.audio(.nowPlaying)` だけだと確定し、`.audio(.workout(activityType:))` の記述を取り下げ (Xcode 27 RC の公開 SDK に無い)。`PredictableIntent` を「寄付がゼロだから使えない」から「前提が崩れたので未着手」に格下げ
 - **2026-08-31**: 撤去済みの FromExtension 分離をめぐる 3 段階の経緯 (畳めるか → 畳めない → そもそも要らなくなった) を 1 節に圧縮。`RelevantEntities` の結論が SDK 更新後も変わっていないことと、SDK の公開シンボル棚卸しの結果を反映

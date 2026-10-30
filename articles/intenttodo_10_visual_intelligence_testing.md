@@ -46,7 +46,7 @@ public struct TodoVisualIntelligenceQuery: IntentValueQuery {
 
 セッションを 2022 まで遡って洗い直したので、出自も補足しておきます。入口の `IntentValueQuery` と `SemanticContentDescriptor` は iOS 26 (WWDC 2025 セッション 275) からある API で、Visual Intelligence 連携そのものはその年に始まっていました。この記事が参照しているセッション 297 ([Best practices for integrating visual intelligence in your app](https://developer.apple.com/videos/play/wwdc2026/297/)) は WWDC 2026 で Visual Intelligence 統合を単独セッションとしてまとめ直した回で、下の追記に書いた **macOS 対応** がそこで増えた分にあたります。一方 AppIntentsTesting (セッション 295) の方は 2026 の新顔で間違いないです。
 
-ここがおもしろかった点をいくつか。
+ここが面白かった点をいくつか。
 
 - **`IntentValueQuery` は `@Dependency` が使えます**。6/N で「`AppEntity` は `@Dependency` 使えない」と書きましたが、value query の方は `_SupportsAppDependencies` に適合しているので、`TodoService` を直接注入できます。entity みたいに `TodoEntityStore` を迂回しなくていいので、ここは素直でした。
 - 戻り値が **単一 Entity 型に縛られない** のが `EntityQuery` との違いです。9/N で作った `@UnionValue` の `[TodoOrCategory]` をそのまま返せるので、Todo とカテゴリの混在結果を出せます。
@@ -99,7 +99,7 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 
 この要求、最初は「Mac 固有の追加バリデーション」だと思っていたんですが、そうではありませんでした。**ルール自体は全プラットフォーム共通** です。セッション 275 (9:19) が "This `OpenIntent` must exist, otherwise your app won't show up" と言っているとおりで、`OpenIntent` の無い entity はそもそも Visual Intelligence の結果に出てきません。Mac 固有なのは **macOS 向けのビルドだけがそれをコンパイル時エラーとして弾いてくる** という enforce のされ方の方でした。
 
-なのでこのエラーの出方がおもしろくて、`OpenCategoryIntent` を外しても **iOS ビルドは普通に通り**、macOS 向けビルドでだけ appintentsmetadataprocessor が `result type 'CategoryAppEntity' that is not openable ... must be associated with an OpenIntent` で止まります (手元の beta 2 で両方確認しました)。iOS だけ見ていると、ビルドは通るのに実機で「なぜか候補に出てこない」という形でしか気付けないことになります。SDK 更新のたびに複数 destination でフルビルドして確かめるのが結局いちばん確実だなと思うのは、こういうところです。深さはビルド成立 (B) までで、Mac の visual search で実際に Todo が出てくるかは実機待ちです。
+なのでこのエラーの出方が面白くて、`OpenCategoryIntent` を外しても **iOS ビルドは普通に通り**、macOS 向けビルドでだけ appintentsmetadataprocessor が `result type 'CategoryAppEntity' that is not openable ... must be associated with an OpenIntent` で止まります (手元の beta 2 で両方確認しました)。iOS だけ見ていると、ビルドは通るのに実機で「なぜか候補に出てこない」という形でしか気付けないことになります。SDK 更新のたびに複数 destination でフルビルドして確かめるのが結局いちばん確実だなと思うのは、こういうところです。深さはビルド成立 (B) までで、Mac の visual search で実際に Todo が出てくるかは実機待ちです。
 
 ちなみに「期限 → カレンダー」「担当者 → 連絡先」みたいな EventKit / Contacts 連携は、別フレームワークの話で App Intents 中心設計の検証主眼からは外れるので、今回は記録だけして未実装にしています。
 
@@ -133,8 +133,7 @@ WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテス
 
 ### UI テストバンドル必須 (unit test では動かない)
 
-最初に大事な制約があります。
-[Apple のドキュメント](https://developer.apple.com/documentation/AppIntentsTesting/testing-your-app-intents-code) が明記していて、AppIntentsTesting は intent を **ライブのアプリプロセスで実行** するので、テストは unit test ではなく **UI テスティングバンドル** に置く必要があります。
+[Apple のドキュメント](https://developer.apple.com/documentation/AppIntentsTesting/testing-your-app-intents-code) が明記していて、AppIntentsTesting は intent を **ライブのアプリプロセスで実行** するので、テストは unit test ではなく **UI テストバンドル** に置く必要があります。
 アプリプロセスと、登録済みの `AppDependencyManager` が要るからで、SPM の Testing パッケージでは動きません。IntentTodo は既存の `IntentTodoUITest` (UI テストターゲット) に追加しました。
 
 もう 1 つ、セッション 295 (2:54) が明言している要件があって、**テストランナーとアプリ本体が同じ development team で code signing されている必要があります**。同一 Apple ID でしか触っていないので「自分には関係ない要件」だと思っていたんですが、後で別の形でまともに踏みました (後述)。ランナーとアプリの紐付けを署名で確かめている、という仕組みの方を覚えておくのが正解でした。
@@ -183,7 +182,7 @@ func testAddTodoIntentRunsAndPersists() async throws {
 `makeIntent(<パラメータラベル>: 値)` → `run()` で実経路実行、`entities["..."].entities(matching:)` で entity query、`valueQueries["..."].values(for:)` で value query を叩けます。
 戻り値は `AnyAppEntity` のような型消去型で、`try matches[0].title` のような **動的プロパティアクセス** で値を取り出します。
 
-アプリターゲットを import せずに文字列で参照するスタイルなので、**多くの誤りはコンパイルではなく実行時に出ます**。型名のタイポやパラメータラベルの間違いがビルドを通ってしまうので、そこは気をつけるポイントでした。
+アプリターゲットを import せずに文字列で参照するスタイルなので、**多くの誤りはコンパイルではなく実行時に出ます**。型名のタイポやパラメータラベルの間違いがビルドを通ってしまうので、そこは気を付けるポイントでした。
 
 ### 自己クリーンアップ設計
 
@@ -257,7 +256,7 @@ watch アプリの UI から前提データを作る道もあるんですが、w
 
 AppIntentsTesting の具体的な使い方は、iOSDC Japan 2026 の [パンフレット記事](https://fortee.jp/iosdc-japan-2026/proposal/79048b55-a6ca-4d73-8cde-ec9858e48957) でも解説されているので、あわせて読んでみてください。それと、梯子のどの段で何かがおかしいと分かったときに見にいくのは結局メタデータになるので、仕組みの方は [kntk さんのセッション](https://speakerdeck.com/kntkymt/app-intents-no-o-sasaeru-gijutsu) を見ておくとどこを読めばいいのかが分かりやすくなると思います。
 
-ただ、この梯子は **全段が Xcode からインストールしたアプリの上に立っていました**。3/N に書いたとおり、IntentTodo は `AppIntentsPackage` の宣言のせいで、TestFlight / App Store から入れたアプリだけ App Intents がまるごと読まれない、という状態で出荷していました。宣言を入れたときはこの梯子の下 3 段を全部登って「害は無い」と判断していて、どの段でも見えなかったわけです。今は梯子の一番上に **配布ビルド (TestFlight) で面に出るところまで見る** を足して、App Intents の構成を変えたらそこまで確かめるようにしています。
+ただ、この梯子は **全段が Xcode からインストールしたアプリの上に立っていました**。3/N に書いたとおり、IntentTodo は `AppIntentsPackage` の宣言のせいで、TestFlight / App Store から入れたアプリだけ App Intents がまるごと読まれない、という状態で出荷していました。宣言を入れたときはこの梯子の下 3 段を全部登って「害は無い」と判断していて、どの段でも見えなかったわけです。今は梯子のいちばん上に **配布ビルド (TestFlight) で面に出るところまで見る** を足して、App Intents の構成を変えたらそこまで確かめるようにしています。
 
 ## 「呼ばれていない」と「呼ばれて 0 件」を見分ける
 
@@ -303,7 +302,7 @@ UI テストが 307 秒かかっていたので、`parallelizable = "YES"` を�
 
 UI テストのクラスが 1 つしかないので、並列にしても **クラス内は分割されません**。シミュレータのクローン起動コストと取り合いだけが乗っていた、ということでした。ついでに「重いテストを並列で回してシミュレータがウォッチドッグで落ちる」という別の問題も消えています。
 
-ちなみに「単体 114 秒かかる」と記録していた Spotlight のテストは、直列で測ったら **0.99 秒** でした。114 秒はクローンを取り合っていたときの数字だったわけで、**遅いテストだと思っていたものが遅かったのは環境の方** だった、という落ちです。timeout の見直しもテストプランの分離もやらずに済みました。
+ちなみに「単体 114 秒かかる」と記録していた Spotlight のテストは、直列で測ったら **0.99 秒** でした。114 秒はクローンを取り合っていたときの数字だったわけで、**遅いテストだと思っていたものが遅かったのは環境の方** だった、というオチです。timeout の見直しもテストプランの分離もやらずに済みました。
 
 ### 直列にしたら、隠れていた待ちの甘さが出た
 
@@ -370,7 +369,7 @@ AppIntentsTesting はテスト対象アプリの App Intents をアプリのプ�
 
 自分でも情けないのが切り分けのやり方で、並列実行・デバイスの残留状態・dyld キャッシュと順番に除外して「環境ノイズではない」ところまでは確認していました。ただ **どの行でも `CODE_SIGNING_ALLOWED=NO` は付けたまま** だったんです。変数を 1 つも動かしていないので、何回やっても同じ答えしか返ってきません。切り分け表を作ると「たくさん試した」感が出るんですが、**全行に同じ誤った定数が置いてあるなら切り分けになっていない** わけで、ここは表の見た目に自分で騙されていました。同時に出ていた別のクラッシュ (シミュレータでは `XPCPeerRequirement.hasEntitlement(_:)` が未実装で trap する、というやつ) を傍証として採用してしまったのも良くなかったです。署名ありで走らせると 23 件全部通るので、あれは 803 とは無関係でした。
 
-発覚したのは、本人が Xcode から手で実行したログに **803 が 1 件も出ていなかった** からです。教訓は「SDK の退行だ」と結論する前に **自分のコマンドラインと IDE の差分を 1 つずつ確かめる**、とくに **他のコマンドから流用したフラグは真っ先に疑う** の 2 つでした。
+発覚したのは、自分が Xcode から手で実行したログに **803 が 1 件も出ていなかった** からです。教訓は「SDK の退行だ」と結論する前に **自分のコマンドラインと IDE の差分を 1 つずつ確かめる**、とくに **他のコマンドから流用したフラグは真っ先に疑う** の 2 つでした。
 
 使い分けとしてはこうです。
 
@@ -434,7 +433,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 ## WWDC 2026 編をふりかえって
 
 6〜10 で WWDC 2026 の App Intents 系要素をひととおり試してきました。
-全体を通して感じたのは、**「名詞 (Entity) と動詞 (Intent) を丁寧に設計しておくと、新しいサーフェスへの適合がだいぶ安く済む」** ということでした。
+全体を通して、**「名詞 (Entity) と動詞 (Intent) を丁寧に設計しておくと、新しいサーフェスへの適合がだいぶ安く済む」** と感じました。
 `SyncableEntity` は id 設計のおかげでタダで適合できたし (6/N)、Visual Intelligence は `OpenTodoIntent` と `@UnionValue` を再利用するだけで組めた (10/N)。逆に `RelevantEntities` みたいに「API 側に自分のドメインの口が無くて適合できない」ケースもあって (9/N)、全部が嬉しい話ではなかったですが、それも含めて「やってみないと分からない採用可否」を記録できたのは良かったと思っています。
 
 この編は実機 (R) まで通せていないものが多いので、Siri / Visual Intelligence を実際に喋らせて確認できたぶんは、おいおい各記事に追記していく予定です。App Store に出してからは TestFlight で実機に乗る機会が増えて、Siri まわりはいくつか確かめられました (5/N / 9/N)。
@@ -456,12 +455,13 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 - **`xcodebuild test` に `CODE_SIGNING_ALLOWED=NO` を付けない**。ランナーの再署名ごと飛んで AppIntentsTesting が 803 で全滅する。`build` (SSU / メタデータの確認) に付けるのは正しいので、フラグの流用が事故になる
 - **この層で `XCTSkip` を使わない**。skip は名前を何にしても `TEST SUCCEEDED` なので、23 件が 1 件も走らなくても緑に見える。待っても直らない設定ミスは待たずに失敗させる
 - 直した assert に歯があるかは、**通ることではなく落とせることで確かめる**。わざと壊して、狙ったメッセージで落ちるところまで見る
-- WWDC 2026 編全体を通して、Entity / Intent を丁寧に設計しておくほど新サーフェスへの適合が安くなる、というのが一番の実感だった
+- WWDC 2026 編全体を通して、Entity / Intent を丁寧に設計しておくほど新サーフェスへの適合が安くなる、というのがいちばんの実感だった
 
 ## 更新履歴
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-02**: 検証の順番の節に、AppIntentsTesting を解説した iOSDC Japan 2026 のパンフレット記事と、メタデータの仕組みを扱った kntk さんのセッションへのリンクを追加
 - **2026-10-01**: 検証の梯子に「配布ビルドで面に出るところまで見る」段が足りていなかった話 (3/N の `AppIntentsPackage` の件) を追加。「『呼ばれていない』と『呼ばれて 0 件』を見分ける」の節 (query の呼び出しをアプリに記録する仕組み) を新設。AppIntentsTesting で踏んだもの (`default: []` が無いと run が落ちる / リネーム後は `simctl erase` が要る) と、27.2 SDK の `DynamicPropertyPath.get(as:)` を追記
 - **2026-09-11**: Xcode 27 RC で測り直した分を反映。`CODE_SIGNING_ALLOWED=NO` を `test` に流用して「SDK が退行した」と誤診した経緯、`XCTSkip` をやめて失敗にした話、緑になる嘘テスト 5 件を直してわざと壊して確かめた話、watch 側のフィクスチャで分かったことを追加。テスト件数を現状 (通し 302 件 / AppIntentsTesting 23 件) に更新

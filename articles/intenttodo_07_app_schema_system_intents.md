@@ -104,14 +104,14 @@ public var note: String? { todoDescription }
 
 ### 測定で見えていなかった制約: 親の適合は子の適合も要求する
 
-ここが今回いちばんの発見でした。`TodoAppEntity` を適合させると、watchOS ビルドがこう落ちます。
+`TodoAppEntity` を適合させると、watchOS ビルドがこう落ちます。
 
 ```
 error: Property 'list' type does not match required AppSchemaEntity property type 'ListEntity'
 error: Property 'locationTrigger' type does not match required AppSchemaEntity property type 'LocationTriggerEntity'
 ```
 
-**親のスキーマ適合は、子のスキーマ適合を要求します**。つまり「reminder スキーマに適合する」は `list` / `listType` / `locationTrigger` / `locationTriggerEvent` を含む **サブグラフ全体** を適合させるという意味でした。単体の probe ではサブエンティティも全部スキーマ付きで書いていたので、この要求に気付けていません。
+**親のスキーマ適合は、子のスキーマ適合を要求します**。つまり「reminder スキーマに適合する」は `list` / `listType` / `locationTrigger` / `locationTriggerEvent` を含む **サブグラフ全体** を適合させるという意味でした。単体の probe ではサブエンティティも全部スキーマ付きで書いていたので、この要求に気付けませんでした。
 
 そして watchOS では `CategoryAppEntity` がスキーマ無しのフォールバックになっているので、**親も適合できない**。ここから watchOS の話になります。
 
@@ -174,7 +174,7 @@ extension WatchCategoryAppEntity: AssistantSchemaEntity {
 
 そして踏んでいたコンパイルエラー (`Property 'list' type does not match…`) は「スキーマに反することをしている」ではなくて、**watchOS で宣言すべきでない適合を宣言したから検証が走っただけ** でした。正しい直し方は「検証を黙らせる」ではなく「watchOS では宣言しない」です。
 
-このアプリで一番恐れている壊れ方が「ビルドは緑なのにメタデータだけ壊れる」なので、それを自分で作り込む形になっていたのは危なかったなと思います。**アンダースコア始まりのシンボルが動いてしまったときこそ疑う**、というのが教訓でした。
+このアプリでいちばん恐れている壊れ方が「ビルドは緑なのにメタデータだけ壊れる」なので、それを自分で作り込む形になっていたのは危なかったなと思います。**アンダースコア始まりのシンボルが動いてしまったときこそ疑う**、というのが教訓でした。
 
 ### Apple には報告した
 
@@ -255,7 +255,7 @@ IntentTodo にはもともと UI から 1 件ずつ消す `DeleteTodoIntent` (�
 「UI 駆動の単体削除」と「システムが意味的に理解するバルク削除」は、要求するシグネチャが違うので無理に 1 つにしない、という判断です。この配列の形は `.reminders.deleteReminders` の要求 (`entities: [ReminderEntity]`) ともそのまま一致していたので、スキーマの方もマクロ 1 行で済みました。
 
 この 2 つの system intent はどちらも **AppShortcuts には登録していません**。
-本編 5/N で書いたとおり AppShortcuts は 10 件上限なので枠を温存したいのと、system intent は AppShortcut が無くてもシステム側が意味解釈してくれるからです。
+AppShortcuts は 10 件上限なので枠を温存したいのと、system intent は AppShortcut が無くてもシステム側が意味解釈してくれるからです。
 
 ## 検索もシステムの語彙に乗せる: .system.searchInApp
 
@@ -394,7 +394,7 @@ list と section は食い違いうる (別のリストのセクションを指�
 
 なので正しい手順は 2 通りあります。既存の Intent がそのままスキーマの要求を満たすなら、マクロを 1 行足すだけ。満たさないなら、**スキーマに合わせた別の Intent を新しく作って `isAssistantOnly = true` にし**、古い Intent には保存済みのショートカットを担わせ続けます (移行が済んだら古い方を畳む)。3/N に書いたとおり型名を変えるとショートカットが迷子になりますが、パラメータの名前や型を変えても、その値との結び付きが外れます。
 
-IntentTodo が直接作り直せたのは、1.0.0 がまだ公開前だったからです。iOS / visionOS は審査を通って OS の公開待ち、macOS は審査待ちで、保存済みのショートカットを持つ利用者がまだいませんでした。それでも「公開前に確定させるのが一番安い」ので、3 プラットフォームとも取り下げて 1.1.0 として出し直しています。**公開したあとに同じことをしてはいけない**、というのはここで覚えておきたいところです。
+IntentTodo が直接作り直せたのは、1.0.0 がまだ公開前だったからです。iOS / visionOS は審査を通って OS の公開待ち、macOS は審査待ちで、保存済みのショートカットを持つ利用者がまだいませんでした。それでも「公開前に確定させるのがいちばん安い」ので、3 プラットフォームとも取り下げて 1.1.0 として出し直しています。**公開したあとに同じことをしてはいけない**、というのはここで覚えておきたいところです。
 
 ### 開発中はシミュレータの登録も古いまま残る
 
@@ -432,6 +432,7 @@ IntentTodo が直接作り直せたのは、1.0.0 がまだ公開前だったか
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-30**: 校正。AppShortcuts の 10 件上限を「5/N で書いたとおり」としていたが 5/N には書いていなかったので、参照を外した。あわせて表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃えた
 - **2026-10-01**: 「Intent 側のスキーマ適合」の節を新設 (Siri が実行できるのはスキーマ適合したアクション / 要求はビルドでしか出ない / 新たに適合させた 7 本と、作成・更新で出た規則 / セクションと添付をモデルに足した話 / 公開済み Intent は形を変えず `isAssistantOnly` で移行する / `simctl erase`)。system intent を「プロトコル直適合でよい」と書いていたのを訂正し、`.system.open` / `.reminders.deleteReminders` のマクロも付けた形に。`#if` で分けられないのは「頭と本体の分割」だと言い直した。27.2 SDK の `caseDisplayRepresentations` 既定実装に触れた。タイトルからダッシュを外した
 - **2026-09-11**: スキーマ適合 entity の `typeDisplayRepresentation` について、上書きが警告になること・マクロが生成するのは空の表現で、出荷メタデータでは元から空だったことを追記。App Schema の watchOS / tvOS unavailable は Xcode 27 RC でも変わらないことを反映
 - **2026-08-31**: `.reminders.reminder` 本体適合が成立したので「保留」の節を全面的に書き換え。据え置きの理由だった SSU バグは発火条件が違い、本体適合は踏まないことが判明。App Schema の制約を「reminders が watchOS で使えない」から「**23 ドメイン全部が watchOS / tvOS で unavailable**」に拡張 (理由は新しい Siri の提供範囲)。親の適合が子の適合を要求すること、`__appSchemaEntity` を手書きして撤去した経緯、`Transferable` を `typealias` 越しに書くと watchOS スライスで落ちること、Apple への報告 (FB24570185) を追加

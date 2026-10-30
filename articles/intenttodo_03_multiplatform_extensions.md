@@ -166,7 +166,7 @@ Xcode の UI からは見えにくい設定なので、自分は pbxproj を直�
 
 ## 増えるのはコードだけじゃない: `PrivacyInfo.xcprivacy` は executable ごとに要る
 
-App Store に出す準備をしていて気付いたんですが、**プライバシーマニフェストもターゲットの数だけ要ります**。IntentTodo は `UserDefaults` を 3 箇所 (通知やライブアクティビティの失敗記録 / Focus フィルタ / Spotlight の client state) で使っていて、これは required reason API なので申告が要ります。無いとアップロードしたあとに ITMS-91053 の警告メールが来ます。
+App Store に出す準備をしていて気付いたんですが、**プライバシーマニフェストもターゲットの数だけ要ります**。IntentTodo は `UserDefaults` を 3 箇所 (通知や Live Activity の失敗記録 / Focus フィルタ / Spotlight の client state) で使っていて、これは required reason API なので申告が要ります。無いとアップロードしたあとに ITMS-91053 の警告メールが来ます。
 
 Apple のドキュメントは「required reason API を使う executable や dynamic library ごとに、それを含むバンドルが manifest を持つ」と書いているので、アプリ本体に 1 つ置くだけでは足りませんでした。
 
@@ -179,7 +179,7 @@ IntentTodo.app/Watch/IntentTodoWatchApp.app/PrivacyInfo.xcprivacy
 
 理由コードも 1 つでは足りなくて、素の `UserDefaults.standard` は `CA92.1` (アプリ自身からしか見えない情報の読み書き)、App Group の `suiteName:` 付きは `1C8F.1` (同じ App Group のアプリ / Extension からしか見えない情報の読み書き) と使い分けます。この記事でずっと書いている「Extension は別プロセスだけど同じ App Group のストアを見る」という構成が、そのまま申告の形にも出てくる感じでした。
 
-置き場所の判定に使える小技も 1 つあって、**プロジェクトファイルに差分が出たら置き場所を間違えています**。4 ターゲットのフォルダは全部 file-system-synchronized group なので、正しい場所に置けばファイルを足すだけでリソースとして焼かれて、プロジェクトファイルは 0 行しか動きません。自分は最初リポジトリ直下に置いてしまって、そこは同期グループの外なので (当時の pbxproj では) `PBXFileReference` だけが増えて、ターゲットには入っていない、という形になりました。すぐ上の `platformFilter` みたいに「プロジェクトファイルを直接触らないと解決しない」場面と、「触ったなら間違い」の場面が両方あるのがややこしいところです。
+置き場所の判定に使える小技も 1 つあって、**プロジェクトファイルに差分が出たら置き場所を間違えています**。4 ターゲットのフォルダは全部 file-system-synchronized group なので、正しい場所に置けばファイルを足すだけでリソースとしてバンドルに入って、プロジェクトファイルは 0 行しか動きません。自分は最初リポジトリ直下に置いてしまって、そこは同期グループの外なので (当時の pbxproj では)`PBXFileReference` だけが増えて、ターゲットには入っていない、という形になりました。すぐ上の `platformFilter` みたいに「プロジェクトファイルを直接触らないと解決しない」場面と、「触ったなら間違い」の場面が両方あるのがややこしいところです。
 
 ## ターゲット依存と TodoService ファクトリ
 
@@ -228,13 +228,13 @@ struct IntentTodoWatchApp: App {
 
 ただこれ、**一次資料で裏を取れていない伝聞** です。当初はセッション 8017 として書いていたんですが、あとで手元に貯めたアーカイブを漁り直したら書き起こしが見つかりませんでした (出てくるのは別テーマの 8011 だけです)。Group Lab はライブ Q&A なので公式の書き起こしが出ないことも多いみたいです。指針そのものは SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので運用は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。
 
-## もう1つの例外: AppShortcutsProvider もアプリ本体に置く
+## もう 1 つの例外: AppShortcutsProvider もアプリ本体に置く
 
-上の「マイグレーションはアプリ本体に寄せる」と同じ形の話がもう1つ見つかりました。**`AppShortcutsProvider`（App Shortcuts の宣言）も SPM パッケージに置いてはいけません。**
+上の「マイグレーションはアプリ本体に寄せる」と同じ形の話がもう 1 つ見つかりました。**`AppShortcutsProvider` (App Shortcuts の宣言) も SPM パッケージに置いてはいけません。**
 
-`TodoAppIntents` パッケージ内に `AppShortcutsProvider` を置いても、ビルド・実行はエラーなく通ります。ところが Siri / Shortcuts アプリ / Spotlight に **App Shortcut が一切出てきません**。Intent 本体（`actions` / `entities` / `queries`）はパッケージから依存元アプリの統合メタデータへちゃんと集約されるのに、`AppShortcutsProvider.appShortcuts`（メタデータ上は `autoShortcuts`）だけは集約対象から外れる、というのが実体でした。
+`TodoAppIntents` パッケージ内に `AppShortcutsProvider` を置いても、ビルド・実行はエラーなく通ります。ところが Siri / Shortcuts アプリ / Spotlight に **App Shortcut が一切出てきません**。Intent 本体 (`actions` / `entities` / `queries`) はパッケージから依存元アプリの統合メタデータへちゃんと集約されるのに、`AppShortcutsProvider.appShortcuts` (メタデータ上は `autoShortcuts`) だけは集約対象から外れる、というのが実体でした。
 
-ビルド時に生成される `Metadata.appintents`（DerivedData 配下の `extract.actionsdata`、JSON）をパッケージ側とアプリ側で見比べると差が分かります。
+ビルド時に生成される `Metadata.appintents` (DerivedData 配下の `extract.actionsdata`、JSON) をパッケージ側とアプリ側で見比べると差が分かります。
 
 | キー | パッケージ側 | アプリ側 |
 |------|------|------|
@@ -397,7 +397,7 @@ let package = Package(
 )
 ```
 
-ややこしいのが、`AppIntents` の `LocalizedStringResource` (Intent の title など) **だけは例外** で、catalog が無くてもアプリの統合メタデータ経由でアプリ側の catalog に出てくることです。これがあるせいで「パッケージの文言も抽出されている」と誤読しました。実際、自分は Intent のタイトルが xcloc に並んでいるのを見て、抽出はできていると思い込んでいます。
+ややこしいのが、`AppIntents` の `LocalizedStringResource` (Intent の title など) **だけは例外** で、catalog が無くてもアプリの統合メタデータ経由でアプリ側の catalog に出てくることです。これがあるせいで「パッケージの文言も抽出されている」と誤読しました。実際、自分は Intent のタイトルが xcloc に並んでいるのを見て、抽出はできていると思い込んでいました。
 
 **2 つ目は、`Text("...")` が実行時に `Bundle.main` を引くこと**でした。`LocalizedStringKey` の既定の bundle はメインバンドルなので、パッケージ同梱の catalog (`Bundle.module`) には当たりません。つまり 1 つ目を直して catalog に翻訳を入れても、引かれないままです。各パッケージにこういう口を 1 つ置いて、UI コピーは必ずここを通すようにしました。
 
@@ -444,7 +444,7 @@ Info.plist  _CodeSignature  ja.lproj        ← en.lproj が無い
 
 ## Intent のコピーは、リンク先ターゲットの main bundle にしか置けない
 
-View の方を直したので Intent のコピーも同じ形だろうと思っていたら、**まったく別の仕組みでした**。しかもこちらの方がたちが悪くて、日本語を入れるまで気付いていません。
+View の方を直したので Intent のコピーも同じ形だろうと思っていたら、**まったく別の仕組みでした**。しかもこちらの方がたちが悪くて、日本語を入れるまで気付きませんでした。
 
 出発点の読みは「AppIntents のメタデータ経由でアプリ側の catalog に載るのは `title` / `parameterSummary` / `@Parameter(title:)` あたりで、`IntentDialog` と `IntentDescription` だけが抜けている」でした。**この前提が全部間違っていました**。ビルド済みの `extract.actionsdata` から「システムが引こうとしているキー」を全部数えてアプリの catalog と突き合わせたら、抜けていたのは 134 件中 113 件で、**`title` すら抽出されていません**。
 
@@ -531,6 +531,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-02**: 静的リンクの話を聞いた発表 (kntk さんの iOSDC Japan 2026 のセッション) へのリンクを追加
 - **2026-10-01**: `AppIntentsPackage` の節を「宣言しない」に全面的に書き換え。保険として残していた 4 ターゲットの宣言が、TestFlight / App Store で入れたアプリだけ App Intents がまるごと読まれない原因だった (TestFlight のビルド二分で特定し、全廃した build で復帰) ことと、検証の根拠が全部 Xcode からのインストールで取ったものだった反省を追加。プロジェクトファイルを Xcode 27.2 の `project.xcproj` 形式に移したことを反映。UI コピーの 3 回目の転び (パッケージに `en.lproj` が無いと英語でキーが出る) と、`parameterSummary` の自動抽出キーは手で直さない話、手動キーが ja の実機で引かれることの確認を追加。統合メタデータとショートカットの迷子の節を独立した見出しに。タイトルと見出しからダッシュを外した
 - **2026-09-12**: 「静的リンクなら、宣言が無くてもメタデータは集約される」の節を追加し、`AppIntentsPackage` へ切り替えた根拠 1 (件数の一致) の読み方を訂正 (重複が起きなかったのではなく、宣言が `extract.actionsdata` に触っていなかった)。「パッケージを組み替えたら、保存済みのショートカットは迷子になるか」の節を追加 (`persistentIdentifier` の既定値は素の型名で、迷子になるのは型名を変えたときだけ / 上書きは `autoShortcuts` まで追従する / インクリメンタルビルドのメタデータは古いまま混ざる)

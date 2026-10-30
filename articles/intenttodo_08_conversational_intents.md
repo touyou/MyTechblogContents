@@ -14,9 +14,9 @@ published: true
 WWDC 2026 編の 3 本目です (この編の前提は 6/N 冒頭を見てください)。
 
 今回は、Intent を **対話的・予測的に賢くする** ための新 API をまとめて試した話です。
-具体的には `requestConfirmation` / `requestChoice` で perform() を一旦止めてユーザーに聞く話、`IntentDialog(full:supporting:)` で返事を出し分ける話、Interactive Snippet でその場で操作させる話、そして `IntentDonationManager` で寄付する話 (結論が何度か動いて、今は Intent を通らない UI 操作だけ寄付しています) の 4 本立てです。
+具体的には `requestConfirmation` / `requestChoice` で `perform()` を一旦止めてユーザーに聞く話、`IntentDialog(full:supporting:)` で返事を出し分ける話、Interactive Snippet でその場で操作させる話、そして `IntentDonationManager` で寄付する話 (結論が何度か動いて、今は Intent を通らない UI 操作だけ寄付しています) の 4 本立てです。
 
-## perform() を止めてユーザーに聞く
+## `perform()` を止めてユーザーに聞く
 
 これまでの自分の Intent は、`perform()` が走り出したら最後まで一気に実行する、というものばかりでした。
 `perform()` の **途中でユーザーに確認や選択を求めて、答えを待ってから続きを実行する** API は、iOS 26 から iOS 27 にかけて一通り揃っています (セッション 275 / 343)。
@@ -24,7 +24,7 @@ WWDC 2026 編の 3 本目です (この編の前提は 6/N 冒頭を見てくだ
 ### requestConfirmation で破壊的操作を確認する
 
 削除みたいな取り返しのつかない操作は、いきなり実行せず一度確認したいです。
-`requestConfirmation(dialog:)` を呼ぶと perform() がそこで止まって、Siri / Shortcuts 側に確認 UI が出ます。拒否されると **cancellation error が throw されて intent ごと中断** されるので、確認が通った場合だけ削除に進めます。
+`requestConfirmation(dialog:)` を呼ぶと `perform()` がそこで止まって、Siri / Shortcuts 側に確認 UI が出ます。拒否されると **cancellation error が throw されて intent ごと中断** されるので、確認が通った場合だけ削除に進めます。
 
 ```swift
 @MainActor
@@ -56,7 +56,7 @@ LNPerformActionErrorCodeUnsupportedValueType
 
 これは `requestConfirmation` に限らず、次に書く **`requestChoice` でも同じ** です。対話を求める API を `perform()` に置くなら、その Intent を UI の `Button(intent:)` から呼ばない、という線引きが要ります。
 
-ついでに、10/N に書いた AppIntentsTesting の話とも繋がります。**`requestChoice` を使う Intent はテストから run できません**。対話版と非対話版を分けておくと、この制約を回避できてテスト可能性が上がる、という副次効果がありました。呼出元ごとに分けるのは対話のためだったんですが、結果的にテストのためにもなっていた形です。
+ついでに、10/N に書いた AppIntentsTesting の話とも繋がります。**`requestChoice` を使う Intent はテストから run できません**。対話版と非対話版を分けておくと、この制約を回避できてテスト可能性が上がる、という副次効果がありました。
 
 ### requestChoice で選択肢を出す
 
@@ -171,7 +171,7 @@ public struct TodoSnippetIntent: SnippetIntent {
 }
 ```
 
-ここで大事なのが、**ボタンを押すたびにシステムが `SnippetIntent` を再実行する** ことです。
+**ボタンを押すたびに、システムは `SnippetIntent` を再実行します**。
 スニペット内のボタンは、ウィジェットと同じで `Button(intent:)` で App Intent を直接実行します。
 
 ```swift
@@ -236,7 +236,7 @@ donate という動機が上の実測で消えたので、残るのは副次的�
 | エラーが握り潰されない | 無音の失敗は別途 5/N の形で拾っている |
 | `requestConfirmation` / `requestChoice` が使える | 確認あり / なしで Intent を 2 本に分けて回避済み (`DeleteTodoIntent` と `DeleteTodoImmediatelyIntent`、`SnoozeTodoIntent` と `QuickSnoozeTodoIntent`) |
 
-そして決め手が、**別プロセスは載せ替えられない** ことでした。Widget や Control の中では `callAsFunction` は使えないので `Button(intent:)` のまま残ります。載せ替えると「アプリ内は直接呼び出し、それ以外はボタン」で、**呼び出し形が 2 種類に増えます**。1/N に書いた「Intent が唯一の実行経路」という一番おいしいところを、得るものがはっきりしないまま手放す形なので、ここは現状維持が正解だと判断しました。
+そして決め手が、**別プロセスは載せ替えられない** ことでした。Widget や Control の中では `callAsFunction` は使えないので `Button(intent:)` のまま残ります。載せ替えると「アプリ内は直接呼び出し、それ以外はボタン」で、**呼び出し形が 2 種類に増えます**。1/N に書いた「Intent が唯一の実行経路」といういちばんおいしいところを、得るものがはっきりしないまま手放す形なので、ここは現状維持が正解だと判断しました。
 
 ### 第 4 段階: 「全部 `Button(intent:)`」を確かめていなかった
 
@@ -302,7 +302,7 @@ try? await IntentDonationManager.shared.deleteDonations(
 
 「追加で寄付、削除で寄付を消す」をペアで持つ、と前は書いていましたが、**ペアのうち片方だけが自分の責任だった** というのが今の理解です。
 
-まだ残っている宿題は、**Widget / Control / ライブアクティビティ起点が同じように記録されるか** です。シミュレータでは合成タップでコントロールが発火せず (Intent 自体が走らない)、ホームウィジェットの行は公式推奨どおり `Link` なので `Button(intent:)` がありません。ここは実機で見るしかなさそうです。
+まだ残っている宿題は、**Widget / Control / Live Activity 起点が同じように記録されるか** です。シミュレータでは合成タップでコントロールが発火せず (Intent 自体が走らない)、ホームウィジェットの行は公式推奨どおり `Link` なので `Button(intent:)` がありません。ここは実機で見るしかなさそうです。
 
 
 ## 「消して」と「言ってない」を区別する: IntentParameter.valueState
@@ -339,13 +339,13 @@ private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -
 
 受け側の `TodoService.update` は `FieldUpdate<Value>` (`.unchanged` / `.set(Value)`) という enum でフィールドごとに受けるようにして、`valueState` の三値をサービス層の語彙に写しています。title のように **モデル上は必須の列** は `.set(nil)` が来ても据え置きにする、という出し分けが必要だったので、上のとおり generic なヘルパーを optional 用と必須用の 2 種に分けました。
 
-この記事の主題 (perform() を止めて聞き返す) とは道具が違いますが、「ユーザーが『消して』と言ったのか、単に何も言わなかったのか」を区別するという意味では同じ方向の話だと思ったので、ここに追記しています。
+この記事の主題 (`perform()` を止めて聞き返す) とは道具が違いますが、「ユーザーが『消して』と言ったのか、単に何も言わなかったのか」を区別するという意味では同じ方向の話だと思ったので、ここに追記しています。
 
 ### 三状態が要るのは Siri / Shortcuts 側だけ
 
 あとからアプリの編集画面をこの Intent に載せたときに分かったんですが、**三状態が必要なのは Siri / Shortcuts から呼ばれる経路だけ** でした。アプリのフォームは開いた時点で全フィールドの現在値を持っているので、保存では **全部を `.set` で送ります**。部分パッチではなく todo 全体の last-write-wins になりますが、現在値から始めているので触らなかった欄には同じ値が書き戻るだけです。
 
-そのうえで 1 つ決めたのが、**`UpdateTodoIntent` の便宜 init は全フィールドを必須にする** ことでした。デフォルト値を与えると引数を省ける分は楽になるんですが、後から Intent にフィールドが増えたときに **フォームが気づかないうちに古いままになります** (コンパイルは通るので、増えたフィールドだけ保存で消える、という壊れ方をします)。必須にしておけばコンパイルエラーで気付けるので、面倒な方を採りました。「呼出側を楽にする既定値」が、この手の *後から増える* 契約とは相性が悪いんだなと思います。
+そのうえで 1 つ決めたのが、**`UpdateTodoIntent` の便宜 init は全フィールドを必須にする** ことでした。デフォルト値を与えると引数を省ける分は楽になるんですが、後から Intent にフィールドが増えたときに **フォームの方は、気付かないうちに古いままになります** (コンパイルは通るので、増えたフィールドだけ保存で消える、という壊れ方をします)。必須にしておけばコンパイルエラーで気付けるので、面倒な方を採りました。「呼出側を楽にする既定値」が、この手の *後から増える* 契約とは相性が悪いんだなと思います。
 
 全フィールドを毎回送るようにしたことで、副作用も 1 つ出てきました。6/N に書いたとおり場所は「名前 + 座標」に分解して保存しているんですが、**名前だけ差し替えると座標が前の場所のまま残ります**。座標は解決元の名前に属するので、名前が変わったら落とす、同じなら保つ、という分岐を足しました。フォームが毎回全フィールドを送る以上、これが無いと **場所と無関係な保存で座標が消える** (あるいは古い座標が生き残る) ことになります。3 ケースともテストにしました。
 
@@ -430,15 +430,15 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 - **ビルド成立 (B)**: `requestConfirmation` / `requestChoice` / `IntentDialog(full:supporting:)` / `SnippetIntent` / `UndoableIntent` / `CustomAppIntentErrorConvertible` はすべて OK。
 - **単体 (U)**: `valueState` の三状態と `UndoableIntent` の復元は AppIntentsTesting で確認済みです (10/N)。`requestChoice` を使う Intent だけはテストから run できません。
-- **観測 (シミュレータ)**: `Button(intent:)` の実行がシステムの donation に記録されること、UI 側から寄付したフィルタ選択と行の選択が `Button(intent:)` と同じ形で記録されることは実測しました。ただし Widget / Control / ライブアクティビティ起点は測れていません。
+- **観測 (シミュレータ)**: `Button(intent:)` の実行がシステムの donation に記録されること、UI 側から寄付したフィルタ選択と行の選択が `Button(intent:)` と同じ形で記録されることは実測しました。ただし Widget / Control / Live Activity 起点は測れていません。
 - **実機 (R)**: Siri が実際に確認 UI / 選択 UI を出すか、スニペットが応答に出るかは未確認です。端末で触れたら追記します。
 
 ## まとめ
 
-- `requestConfirmation` (yes/no) / `requestChoice` (多分岐) は perform() を止めてユーザーに聞ける。拒否 / `.cancel` は throw で中断される
+- `requestConfirmation` (yes/no) / `requestChoice` (多分岐) は `perform()` を止めてユーザーに聞ける。拒否 / `.cancel` は throw で中断される
 - `requestChoice` の `IntentChoiceOption` は安定 id を持たないので、選択肢生成と逆引きを enum に一元化してタイトル照合 + フォールバックでドリフトを防ぐ
 - `IntentDialog(full:supporting:)` で「音声単独」と「視覚併用」のメッセージを出し分ける
-- `valueState` の三状態が要るのは **Siri / Shortcuts 側だけ**。アプリのフォームは全フィールドを `.set` で送る last-write-wins にする。便宜 init に既定値を与えると、Intent にフィールドが増えたときフォームが気づかないうちに古いままになる
+- `valueState` の三状態が要るのは **Siri / Shortcuts 側だけ**。アプリのフォームは全フィールドを `.set` で送る last-write-wins にする。便宜 init に既定値を与えると、Intent にフィールドが増えたときフォームが気付かないうちに古いままになる
 - Interactive Snippet はボタンを押すたびにシステムが `SnippetIntent` を再 perform するので、perform で毎回最新 entity を取り直す。app プロセス提示なので entity 解決クラッシュは無関係
 - **`perform()` の中で `donate()` を呼ぶのは規約違反**。呼出元を判別する API が無いので Siri / Shortcuts 経由でも走ってしまう
 - そのうえで **アプリ内 `Button(intent:)` の実行はシステムがすでに donation として記録している** (実測)。ただし「UI が全部 `Button(intent:)`」は確かめていない前提で、実際にはフィルタの選択と行の選択が Intent を通っていなかった。**Intent を通らない UI 操作だけを、Binding の setter から寄付する**。`deleteDonations(matching:)` は呼出元に関係なく正しいので残す
@@ -452,6 +452,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-01**: 寄付の節に「第 4 段階」を追加。「UI が全部 `Button(intent:)`」は確かめていない前提で、フィルタの選択と行の選択が Intent を通っていなかったので、その 2 つを Binding の setter から寄付するようにした (明示的な寄付ゼロという結論を撤回)。`ShowTodosIntent` のスニペットと dialog のコードを現行に、`valueState` のコード例を 7/N のリネーム後の名前に更新。タイトルと見出しからダッシュを外した
 - **2026-09-11**: 寄付の節に「第 3 段階: 載せ替え案の方も畳んだ」を追加 (`callAsFunction(donate:)` への載せ替えを不採用にした理由)。`IntentSystemContext` が公開しているメンバを 4 つ (`currentMode` / `isVoiceOnly` / `locale` / `preciseTimestamp`) に数え直した
 - **2026-08-31 (2)**: `valueState` の節に「三状態が要るのは Siri / Shortcuts 側だけ」を追加 (アプリのフォームは全フィールド `.set` の last-write-wins / 便宜 init は全フィールド必須 / 名前だけ変えたときの座標の扱い)

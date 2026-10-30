@@ -31,7 +31,8 @@ published: false
 - **FFMultiplier**: チュートリアルを固定サイズで組んでいたので、縦に収まりませんでした。固定サイズをやめました
 - **チェケラ**: 右の列のぶん横幅が減り、録音パネルの REC / STOP / PLAY の文字が単語の途中で折り返しました。1 行に収まらないときは、文字を外してアイコンを大きくしたボタンに切り替えます
 
-<!-- TODO: チェケラの録音パネルがアイコンだけのボタンに切り替わった状態のスクショ（文字サイズを上げて再現できなければ、この行ごと省く） -->
+![閉じた Duo のチェケラ録音パネル（文字サイズ最大）](/images/iphone_duo_apps/checkitout-record-icons-expanded.jpg =300x)
+*文字サイズを最大にした閉じた Duo。REC / STOP / PLAY が入りきらず、アイコンだけのボタンになる*
 
 どれも Duo 専用の分岐ではなく、「縦が足りないとき」「横が足りないとき」にどう縮むかを決めただけです。なので横向きの iPhone や Split View でも同じように効きます。
 
@@ -112,10 +113,11 @@ role を付けたことで、普通の iPhone でも閉じるボタンの × が
 
 ワークショップで公式アプリを見ていて、一番真似したいと思ったのがこの扱いです。たとえばフィットネスアプリは、半開きのときにコンテンツが折り目をまたがないように並べています。Graphica の作品一覧と Playground のレッスン一覧では、これを真似しました。
 
-![開いた Duo の Playground 学ぶ](/images/iphone_duo_apps/playground-open-learn.jpg)
-*平らに開いたときは、ふつうの 2 列で並べる*
+![平らに開いた Duo の Playground 学ぶ](/images/iphone_duo_apps/playground-learn-flat.jpg)
+*平らに開いたとき。ふつうの 2 列で並べる*
 
-<!-- TODO: 同じ「学ぶ」画面を半開き（book posture）で撮り、上の平らなスクショと並べて比較する -->
+![半開きの Duo の Playground 学ぶ](/images/iphone_duo_apps/playground-learn-book.jpg)
+*半開きのとき。列の間を折り目の幅まで広げ、カードが折り目をまたがないようにする*
 
 ### 折り目の位置は reservedRegions で取る
 
@@ -127,9 +129,8 @@ role を付けたことで、普通の iPhone でも閉じるボタンの × が
 - **分かれ目は割合で持つ**: 折り目の値は、配置の 1 フレーム後にしか届きません。最初は列の幅を絶対値で持っていたら、開閉のたびに左の列だけガタつきました。分かれ目を幅に対する割合で持つと、幅のアニメーションに両方の列が追従し、遅れて届く補正もアニメーションでならせます
 - **はみ出すものは止める**: Playground のトップのガラスのカードは、折り目の手前で止めます
 
-![開いた Duo の Graphica ギャラリー](/images/iphone_duo_apps/graphica-open-gallery.jpg)
-
-<!-- TODO: Graphica のギャラリーも半開きで撮れたら差し替える -->
+![半開きの Duo の Graphica ギャラリー](/images/iphone_duo_apps/graphica-gallery-book.jpg)
+*Graphica のギャラリーも、半開きでは列の間が折り目に来る*
 
 ### バランスより「かぶせない」、posture に寄せすぎない
 
@@ -151,9 +152,14 @@ role を付けたことで、普通の iPhone でも閉じるボタンの × が
 - **チェケラ**: 半開きのときは、パッドを折り目の片側に、ロゴ・リスト・操作をもう片側に置きます。形が変わるときは `matchedGeometryEffect` で部品がつながって動きます
 - **Graphica / Playground**: 作品の詳細と Create、レッスンを左右に分けました
 
-![開いた Duo の Programming Quiz](/images/iphone_duo_apps/quiz-open-question.jpg)
+![半開きの Duo の Programming Quiz](/images/iphone_duo_apps/quiz-book.jpg)
+*Programming Quiz。問題と選択肢が折り目の左右に分かれる*
 
-<!-- TODO: 半開きの状態のスクショ（チェケラ・FFMultiplier・Quiz）を撮って差し込む -->
+![半開きの Duo の FFMultiplier](/images/iphone_duo_apps/ffmultiplier-book.jpg)
+*FFMultiplier。問題と入力のキーを分ける*
+
+![半開きの Duo のチェケラ](/images/iphone_duo_apps/checkitout-book.jpg)
+*チェケラ。パッドとリスト・操作を分ける*
 
 ## ヒンジの角度そのものを体験にする（月屏風）
 

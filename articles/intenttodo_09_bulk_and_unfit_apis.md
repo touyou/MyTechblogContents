@@ -115,7 +115,7 @@ IntentTodo も共有パッケージが Widget Extension にリンクされてい
 
 ちなみに `ExecutionTargets` は `AppIntent` だけでなく **`EntityQuery` 側にも生えています** (公式が "available on both `AppIntent` and `EntityQuery`" と書いています)。IntentTodo の entity 解決は読み取りしかしないので、こちらは未指定のままです。
 
-では **指定しなかったとき** はどうなるかというと、これが「呼出元に応じて固定的に決まる」ではありませんでした。セッション 345 (15:59〜16:55) によると、未指定の Intent は **システムのヒューリスティクス** でプロセスが選ばれます (アプリが起動中ならアプリを優先、そうでなければ Extension を起こす)。SDK 側でも `IntentExecutionTargets` は `.default` を独立したケースに持つ `OptionSet` になっていて、「既定はシステムに委ねる」が型としてそう表現されていました。2/N の実行プロセスの表もこれを前提に書いています。
+では **指定しなかったとき** はどうなるかというと、これが「呼出元に応じて固定的に決まる」ではありませんでした。セッション 345 (15:59〜16:55) によると、未指定の Intent は **システムのヒューリスティクス** でプロセスが選ばれます (アプリが起動中ならアプリを優先、そうでなければ Extension を起こす)。SDK 側でも `IntentExecutionTargets` は `.default` を独立したケースに持つ `OptionSet` になっていて、「既定はシステムに委ねる」が型としても表現されていました。2/N の実行プロセスの表もこれを前提に書いています。
 
 ### workaround を畳む道具にはならなかった (そして workaround の方が消えた)
 
@@ -275,6 +275,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-30**: 校正 (重複した「そう」を削除)
 - **2026-10-01**: `.foreground(.dynamic)` の節を「値を返す Intent にアプリを開かせない」に書き換え。`.foreground` だけの `ShowTodosIntent` が前面に出せない経路で拒否され、dynamic にすると Siri から毎回アプリが開いたので、`.background` + スニペットに分けた経緯と、同じ変更で `[.main]` を外して Siri が失敗した反省を追加 (「当て先が無い」で閉じていた結論を撤回)。`[.main]` の固定数を 20 個に更新し、App Shortcut 登録の読み取り系の例外を反映。27.2 SDK の `@UnionValue` の追加と、27.1 / 27.2 beta でも `AppEntityContext` が変わらないことを追記
 - **2026-09-11**: `AppEntityContext` として使えるのは `.audio(.nowPlaying)` だけだと確定し、`.audio(.workout(activityType:))` の記述を取り下げ (Xcode 27 RC の公開 SDK に無い)。`PredictableIntent` を「寄付がゼロだから使えない」から「前提が崩れたので未着手」に格下げ
 - **2026-08-31**: 撤去済みの FromExtension 分離をめぐる 3 段階の経緯 (畳めるか → 畳めない → そもそも要らなくなった) を 1 節に圧縮。`RelevantEntities` の結論が SDK 更新後も変わっていないことと、SDK の公開シンボル棚卸しの結果を反映

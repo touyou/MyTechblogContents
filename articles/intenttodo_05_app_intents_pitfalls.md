@@ -271,7 +271,7 @@ Button(intent: ToggleTodoCompletionIntent(todo: selectedTodo)) { Text("完了に
 
 2 つめが、**対象の Entity をコマンド側で capture しないこと**。`NavigationModel` を `TodoCommands(navigationModel:)` で渡せば `selectedTodo` は読めるんですが、`Commands` の body が `@Observable` の変更で必ず組み直される保証を自分は確認できていません。組み直されなかったら **古い選択に対して Intent が走る** = 別の Todo が消える、という壊れ方なので、読み違えたときの代償が大きすぎます。選択は `focusedSceneValue(\.selectedTodo, ...)` で publish して `@FocusedValue` で受ける形にしました。これは「フォーカスに依存するメニュー項目」のために用意されている仕組みなので、更新は SwiftUI 側の保証です。シートを出すだけの項目 (⌘N の追加 / ⌘E の編集) はクリック時に `NavigationModel` を読むので、そもそも陳腐化しません。
 
-3 つめが削除で、これは上の落とし穴 4 とまったく同じ形になりました。⌫ を隠しボタンの `keyboardShortcut(.delete, modifiers: [])` で拾う案は駄目で、メニューのキー等価はフィールドエディタより先に評価されるので **検索フィールドの backspace まで奪います**。`List` の `.onDeleteCommand` はレスポンダチェーン経由なので、テキスト入力中は入力側が先に食ってくれます。
+3 つめが削除で、これは後で書く落とし穴 4 とまったく同じ形になりました。⌫ を隠しボタンの `keyboardShortcut(.delete, modifiers: [])` で拾う案は駄目で、メニューのキー等価はフィールドエディタより先に評価されるので **検索フィールドの backspace まで奪います**。`List` の `.onDeleteCommand` はレスポンダチェーン経由なので、テキスト入力中は入力側が先に食ってくれます。
 
 ただし `.onDeleteCommand` はクロージャなので `Button(intent:)` にできません。ここで `TodoService` を直接呼ぶと、スナップショットの保存も undo の登録も donation の後始末も全部写経することになって、「削除」の意味が 2 か所に分かれます。なので **クロージャは「確認を出して」と頼むだけ** にして、実行は `.confirmationDialog(_:item:)` の中の `Button(role: .destructive, intent: DeleteTodoImmediatelyIntent(todo:))` に任せました。⌫ / 行の右クリック / メニューの ⌘⌫ の 3 経路が、1 つの確認と 1 つの Intent に収束します。経路は 3 つに増えたけど Intent は増えていない、というのが気持ちいいところでした。確認を挟んでも詳細を開くより速いし、削除は `UndoableIntent` なので ⌘Z でも戻せます (8/N)。
 
@@ -411,7 +411,7 @@ DeleteTodoIntent failed to execute with error:
 LNPerformActionErrorCodeUnsupportedValueType
 ```
 
-原因は `DeleteTodoIntent.perform()` の中で呼んでいた `requestConfirmation(dialog:)` でした。8/N で書いたとおり、これは `perform()` を止めてユーザーに確認を求める API なんですが、**アプリ内の `Button(intent:)` には確認を提示する面がありません**。要求した時点で失敗して、削除まで到達しない、ということになります。
+原因は `DeleteTodoIntent.perform()` の中で呼んでいた `requestConfirmation(dialog:)` でした。8/N で書くとおり、これは `perform()` を止めてユーザーに確認を求める API なんですが、**アプリ内の `Button(intent:)` には確認を提示する面がありません**。要求した時点で失敗して、削除まで到達しない、ということになります。
 
 厄介なのが、**Siri / Shortcuts / AppIntentsTesting 経由では成功する** ところです。それらには確認を出す面があるので、テストは通ります。壊れているのは UI の削除経路だけ (一覧のスワイプ / iOS 詳細 / visionOS / watchOS の 4 箇所) でした。
 
@@ -588,6 +588,7 @@ IntentTodo は長らく `SiriTipView`（「"やることを追加" と言って�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-30**: 校正。Mac のメニューの節で落とし穴 4 を「上の」と書いていたのを「後で書く」に、8/N への参照を「書いたとおり」から「書くとおり」に訂正
 - **2026-10-02**: タイトルが Zenn の上限 (70 文字) を超えてデプロイできなくなっていたので、`Control Widget` を `Control` に縮めた
 - **2026-10-01**: 落とし穴 6 (Siri は Intent を呼ばずに答えることがある。一覧の依頼に OmniSearch が答えていた / Siri の言語が英語だと日本語のフレーズは使われない) を追加。おまけの `SiriTipView` は移設のあと結局降ろしたので、その理由 3 つに書き換え。Spotlight の節に Cascade 索引への donate を確かめた話を、落とし穴 4 にリストやタグの削除には確認を付けなかった判断と `.confirmationDialog` / `.alert` まわりの罠を追加。`ShowTodosIntent` がスニペットを返すようになったことを反映。タイトルと見出しからダッシュを外した
 - **2026-09-11**: おまけ 4 (Mac のメニューバーからも `Button(intent:)` が走る / 対象は `@FocusedValue` から取る / `.onDeleteCommand` は確認ダイアログ経由で Intent に収束させる) を追加

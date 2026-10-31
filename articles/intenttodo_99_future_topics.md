@@ -85,7 +85,7 @@ WWDC 2026 で `ResultsObserver` / `ModelResultsObserver` という、SwiftUI の
 
 Vision Pro 持ってないので、シミュレータで動いた範囲だけしか言及できない状態。
 実機は相変わらず無いままなんですが、**実機 SDK 向けのビルドだけが落ちる** という別種の問題は 1 つ直しました。`#if canImport(VisualIntelligence)` がシミュレータでは false、実機 SDK では true になってビルドが割れる話で、詳しくは [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) に書いています。シミュレータで動いた範囲しか言えない、の前に「実機向けにビルドは通るのか」という段があったんだなと反省しました。
-visionOS でハマった「`NavigationSplitView.selection` の更新を NavigationModel に統合した」話 (本シリーズ 2/N で軽く触れた話) の続きは、実機検証ができたら書きたいです。
+visionOS でハマった「`NavigationSplitView.selection` の更新を NavigationModel に統合した」話 の続きは、実機検証ができたら書きたいです。
 
 ### C. Spotlight の iOS 反映ラグ
 
@@ -102,7 +102,7 @@ macOS では即座に検索ヒットするのですが、iOS では index 反映
 - Siri からの音声呼び出し
 - フィルタ付き Intent (`ShowTodosIntent`) のパラメータ選択 UI
 
-このうち **操作導線まわりは決着しました**。Mac で触ってもらったら「削除が大変」「ショートカットが 1 つも無い」と言われたので、メニューバー・コンテキストメニュー・⌫ を足して、手で 8 項目確認してもらっています。おかげで **`Button(intent:)` は `Commands` の中 (macOS のメニューバー) でも intent を実行する** が実測で取れました → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
+このうち **操作導線まわりは決着しました**。Mac で触ってもらったら「削除が大変」「ショートカットが 1 つも無い」と言われたので、メニューバー・コンテキストメニュー・⌫ を足して、手で 8 項目確認しました。おかげで **`Button(intent:)` は `Commands` の中 (macOS のメニューバー) でも intent を実行する** が実測で取れました → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 
 残っているのは上のリストのうち通知タップと Siri / Shortcuts.app 側で、こちらは触れていないので検証してから書く予定です。
 

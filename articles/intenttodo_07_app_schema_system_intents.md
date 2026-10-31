@@ -387,7 +387,7 @@ list と section は食い違いうる (別のリストのセクションを指�
 
 ### 公開済みの Intent なら、この作り直しはやってはいけなかった
 
-作成と更新の 2 本は、パラメータのリネームや型の変更で Intent の形を作り直しています。これをやったあとで「リリース済みのアプリだと大丈夫なのか」と聞かれて調べたら、Apple のドキュメントに直接の指示がありました。
+作成と更新の 2 本は、パラメータのリネームや型の変更で Intent の形を作り直しています。これをやったあとで「リリース済みのアプリだと大丈夫なのか」が気になって調べたら、Apple のドキュメントに直接の指示がありました。
 
 > Removing or changing the older intent breaks any shortcuts that use it. As a temporary workaround, configure the new intent so that it's only available to Apple Intelligence by setting `isAssistantOnly` to `true`.
 > (Making actions and content discoverable by Apple Intelligence)
@@ -432,6 +432,7 @@ IntentTodo が直接作り直せたのは、1.0.0 がまだ公開前だったか
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した
 - **2026-10-30**: 校正。AppShortcuts の 10 件上限を「5/N で書いたとおり」としていたが 5/N には書いていなかったので、参照を外した。あわせて表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃えた
 - **2026-10-01**: 「Intent 側のスキーマ適合」の節を新設 (Siri が実行できるのはスキーマ適合したアクション / 要求はビルドでしか出ない / 新たに適合させた 7 本と、作成・更新で出た規則 / セクションと添付をモデルに足した話 / 公開済み Intent は形を変えず `isAssistantOnly` で移行する / `simctl erase`)。system intent を「プロトコル直適合でよい」と書いていたのを訂正し、`.system.open` / `.reminders.deleteReminders` のマクロも付けた形に。`#if` で分けられないのは「頭と本体の分割」だと言い直した。27.2 SDK の `caseDisplayRepresentations` 既定実装に触れた。タイトルからダッシュを外した
 - **2026-09-11**: スキーマ適合 entity の `typeDisplayRepresentation` について、上書きが警告になること・マクロが生成するのは空の表現で、出荷メタデータでは元から空だったことを追記。App Schema の watchOS / tvOS unavailable は Xcode 27 RC でも変わらないことを反映

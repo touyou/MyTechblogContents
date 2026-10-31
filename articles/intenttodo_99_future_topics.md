@@ -102,7 +102,7 @@ macOS では即座に検索ヒットするのですが、iOS では index 反映
 - Siri からの音声呼び出し
 - フィルタ付き Intent (`ShowTodosIntent`) のパラメータ選択 UI
 
-このうち **操作導線まわりは決着しました**。Mac で触ってもらったら「削除が大変」「ショートカットが 1 つも無い」と言われたので、メニューバー・コンテキストメニュー・⌫ を足して、手で 8 項目確認しました。おかげで **`Button(intent:)` は `Commands` の中 (macOS のメニューバー) でも intent を実行する** が実測で取れました → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
+このうち **操作導線まわりは決着しました**。Mac で触ってみたら「削除が大変」「ショートカットが 1 つも無い」のが気になったので、メニューバー・コンテキストメニュー・⌫ を足して、手で 8 項目確認しました。おかげで **`Button(intent:)` は `Commands` の中 (macOS のメニューバー) でも intent を実行する** が実測で取れました → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 
 残っているのは上のリストのうち通知タップと Siri / Shortcuts.app 側で、こちらは触れていないので検証してから書く予定です。
 

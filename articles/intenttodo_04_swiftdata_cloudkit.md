@@ -307,7 +307,7 @@ NSInternalInconsistencyException: No eligible connection available
 
 ## ハマりどころ 8: in-memory のストアも、既定では iCloud と同期する
 
-これもスクリーンショットの仕込みで踏んだものです。撮影や UI テストでは、共有ストアを汚さないように `SharedModelContainer.createInMemoryContainer()` で一時的なストアを作っていました (ハマりどころ 4 のテストの話でも使っているやつです)。撮影を回したあとしばらくして、「同じデータが同期されてきて、Mac の追加画面のスクショに写り込む。消すと同じものがまとめて消える」と言われました。
+これもスクリーンショットの仕込みで踏んだものです。撮影や UI テストでは、共有ストアを汚さないように `SharedModelContainer.createInMemoryContainer()` で一時的なストアを作っていました (ハマりどころ 4 のテストの話でも使っているやつです)。撮影を回したあとしばらくして、同じデータが同期されてきて Mac の追加画面のスクショに写り込み、消すと同じものがまとめて消える、ということに気付きました。
 
 原因は `ModelConfiguration(schema:isStoredInMemoryOnly:)` だけで作っていたことでした。`cloudKitDatabase` の既定は `.automatic` なので、CloudKit の entitlement を持つアプリのプロセスで作ると、**in-memory でもミラーリングが動きます**。その結果、こういうことが起きていました。
 
@@ -383,6 +383,7 @@ public func incompleteCount() throws -> Int {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-01**: ハマりどころ 8 (in-memory のストアも既定では iCloud と同期する。一時ストアには `cloudKitDatabase: .none`) を追加。ハマりどころ 6 に、タグの絞り込みで同じ trap を踏みかけた話 (fetch 越しのスナップショットで読む / ダイジェストにリスト名を入れる) を追加。「silently」「静かな」といった言い回しを具体的な書き方に直した
 - **2026-09-11**: ハマりどころ 7 (`ModelContainer` の init はストアのロードを待たずに返る。初回起動だけ `mainContext` で落ちる / init 直後の fetch は空で返る / バッチ削除は Objective-C 例外で abort) を追加

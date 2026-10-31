@@ -36,11 +36,13 @@ Duo の外側ディスプレイはふつうの iPhone と比べると幅はあ�
 
 どれも Duo 専用の分岐ではなく、「縦が足りないとき」「横が足りないとき」にどう縮むかを決めただけです。なので横向きの iPhone や Split View でも同じように縮んでくれます。
 
-チェケラの録音パネルは、文字付きのボタンが 1 行に入らなければアイコンだけの版に切り替えています。
+チェケラの録音パネルは、文字付きのボタンが 1 行に入らなければアイコンだけの版に切り替えています。`ViewThatFits` は候補を上から順に試して、最初に収まったものを表示するので、同じボタンの並びを 2 つ渡しています。
 
 ```swift
 ViewThatFits(in: .horizontal) {
+    // 1 つ目: 文字付きのボタン。横 1 行に収まればこちらを表示する
     transportButtons
+    // 2 つ目: 収まらないときは、同じボタンを文字なし・大きめにして表示する
     transportButtons
         .labelStyle(.iconOnly)
         .controlSize(.large)
@@ -73,6 +75,7 @@ Intento の詳細画面は、だいたい次のような形です。
 .toolbar {
     ToolbarItem(placement: .primaryAction) {
         Button(intent: ToggleFavoriteIntent(todo: entity)) {
+            // 見た目はアイコンだけでも、Label でタイトルを持たせておく（⋯ に畳まれたときの行になる）
             Label("お気に入り", systemImage: entity.isFavorite ? "star.fill" : "star")
                 .labelStyle(.iconOnly)
         }
@@ -90,9 +93,11 @@ Intento の詳細画面は、だいたい次のような形です。
 
 ```swift
 .toolbar {
+    // role を付けると、グリフと置き場所をシステムが決めてくれる
     ToolbarItem(placement: .cancellationAction) {
         Button("閉じる", systemImage: "xmark", role: .close) { onClose() }
     }
+    // 保存はこのシートの主役なので、畳まれない位置に固定する（iOS 27 から）
     ToolbarItem(placement: .topBarPinnedTrailing) {
         Button("保存", systemImage: "square.and.arrow.down", role: .confirm) { onSave(title) }
     }
@@ -114,9 +119,11 @@ Playground ではこの指定を小さな extension にまとめて、画面ご�
 extension ToolbarContent {
     @MainActor @ToolbarContentBuilder
     func overflowOrder(_ order: ToolbarOverflowOrder) -> some ToolbarContent {
+        // .last = 最後まで右の列に残す、.first = 先に ⋯ へ畳む
         if #available(iOS 27.0, *) {
             visibilityPriority(order == .last ? .high : .low)
         } else {
+            // iOS 26 以前は順序を指定できないので、何もしない
             self
         }
     }
@@ -137,8 +144,9 @@ Intento の追加ボタンは、一番よく押すのでフローティングボ
 
 ```swift
 ScrollView {
-    // ...
+    // 中身には padding を付けない
 }
+// 余白はスクロールに伝える。左右で違う Safe Area の内側にそろえるのはシステムに任せる
 .contentMargins(.horizontal, Self.contentMargin, for: .scrollContent)
 .contentMargins(.bottom, 24, for: .scrollContent)
 ```
@@ -176,11 +184,13 @@ extension GeometryProxy {
     var verticalFold: ClosedRange<CGFloat>? {
         guard #available(iOS 27.1, *) else { return nil }
         return reservedRegions(kind: .division)
+            // 有効で、縦長で、このビューの内側にある折り目だけを拾う
             .first { region in
                 let frame = region.frame
                 return region.isActive && frame.height > frame.width
                     && frame.minX > 0 && frame.maxX < size.width
             }
+            // 折り目の左端〜右端。格子はこの幅をそのまま列の間の隙間にする
             .map { $0.frame.minX...$0.frame.maxX }
     }
 }
@@ -228,6 +238,7 @@ Playground のレッスン画面では、判定はこの 1 か所だけです。
 @Environment(\.horizontalSizeClass) private var sizeClass
 @State private var isWiderThanTall = false
 
+// 左右に分けるのは「regular かつ横長」のときだけ。子ビューにはこの結果だけを渡す
 private var usesSplitPanes: Bool {
     sizeClass == .regular && isWiderThanTall
 }
@@ -252,12 +263,14 @@ FFMultiplier のゲーム画面はこれだけです。
 ```swift
 if #available(iOS 27.1, *) {
     ArrangementView {
-        displaySection
+        displaySection      // 表示する部分（問題の数字）
     } secondary: {
-        keypadSection
+        keypadSection       // 操作する部分（入力のキー）
     }
+    // 左右か上下か、半開きの分かれ目をどこにするかはシステムに任せる
     .arrangementViewStyle(.split)
 } else {
+    // iOS 27.1 より前は従来どおり縦に積む
     VStack(spacing: 0) {
         displaySection
         keypadSection
@@ -295,6 +308,7 @@ if #available(iOS 27.1, *) {
 
 ```swift
 if #available(iOS 27.1, *) {
+    // ヒンジが動くたびに呼ばれる。角度は 0°（閉じた状態）〜180°（平ら）
     content.onHingeChange { _, context in
         // ヒンジの無い端末では nil。そのときはスライダーの値を使う
         hinge.hardwareDegrees = context.hinge?.angle.degrees

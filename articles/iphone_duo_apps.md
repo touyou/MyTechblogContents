@@ -82,7 +82,17 @@ Intento の詳細画面は、だいたい次のような形です。
     }
     // 編集と削除はお気に入りより優先度が低いので、1 つのメニューにまとめる
     ToolbarOverflowMenu {
-        detailMenuContent
+        Button {
+            navigationModel.showAttributeEditor()
+        } label: {
+            Label("編集", systemImage: "pencil")
+        }
+        Divider()
+        Button(role: .destructive) {
+            isConfirmingDelete = true  // 確認ダイアログを出してから消す
+        } label: {
+            Label("削除", systemImage: "trash")
+        }
     }
 }
 ```

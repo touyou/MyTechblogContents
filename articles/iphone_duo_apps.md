@@ -36,6 +36,17 @@ Duo の外側ディスプレイはふつうの iPhone と比べると幅はあ�
 
 どれも Duo 専用の分岐ではなく、「縦が足りないとき」「横が足りないとき」にどう縮むかを決めただけです。なので横向きの iPhone や Split View でも同じように縮んでくれます。
 
+チェケラの録音パネルは、文字付きのボタンが 1 行に入らなければアイコンだけの版に切り替えています。
+
+```swift
+ViewThatFits(in: .horizontal) {
+    transportButtons
+    transportButtons
+        .labelStyle(.iconOnly)
+        .controlSize(.large)
+}
+```
+
 ## ツールバーは右の列に移る前提で整理する
 
 バーが右の縦の列に移ると、項目は上から下へ 1 列に並びます。並べられる数は少なく、入りきらない項目はメニュー（⋯）へ回ります。
@@ -56,9 +67,37 @@ Duo の外側ディスプレイはふつうの iPhone と比べると幅はあ�
 | 優先度を決める | `visibilityPriority` で、最後まで残す項目と先にメニューへ畳まれる項目を決める |
 | 自前の ⋯ をやめる | 自作のメニューを `ToolbarOverflowMenu` に入れる |
 
+Intento の詳細画面は、だいたい次のような形です。
+
+```swift
+.toolbar {
+    ToolbarItem(placement: .primaryAction) {
+        Button(intent: ToggleFavoriteIntent(todo: entity)) {
+            Label("お気に入り", systemImage: entity.isFavorite ? "star.fill" : "star")
+                .labelStyle(.iconOnly)
+        }
+    }
+    // 編集と削除はお気に入りより優先度が低いので、1 つのメニューにまとめる
+    ToolbarOverflowMenu {
+        detailMenuContent
+    }
+}
+```
+
 タイトルが要るのは、**アイコンだけのボタンはメニューに載らない**からです。タイトルの無い項目はメニューの行を描けないので、畳まれる代わりに捨てられます。`accessibilityLabel` を付けていても、捨てられる挙動は変わりません。
 
 チェケラの録音パネルは、もとは自作のシートで、× と SAVE をパネルの中に置いていました。これをシステムのシートに変え、× には `.close`、SAVE には `.confirm` の role とタイトルを付けてシートのツールバーに載せると、外側ディスプレイでは 2 つとも右の列に移ります。シートにしたことで、下にスワイプして閉じることも可能になりました。
+
+```swift
+.toolbar {
+    ToolbarItem(placement: .cancellationAction) {
+        Button("閉じる", systemImage: "xmark", role: .close) { onClose() }
+    }
+    ToolbarItem(placement: .topBarPinnedTrailing) {
+        Button("保存", systemImage: "square.and.arrow.down", role: .confirm) { onSave(title) }
+    }
+}
+```
 
 ![外側ディスプレイのチェケラ録音パネル](/images/iphone_duo_apps/checkitout-closed-record.jpg =300x)
 *× と保存がシートのツールバーに載り、右の列に移る*
@@ -68,6 +107,22 @@ Programming Quiz の閉じるボタンも、画面の左上に自前で置いて
 ![外側ディスプレイの Programming Quiz](/images/iphone_duo_apps/quiz-closed-question.jpg =300x)
 
 優先度はアプリごとに「この画面で何をしに来たか」で決めました。Playground のエディタは Parameters / Export / Favorites の優先度を高くして最後まで右の列に残し、設定と Pro は優先度を下げて先に ⋯ へ畳まれるようにしています。FFMultiplier は、全削除と共有の優先度を下げました。
+
+Playground ではこの指定を小さな extension にまとめて、画面ごとに「最後まで残す／先に畳む」だけを書くようにしています（`visibilityPriority` は iOS 27 から）。
+
+```swift
+extension ToolbarContent {
+    @MainActor @ToolbarContentBuilder
+    func overflowOrder(_ order: ToolbarOverflowOrder) -> some ToolbarContent {
+        if #available(iOS 27.0, *) {
+            visibilityPriority(order == .last ? .high : .low)
+        } else {
+            self
+        }
+    }
+}
+```
+
 
 ![外側ディスプレイの Graphica Playground](/images/iphone_duo_apps/playground-closed-editor.jpg =300x)
 
@@ -79,6 +134,14 @@ Intento の追加ボタンは、一番よく押すのでフローティングボ
 ## 左右で違う Safe Area は contentMargins に任せる
 
 右の列があるので、Duo は Safe Area が左右で違います。中身に `padding` を直接付けていると、片側だけ詰まって見えます。Toreta・Graphica・Playground ではスクロールの外周の余白を `padding` から `contentMargins` に寄せました。余白の量だけ伝えて、Safe Area の内側でそろえるのはシステムに任せる形です。
+
+```swift
+ScrollView {
+    // ...
+}
+.contentMargins(.horizontal, Self.contentMargin, for: .scrollContent)
+.contentMargins(.bottom, 24, for: .scrollContent)
+```
 
 横スクロールの列は扱いを分けました。Toreta のコレクション画面のチップの列は、余白を打ち消して右の列の下まで流しています。見出しやカードは Safe Area の内側に置いたままです。
 
@@ -104,6 +167,24 @@ Intento の追加ボタンは、一番よく押すのでフローティングボ
 `LazyVGrid` や `GridItem` には、折り目を避ける指定がありません。ワークショップで聞いて、ネイティブには無いことを確かめました。なので格子は自前の `Layout` で組んでいます。
 
 折り目の位置は iOS 27.1 の `GeometryProxy.reservedRegions(kind: .division)` で取れます。Duo 以外の端末では nil、避ける必要がない状態では幅 0 で返ってくると教わったので、それを使いました。端末や状態ごとに分岐を書かなくても、格子の計算に共通で挟んでおくだけで、半開きのときだけ折り目の幅が列の間の隙間に入ります。
+
+Playground では `GeometryProxy` に、このビューの中を縦に通る折り目だけを取り出す extension を足しています。
+
+```swift
+extension GeometryProxy {
+    /// このビューの中を縦に通る折り目の左右端。無いときは nil
+    var verticalFold: ClosedRange<CGFloat>? {
+        guard #available(iOS 27.1, *) else { return nil }
+        return reservedRegions(kind: .division)
+            .first { region in
+                let frame = region.frame
+                return region.isActive && frame.height > frame.width
+                    && frame.minX > 0 && frame.maxX < size.width
+            }
+            .map { $0.frame.minX...$0.frame.maxX }
+    }
+}
+```
 
 - **格子は列の間を折り目にする**: Playground のレッスン一覧（学ぶ）と、Graphica の作品一覧（ギャラリー・マイページ）の格子は、開いたときに 2 列にします。折り目があれば、その幅をそのまま列の間の隙間にします
 - **分かれ目は割合で持つ**: 折り目の値は、配置の 1 フレーム後にしか届きません。最初は列の幅を絶対値で持っていたら、開閉のたびに左の列だけガタつきました。分かれ目を幅に対する割合で持つと、幅のアニメーションに両方の列が追従し、遅れて届く補正もアニメーションでならせます
@@ -141,9 +222,48 @@ Intento の追加ボタンは、一番よく押すのでフローティングボ
 - 判定は 1 か所に置き、子には結果（Bool）だけを渡す。子が Size Class を読み直すと、親と条件がずれる
 - 幅で決めてよいのは、格子の列数のような**中身の詰め方**だけ
 
+Playground のレッスン画面では、判定はこの 1 か所だけです。
+
+```swift
+@Environment(\.horizontalSizeClass) private var sizeClass
+@State private var isWiderThanTall = false
+
+private var usesSplitPanes: Bool {
+    sizeClass == .regular && isWiderThanTall
+}
+
+// body の中で、Safe Area を足し戻した寸法で縦横を測る
+.onGeometryChange(for: Bool.self) { proxy in
+    let size = proxy.size
+    let insets = proxy.safeAreaInsets
+    return size.width + insets.leading + insets.trailing
+        > size.height + insets.top + insets.bottom
+} action: { isWiderThanTall = $0 }
+```
+
+Safe Area を足し戻しているのは、キーボードが出て高さが縮んだだけで、入力中に左右分割へ切り替わらないようにするためです。
+
 ### 分ける画面は ArrangementView に任せる
 
 2 つに分けたい画面は、iOS 27.1 の `ArrangementView`（split スタイル）に任せました。`ArrangementView` は横長なら左右、縦なら上下に分け、半開きの Duo では分かれ目を折り目に合わせてくれる仕様です。なので自分は、それに従って表示する部分と操作する部分にコンテンツを割り振っただけです。
+
+FFMultiplier のゲーム画面はこれだけです。
+
+```swift
+if #available(iOS 27.1, *) {
+    ArrangementView {
+        displaySection
+    } secondary: {
+        keypadSection
+    }
+    .arrangementViewStyle(.split)
+} else {
+    VStack(spacing: 0) {
+        displaySection
+        keypadSection
+    }
+}
+```
 
 - **Programming Quiz**: 問題と選択肢を分けました。「次の問題へ」ボタンの場所は常に確保して、答えても高さが変わらないようにしています
 - **FFMultiplier**: ゲーム画面の数字の表示と、入力のボタンを分けました
@@ -170,6 +290,17 @@ Intento の追加ボタンは、一番よく押すのでフローティングボ
 ![折り目の余白の比較](/images/iphone_duo_apps/tsukibyobu-gap-compare.jpg)
 
 描画は角度で変わらない層と角度で変わる層に分けました。ヒンジを動かしている間は軽い層だけを描き直すので、1 フレーム約 2ms で済んでいます。Duo 以外の端末ではスライダーで角度を変えます。
+
+角度は iOS 27.1 の `onHingeChange` で受け取っています。
+
+```swift
+if #available(iOS 27.1, *) {
+    content.onHingeChange { _, context in
+        // ヒンジの無い端末では nil。そのときはスライダーの値を使う
+        hinge.hardwareDegrees = context.hinge?.angle.degrees
+    }
+}
+```
 
 ### 縦向きの Duo には床を敷いて映り込ませる
 

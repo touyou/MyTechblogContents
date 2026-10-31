@@ -259,7 +259,7 @@ struct IntentTodoWatchApp: App {
 
 最初は「パッケージ側に 1 つだけ宣言して、**メインアプリターゲットには `includedPackages` 付きの `AppIntentsPackage` を重複宣言しない**」という運用でした。2026-04 に Shortcuts のルーティングが壊れた (`LNContextErrorDomain Code=2001`) ときに、重複宣言が原因だと判断したのが根拠です。ただ当時のコミットを読み返すと、Intent routing の修正・`@Dependency` パターンへの統一・重複 Intent の削除をまとめてやった大きな PR の中の出来事で、重複宣言だけを切り出して再現させた記録は残っていませんでした。デバッグログで疑っていたのも「Widget Extension が `TodoAppIntents` を import しているせいで、Shortcuts が Widget Extension を intent の提供元に選んだ」の方で、これは 2/N で書いた実行プロセス選択の話です。「壊れた記憶」をそのまま制約として書き残すと、何と何を切り分けたのかが後から辿れなくなるんだなというのが 1 つ目の反省でした。
 
-次に、公式手順どおりの形に切り替えました。セッション 244 (23:29〜24:00) やセッション 275 (25:50)、それに公式ドキュメントを読むと、アプリ / Widget / Live Activity / watchOS App の **利用側にも `includedPackages` 付きで宣言する** 形が標準手順として紹介されているからです。根拠は 3 つで、クリーンビルドでメタデータの件数が宣言前と完全一致したこと、AppIntentsTesting が全部グリーンだったこと、Shortcuts アプリでアクション一覧とパラメータ表示を目で見たこと、でした。10/N に書く検証の梯子 (AppIntentsTesting → Shortcuts → Spotlight → Siri) の下 3 段をそのまま当てた形です。
+次に、公式手順どおりの形に切り替えました。セッション 244 (23:29〜24:00) やセッション 275 (25:50)、それに公式ドキュメントを読むと、アプリ / Widget / Live Activity / watchOS App の **利用側にも `includedPackages` 付きで宣言する** 形が標準手順として紹介されているからです。根拠は 3 つで、クリーンビルドでメタデータの件数が宣言前と完全一致したこと、AppIntentsTesting が全部グリーンだったこと、Shortcuts アプリでアクション一覧とパラメータ表示を目で見たこと、でした。10/N に書く検証の梯子 (AppIntentsTesting → Shortcuts → Spotlight → Siri) の下 2 段に、メタデータの件数を足した形です。
 
 ### 静的リンクなら、宣言が無くてもメタデータは集約される
 
@@ -531,6 +531,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-10-31**: 検証の根拠を「梯子の下 3 段」と書いていたが、実際に通したのは AppIntentsTesting と Shortcuts の 2 段 (+ メタデータの件数) だったので訂正
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-02**: 静的リンクの話を聞いた発表 (kntk さんの iOSDC Japan 2026 のセッション) へのリンクを追加
 - **2026-10-01**: `AppIntentsPackage` の節を「宣言しない」に全面的に書き換え。保険として残していた 4 ターゲットの宣言が、TestFlight / App Store で入れたアプリだけ App Intents がまるごと読まれない原因だった (TestFlight のビルド二分で特定し、全廃した build で復帰) ことと、検証の根拠が全部 Xcode からのインストールで取ったものだった反省を追加。プロジェクトファイルを Xcode 27.2 の `project.xcproj` 形式に移したことを反映。UI コピーの 3 回目の転び (パッケージに `en.lproj` が無いと英語でキーが出る) と、`parameterSummary` の自動抽出キーは手で直さない話、手動キーが ja の実機で引かれることの確認を追加。統合メタデータとショートカットの迷子の節を独立した見出しに。タイトルと見出しからダッシュを外した

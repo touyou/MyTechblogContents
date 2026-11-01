@@ -232,7 +232,7 @@ func testAddThenShowChain() async throws {
 - クリーンビルド直後の最初のテストだけ "bundle is not present" で落ちます。`setUp` で軽いクエリが通るまで待つようにしました
 - **スキーマに適合した Intent の非 optional なコレクションに `default: []` が無いと、`makeIntent(title:)` だけの run が落ちます** (`The App Intent requested value for parameter 'tags'`)。ビルドもメタデータも正しいのに落ちるので、最初は何が悪いのか分かりませんでした (7/N)
 - **パラメータをリネームした直後は、シミュレータの登録が古いまま残ることがあります**。クリーンビルドしても旧パラメータを要求され続けて、アンインストールでも戻らず、`xcrun simctl erase` で直りました (7/N)
-- Xcode 27.2 beta の SDK で、型消去された値を読む `DynamicPropertyPath` に `async` な `get(as:)` が足されました。`@DeferredProperty` (6/N) のように非同期に解決される属性は、今の同期の読み出しでは手が無いので候補にはなりそうですが、`anyAppleOS 27.2` からなのでまだ書けず、本当にそういう用途の API なのかも確かめていません
+- `@DeferredProperty` (6/N) のように非同期に解決される属性は、`DynamicPropertyPath` の同期の読み出しでは手がありません。Xcode 27.2 beta の SDK には `async` な `get(as:)` が足されていて候補になりそうだったんですが、**正式版の 27.2 には入りませんでした**。beta で見つけた API は、正式版で残っているか見るまで当てにしない方がよさそうです
 
 ### 画面が publish している entity も検証できる (ただし watchOS を除く)
 
@@ -461,6 +461,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-01**: 27.2 beta で見つけた `DynamicPropertyPath.get(as:)` が正式版に入らなかったことを反映
 - **2026-10-31**: 「梯子の下 3 段」を 2 段に、洗い出した嘘テストの件数を 5 件から 6 件に訂正 (箇条書きと一致させた)
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-02**: 検証の順番の節に、AppIntentsTesting を解説した iOSDC Japan 2026 のパンフレット記事と、メタデータの仕組みを扱った kntk さんのセッションへのリンクを追加

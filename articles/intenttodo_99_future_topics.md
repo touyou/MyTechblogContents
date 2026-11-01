@@ -168,7 +168,7 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 
 SSU training のバグで `PlaceDescriptor` を `String` に退避していた件は、**発火条件が分かったので entity 側だけ戻しました**。バグが出るのは App Shortcut に登録した Intent の `@Parameter` だけで、entity の `@Property` は SSU の variable にならないので踏みません。
 
-残っているのは `AddTodoIntent.location` の `@Parameter` だけで、これは SDK 待ちです。Feedback (FB24548956) は出しました。バグが `PlaceDescriptor` 固有でもベータ特有でもない (リリース版の Xcode 26.6 でも再現する = iOS 26 世代から出荷されている) ことまで確かめてあります。詳細は [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)。
+残っているのは `AddTodoIntent.location` の `@Parameter` だけです。Feedback (FB24548956) を出していたバグは **Xcode 27.2 で直りました** が、効くのはビルドする側の Xcode なので、配布ビルドの Xcode Cloud が 27.2 に上がって TestFlight で確かめるまでは戻さずにいます。バグが `PlaceDescriptor` 固有でもベータ特有でもない (リリース版の Xcode 26.6 でも再現する = iOS 26 世代から出荷されていた) ことまで確かめてあります。詳細は [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)。
 
 ### K. `UndoableIntent` で取り消しに対応する (採用済み)
 
@@ -295,9 +295,16 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 測り方の小技も 2 つ書いておくと、swiftinterface は版ごとに宣言の並び順が動くので、素直に `diff` すると 2.3 MB 出て読めません。**行をソートしてから差分を取る** と並び替えが消えて、27.1 → 27.2 は 16,797 行に対して 33 行になりました。もう 1 つ、`xcodebuild -version` は PATH の先にある Xcode を答えるので、`/Applications/Xcode.app` の中身を取り違えかけました。SDK を比べるときは、アプリのバンドルのパスを直接指した方が確実です。
 
-ただし 27.2 は **宣言を比べただけで、ビルドはしていません**。SSU バグ (FB24548956) と watch のメタデータ上書き (FB24570185) が直ったか、スキーマの要求が変わっていないかは、ビルドしないと分からないので未確認のままです。
+この時点の 27.2 は **beta の宣言を比べただけで、ビルドはしていませんでした**。正式版の Xcode 27.2 (27B52) が出てから、ビルドまで含めて測り直しています。
 
-「変わっていない」の確認に丸一日使うのはもったいなく感じるんですが、**制約の側が古びていないかを定期的に測るのは、新機能を追うのと同じくらい大事** だと思っています (6 つ目の型のとおりです)。今回は変わっていなかった代わりに、自分の測り方の方が壊れていました。
+- **SSU バグ (FB24548956) は直った**。ただし配布ビルドの Xcode Cloud がまだ 27.1 なので、`@Parameter` の退避は継続 → [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
+- **watch のメタデータ上書き (FB24570185) は直っていない**。型名を揃えると今も後勝ちで schema が落ちる → [7/N](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents)
+- スキーマ適合の要求は変化なし。iOS / watchOS / macOS / visionOS のクリーンビルドは警告ゼロ
+- **beta で増えていた 3 つのうち、`get(as:)` は正式版に入らなかった** → [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)。別に、受け取り専用の `ValueRepresentation(importing:)` が `anyAppleOS 27.2` で足されていた (beta には無かったように見える)
+
+測る前に旧版の Xcode を消してしまっていたので、正式版はソート差分が取れず、宣言ごとに grep で確かめています。**次の版が出るまで旧版の swiftinterface を退避しておく** のも、測り方の小技に足しておきます。
+
+「変わっていない」の確認に丸一日使うのはもったいなく感じるんですが、**制約の側が古びていないかを定期的に測るのは、新機能を追うのと同じくらい大事** だと思っています (6 つ目の型のとおりです)。RC のときは制約が変わっていなかった代わりに、自分の測り方の方が壊れていました。
 
 ### 実機検証待ちに積み増しになったもの
 
@@ -332,7 +339,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 - 本編は「実機で詰まった話」、WWDC 2026 編は「採用していいか / 設計判断」と、軸を分けて書いている
 - 最初に並べた将来トピックのうち、Visual Intelligence / Interactive Snippets / Intent Modes の一部は WWDC 2026 編で片付いた
 - FoundationModels (端末内 LLM) と `SpotlightSearchTool` は「やらないと決めた」もの。主眼から外れるため。寄付は一度「要らない」で閉じたが、前提が崩れて Intent を通らない UI 操作のぶんだけ入れた
-- 残りの検証待ち (watchOS / visionOS の実機 / Spotlight ラグ / macOS の通知と Siri / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の `@Parameter` 復帰) は、手元の機材と検証コストで順番が決まる予定。SDK 側の対応待ちは 2 件 (FB24548956 / FB24570185) で、**Xcode 27 RC でもどちらも未解消** (27.2 beta はビルドでは未確認)
+- 残りの検証待ち (watchOS / visionOS の実機 / Spotlight ラグ / macOS の通知と Siri / `.foreground(.deferred)` / `LoadResult<T>` / `PlaceDescriptor` の `@Parameter` 復帰) は、手元の機材と検証コストで順番が決まる予定。SDK 側の対応待ちだった 2 件のうち、FB24548956 は **Xcode 27.2 で直った** (配布ビルドが 27.2 になってから戻す)。FB24570185 は 27.2 でも未解消
 - 書き溜めた「制約」をセッション書き起こしと全数突き合わせたら、断定しすぎ・理由付けの誤り・出典の取り違えがまとめて出てきた。「セッションで説明されていたこと / API ドキュメントで知ったこと / 自分がビルドして観測したこと」、それに「そこから推論したこと」は、後から見分けられる形で分けて書いておかないと直せなくなる
 - 確かめるときは **正常なはずの側も一緒に並べる**。片側だけ見ていると、同じ現象がぜんぜん違う原因に見える
 - **「できない理由」は結論だけ持ち越さない**。SDK が上がったら理由の方を測り直す
@@ -345,6 +352,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-01**: Xcode 27.2 正式版での測り直しを RC の節に追加 (FB24548956 は直った・配布ビルドが 27.1 なので退避は継続 / FB24570185 は未解消 / `get(as:)` は正式版に無く `ValueRepresentation(importing:)` が増えた)。トピック J とまとめの SDK 待ちを更新
 - **2026-10-01**: **「8 つ目の型: 手元で正しいことを、配った先でも正しいと思う」** を追加 (`AppIntentsPackage` が配布したアプリでだけ App Intents を読ませなくしていた件と、`ShowTodosIntent` で 2 つの変数を一緒に動かした件)。`.foreground(.dynamic)` と寄付の項を、それぞれの結論の撤回に合わせて書き直し。`AppIntentsPackage` の断定取り下げの項を「今は 1 つも宣言しない」に更新。Xcode 27.1 / 27.2 beta の SDK 棚卸しを RC の節に追加。実機検証待ちを現状に更新 (フレーズ / 未指定の読み取り系 / Intent のスキーマ適合 / 配った先の登録 / 読み上げの日本語)。external storage を採用済みに。タイトルからダッシュを外した
 - **2026-09-12**: `AppIntentsPackage` の断定取り下げの項に、静的リンクなら宣言が無くてもメタデータは集約される (宣言は中身に触っていなかった) ことを追記。「7 つ目の型」に、インクリメンタルビルドの古いメタデータで `persistentIdentifier` の追従を読み違えかけた件を追加
 - **2026-09-11**: Xcode 27 RC で制約を全部測り直した節を追加 (結論は「beta 6 から何も動いていない」)。**「7 つ目の型: 測る道具の方を疑わない」** を追加。トピック D (macOS native) の操作導線を決着済みに更新。別プロセス起点の donation を、載せ替えの判断とは独立した問いとして書き直し

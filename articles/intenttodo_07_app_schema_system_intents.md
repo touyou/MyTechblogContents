@@ -62,7 +62,7 @@ public enum TodoListType: String {
 - スキーママクロが `typeDisplayRepresentation` を生成してくれるので、自分で書いていた分は **削除** しました。スキーマ適合の entity で上書きすると `typeDisplayRepresentation should not be overridden in an AppEntity that conforms to a schema` という警告になります。ただし「マクロがスキーマ由来の名前を入れてくれる」わけではなくて、生成されるのは **空の `TypeDisplayRepresentation`** でした。出荷メタデータを覗いてみると、スキーマに適合している entity は **上書きの有無にかかわらず `displayTypeName` が空** です。この上書きは、システムが読むメタデータには最初から載っていなくて、プロセス内で Swift として読んだときだけ値が変わる、という状態だったわけです。外しても挙動は変わりませんでした。
 - 6/N で書いたプロパティマクロのときと同じで、スキーママクロも非 `Hashable` な backing を生やすので、`Hashable` の自動合成が壊れます。`==` / `hash(into:)` を明示実装で補いました。
 - listType には `standard` という **case の存在が要求されます** (`conforming to 'reminders.listType' requires enum case 'standard'`)。`.reminders.list` の `type` も非 optional 必須です。
-- Xcode 27.2 beta の SDK で、スキーマ適合の enum には `caseDisplayRepresentations` の既定実装が入りました。ただし `anyAppleOS 27.2` からなので、deployment target が 27.0 の IntentTodo では宣言を外せません。何の文言が入るのかもまだ確かめていません。
+- Xcode 27.2 の SDK で、スキーマ適合の enum には `caseDisplayRepresentations` の既定実装が入りました。ただし `anyAppleOS 27.2` からなので、deployment target が 27.0 の IntentTodo では宣言を外せません。何の文言が入るのかもまだ確かめていません。
 
 「スキーマが要求するプロパティを満たしつつ、独自プロパティは足してもいい」という塩梅は、思っていたより柔らかくて好印象でした。
 
@@ -178,7 +178,7 @@ extension WatchCategoryAppEntity: AssistantSchemaEntity {
 
 ### Apple には報告した
 
-「App Schema が watchOS に無い」ことと「埋め込んだ watch アプリのメタデータが iOS アプリにマージされる」ことが組み合わさると、**共有 entity を持つアプリは型を二重定義しない限りどのスキーマにも適合できません**。しかもエラーも出ずに壊れます。ここは Feedback (FB24570185) を出しました。
+「App Schema が watchOS に無い」ことと「埋め込んだ watch アプリのメタデータが iOS アプリにマージされる」ことが組み合わさると、**共有 entity を持つアプリは型を二重定義しない限りどのスキーマにも適合できません**。しかもエラーも出ずに壊れます。ここは Feedback (FB24570185) を出しました。正式版の Xcode 27.2 でも、型名を揃えた probe で今も schema が黙って落ちたので、watch 側に別の型名を付ける回避はまだ外せません。
 
 裏付けとして、WWDC 2026 の App Intents 系公式サンプル 4 本 (Calendar / Messaging / Music / Photo) は **どれも watch ターゲットを持っていません**。この組み合わせは公式サンプルで一度も踏まれていない、ということみたいです。ドキュメントにも複数ターゲットのメタデータマージについての記述はありませんでした。
 
@@ -432,6 +432,7 @@ IntentTodo が直接作り直せたのは、1.0.0 がまだ公開前だったか
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-01**: Xcode 27.2 正式版で確かめた結果を反映 (FB24570185 は 27.2 でも再現 / `caseDisplayRepresentations` の既定実装は正式版にも入っている)
 - **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した
 - **2026-10-30**: 校正。AppShortcuts の 10 件上限を「5/N で書いたとおり」としていたが 5/N には書いていなかったので、参照を外した。あわせて表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃えた
 - **2026-10-01**: 「Intent 側のスキーマ適合」の節を新設 (Siri が実行できるのはスキーマ適合したアクション / 要求はビルドでしか出ない / 新たに適合させた 7 本と、作成・更新で出た規則 / セクションと添付をモデルに足した話 / 公開済み Intent は形を変えず `isAssistantOnly` で移行する / `simctl erase`)。system intent を「プロトコル直適合でよい」と書いていたのを訂正し、`.system.open` / `.reminders.deleteReminders` のマクロも付けた形に。`#if` で分けられないのは「頭と本体の分割」だと言い直した。27.2 SDK の `caseDisplayRepresentations` 既定実装に触れた。タイトルからダッシュを外した

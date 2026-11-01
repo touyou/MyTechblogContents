@@ -446,7 +446,7 @@ Info.plist  _CodeSignature  ja.lproj        ← en.lproj が無い
 
 View の方を直したので Intent のコピーも同じ形だろうと思っていたら、**まったく別の仕組みでした**。しかもこちらの方がたちが悪くて、日本語を入れるまで気付きませんでした。
 
-出発点の読みは「AppIntents のメタデータ経由でアプリ側の catalog に載るのは `title` / `parameterSummary` / `@Parameter(title:)` あたりで、`IntentDialog` と `IntentDescription` だけが抜けている」でした。**この前提が全部間違っていました**。ビルド済みの `extract.actionsdata` から「システムが引こうとしているキー」を全部数えてアプリの catalog と突き合わせたら、抜けていたのは 134 件中 113 件で、**`title` すら抽出されていません**。
+出発点の読みは「AppIntents のメタデータ経由でアプリ側の catalog に載るのは `title` / `parameterSummary` / `@Parameter(title:)` あたりで、`IntentDialog` と `IntentDescription` だけが抜けている」でした。**この前提が全部間違っていました**。ビルド済みの `extract.actionsdata` から「システムが引こうとしているキー」を全部数えてアプリの catalog と突き合わせたら、100 件以上が抜けていて、**`title` すら抽出されていません**。
 
 catalog に載っていた 22 キーの出どころを辿ると 2 つしかなくて、アプリターゲットに直書きした `shortTitle` 8 件と、`parameterSummary` 14 件でした。`title` が 7 件あるように見えていたのは、**同じ文字列を `shortTitle` にも書いていた偶然** です。`TodoAppIntents` は `defaultLocalization` も resources も持たないので、**このモジュールでは文字列抽出そのものが走っていませんでした**。
 
@@ -531,6 +531,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-01**: 抜けていたキー数「134 件中 113 件」が開発記録の表と合わなかったので、「100 件以上」に改めた
 - **2026-10-31**: 検証の根拠を「梯子の下 3 段」と書いていたが、実際に通したのは AppIntentsTesting と Shortcuts の 2 段 (+ メタデータの件数) だったので訂正
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-02**: 静的リンクの話を聞いた発表 (kntk さんの iOSDC Japan 2026 のセッション) へのリンクを追加

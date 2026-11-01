@@ -244,7 +244,7 @@ extension TodoAppEntity: Transferable {
 
 ### SDK バグで `@Parameter` だけ `String` に退避している
 
-ここまでさんざん「ネイティブ型で受ける」と書いておいて何なんですが、**`AddTodoIntent.location` だけは今も場所名の `String`** です。SDK のバグを踏むからで、Feedback (FB24548956) を出して待っている状態です。
+ここまでさんざん「ネイティブ型で受ける」と書いておいて何なんですが、**`AddTodoIntent.location` だけは今も場所名の `String`** です。SDK のバグを踏むからで、Feedback (FB24548956) を出していました。Xcode 27.2 で直りましたが、まだ戻していない理由は後で書きます。
 
 きっかけは Xcode Cloud が赤くなったことでした。ログを追うと `AppIntentsSSUTraining` (Siri の音声理解の学習アセットを作るフェーズ) が、`PlaceDescriptor` のパラメータを SSU の variable に変換するときに、裏側のシステム Entity 型名 `GeoToolbox.PlaceDescriptorEntity` をそのまま variable 名に使っていて、**ドットが入っているせいで検証器の正規表現 `^[a-zA-Z_][a-zA-Z_$0-9]*$` に落ちて** いました。生成器と検証器が食い違っている形なので、アプリ側でできることは「その型を使わない」しかありません。
 
@@ -268,7 +268,7 @@ SSU の variable は「**App Shortcut が参照する Intent のパラメータ�
 
 さらに、**リリース版の Xcode 26.6 でも再現しました**。`PlaceDescriptor` の `_SystemIntentValue` 適合は iOS 26 からなので、ベータ特有の話ではなく **26 世代から出荷されているバグ** だった、ということになります。Apple の公式サンプル (UnicornChat) に 13 行足すだけでも同じエラーが出ます。
 
-そして **Xcode 27 が RC (27A266a) になっても直っていません**。`@Parameter` を `PlaceDescriptor?` に戻した probe を、共有 DerivedData を汚さない別ディレクトリでクリーンビルドし直したんですが、同じ regex のエラーが出て `nlu.appintents` の生成数は 0 のままでした。その後の Xcode 27.1 は App Intents の SDK 差分がゼロで、27.2 beta は SDK の宣言を比べただけでビルドはしていないので、直ったかどうかは未確認です。退避はもうしばらく続きそうです。
+そして **Xcode 27 が RC (27A266a) になっても直っていません**。`@Parameter` を `PlaceDescriptor?` に戻した probe を、共有 DerivedData を汚さない別ディレクトリでクリーンビルドし直したんですが、同じ regex のエラーが出て `nlu.appintents` の生成数は 0 のままでした。その後の Xcode 27.1 は App Intents の SDK 差分がゼロでした。
 
 #### 分かったので entity 側は戻した
 
@@ -279,6 +279,12 @@ SSU の variable は「**App Shortcut が参照する Intent のパラメータ�
 ただこの判断、根拠はローカルビルドで `nlu/` が生成されることだけでした。3/N に書いた `AppIntentsPackage` の件と同じで、配布したアプリが読まれるかは見ていなかったことになります。その後の TestFlight 版で、App Shortcut のフレーズが Siri から通るところまでは確かめられました。
 
 不幸中の幸いだったのが、この節で書いた「入力と公開はシステム型、保存は primitive、境界で変換」の二重表現にしていたおかげで、**退避も復帰も触ったのが境界だけで済んだ** ことでした。モデルは最初から `locationName` + 緯度経度の primitive なので、`@Model` もマイグレーションも一切触っていません。ネイティブ型を保存層まで通す設計にしていたら、SDK バグひとつで永続化スキーマまで巻き添えになっていたはずです。
+
+#### Xcode 27.2 で直った、けどまだ戻さない
+
+正式版の Xcode 27.2 (27B52) で、同じ probe (`@Parameter var place: PlaceDescriptor?` の Intent を App Shortcut に登録) をクリーンビルドし直したら、**直っていました**。SSU の variable 名が `GeoToolbox_PlaceDescriptorEntity` とアンダースコア区切りになっていて、regex のエラーも出ず、en / ja の `nlu.appintents` もちゃんと生成されます。
+
+それでも `AddTodoIntent.location` はまだ `String` のままにしています。このバグは OS ではなく **ビルド時の SSU training** で起きるので、効くのは「配布するバイナリをどの Xcode でビルドしたか」です。IntentTodo の配布ビルドは Xcode Cloud の Latest Release で回していて、それがまだ 27.1 を指しています。手元が 27.2 で緑でも、配ったアプリは学習アセットを失う側にいるわけです。3/N の `AppIntentsPackage` の件で「手元で正しいことと、配った先で読まれることは別」を踏んでいるので、Xcode Cloud が 27.2 に上がって、TestFlight 版で Siri のフレーズが通るのを見てから戻すつもりです。probe も別の Intent で試しただけで、`AddTodoIntent.location` 自体を戻した形はまだ試していません。
 
 #### 判定は必ずクリーンビルドで
 
@@ -595,7 +601,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 - **ビルド成立 (型レベル)**: 全部 OK。`Duration` / `PersonNameComponents` / `PlaceDescriptor` / 各プロパティマクロ / `SyncableEntity` / 後から足した `TransientAppEntity` はコンパイルが通り、API 採用としては妥当だと判断しています。
 - **単体 (SPM / テスト)**: Entity 変換・`ValueRepresentation` の export・`parameterSummary` の生成物は、AppIntentsTesting と出荷メタデータの検査で確認済みです (10/N)。
 - **実機 (Siri が実際にネイティブ型ピッカーを出すか、deferred property がいつ呼ばれるか)**: 未確認です。ここは端末での手動確認が要るので、できたら追記します。
-- `PlaceDescriptor` は entity の `@Property` としては戻していますが、`AddTodoIntent` の `@Parameter` だけは SDK バグ (FB24548956) の回避で `String` のままです。
+- `PlaceDescriptor` は entity の `@Property` としては戻していますが、`AddTodoIntent` の `@Parameter` だけは SDK バグ (FB24548956) の回避で `String` のままです。バグは Xcode 27.2 で直ったので、配布ビルドが 27.2 になって TestFlight で確かめたら戻します。
 
 なので本記事は「これらの API を採用して設計に組み込むと、こういう構造になる」という設計判断の記録として読んでもらえればと思います。
 
@@ -604,7 +610,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 - WWDC 2026 編は `xcode27` ブランチでの検証 (現在は `main` にマージ済み) で、本編より浅い (主に型レベル + 単体)。実機可否より「採用していいか / 設計をどう変えるか」を書く
 - `@Property` でモデル属性をシステムに公開し、関連 (`category`) も Entity として持てる
 - `Duration` / `PersonNameComponents` / `PlaceDescriptor` はネイティブ型で入力・公開し、保存は CloudKit 互換 primitive に落とす「二重表現」にする。境界で変換する
-- SSU training のバグが出るのは **App Shortcut に登録した Intent の `@Parameter` に system value 型を置いたとき** だけ。entity の `@Property` は SSU の variable にならないので踏まないし、system value 型を持つ自前 entity をパラメータにしても踏まない。`PlaceDescriptor` 固有でもベータ特有でもなく、iOS 26 世代から出荷されている (FB24548956)
+- SSU training のバグが出るのは **App Shortcut に登録した Intent の `@Parameter` に system value 型を置いたとき** だけ。entity の `@Property` は SSU の variable にならないので踏まないし、system value 型を持つ自前 entity をパラメータにしても踏まない。`PlaceDescriptor` 固有でもベータ特有でもなく、iOS 26 世代から出荷されていた (FB24548956)。**Xcode 27.2 で直った** が、ビルド時のバグなので配布ビルドの Xcode が 27.2 になるまでは回避を外さない
 - **`parameterSummary` は Shortcuts 編集画面の allowlist**。載せ忘れたパラメータはエラーも出ずに編集できなくなる (ビルドは緑、Siri から名指しすれば動く)。裏返しに「Shortcuts からは書けるのにアプリからは書けない」属性も生まれる。書き込み経路は Intent・`parameterSummary`・サービス層・UI の 4 つが揃って初めて通る
 - `@ComputedProperty` (同期・軽い導出) と `@DeferredProperty` (非同期・要求時フェッチ、Spotlight 非 index) を使い分ける。どちらも出自は iOS 26 で、2026 の新 API ではない。**スナップショットに値を持たない** という性質は、スキーマ要求名の付け替え (entity だけ) や、削除済みオブジェクトを読まないための逃がしにも使える
 - Entity は `@Dependency` を使えないので、共有コンテナは `TodoEntityStore` に置いて参照する。`AppDependencyManager` とは別々の登録なので、アプリと Widget Extension の両プロセスで登録する
@@ -620,6 +626,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-01**: SSU バグ (FB24548956) が Xcode 27.2 正式版で直ったことを反映し、「Xcode 27.2 で直った、けどまだ戻さない」の節を追加 (配布ビルドの Xcode Cloud がまだ 27.1 なので `@Parameter` の退避は継続)
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-01**: SSU バグの発火条件の表に「system value 型を持つ自前 entity をパラメータにしても踏まない」を追加。Xcode 27.1 / 27.2 beta の状況、entity 側を戻した根拠がローカルビルドだけだった点を追記。`AddTodoIntent` のコード例が簡略版であること (7/N でパラメータ名が変わった) を明記し、`parameterSummary` のコード例を現行の名前に更新。`@ComputedProperty` の別名は Intent のパラメータには使えないことを追記。更新履歴の並びを日付順に直した
 - **2026-09-12**: 「判定は必ずクリーンビルドで」に、ログだけでなく `Metadata.appintents` もインクリメンタルビルドで古い値が混ざる件を 1 文追加 (3/N へリンク)

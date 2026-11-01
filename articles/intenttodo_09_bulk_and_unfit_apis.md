@@ -158,7 +158,7 @@ public func perform() async throws -> some IntentResult & ReturnsValue<[TodoOrCa
 
 `EntityQuery` は単一の Entity 型に縛られますが、`@UnionValue` を返り値に使うと **複数種類を 1 つの結果リストに混ぜられる** のが利点です。これは次回 (10/N) の Visual Intelligence でもそのまま再利用できました。
 
-なお Xcode 27.2 beta の SDK で、`@UnionValue` の型を受ける `@Parameter` に `default:` 付きのイニシャライザと、コレクション用の `size:` が足されました。ただし `anyAppleOS 27.2` からなので、deployment target が 27.0 の IntentTodo ではまだ書けません。戻り値に使っている今の形には影響しません。
+なお Xcode 27.2 の SDK で、`@UnionValue` の型を受ける `@Parameter` に `default:` 付きのイニシャライザと、コレクション用の `size:` が足されました。ただし `anyAppleOS 27.2` からなので、deployment target が 27.0 の IntentTodo ではまだ書けません。戻り値に使っている今の形には影響しません。
 
 セッションを洗い直したら、`@UnionValue` マクロ自体は WWDC 2024 (iOS 18、セッション 10134) からあるものでした。この記事が扱っているセッション 345 は、`typeDisplayRepresentation` / `caseDisplayRepresentations` の実装要件を提示した回です。実際ハマったのがその細目の方だったので、体感として新機能に見えていたんだと思います。なお上に書いた `public enum` の `: Sendable` 明示は 345 で言われていることではなくて、**自分がビルドを通そうとして踏んだだけ** の話なので、そこは分けて読んでもらえればと思います。
 
@@ -169,7 +169,7 @@ public func perform() async throws -> some IntentResult & ReturnsValue<[TodoOrCa
 
 `updateEntities(_:for:)` の第二引数は `AppEntityContext` で、これが **ドメイン固有のファクトリしか持っていない** ことが分かりました。
 
-- **公開 SDK で使える context は `.audio(.nowPlaying)` 1 つだけ** です。`AppEntityContext` のファクトリは `.audio(_:)` の 1 つ、`AudioContext` の値も `.nowPlaying` の 1 つでした (iOS / macOS / watchOS / visionOS の swiftinterface を Xcode 27 RC で確認)。その後の Xcode 27.1 と 27.2 beta の SDK でも同じでした。ここは以前 `.audio(.workout(activityType:))` も並べて書いていたんですが、手元の公開 SDK のどこにも見つけられなかったので取り下げます。framework overlay (HealthKit など) が独自の domain context を足す余地はある、という形です。
+- **公開 SDK で使える context は `.audio(.nowPlaying)` 1 つだけ** です。`AppEntityContext` のファクトリは `.audio(_:)` の 1 つ、`AudioContext` の値も `.nowPlaying` の 1 つでした (iOS / macOS / watchOS / visionOS の swiftinterface を Xcode 27 RC で確認)。その後の Xcode 27.1 と 27.2 の SDK でも同じでした。ここは以前 `.audio(.workout(activityType:))` も並べて書いていたんですが、手元の公開 SDK のどこにも見つけられなかったので取り下げます。framework overlay (HealthKit など) が独自の domain context を足す余地はある、という形です。
 - いずれにせよ **汎用 / reminders / todo 向けの context 値が存在しない** んです。
 - かといって `.audio(.nowPlaying)` で Todo を寄付するのは意味的に間違っています (Todo が再生中メディア扱いになる)。
 
@@ -274,6 +274,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-01**: Xcode 27.2 の記述を beta から正式版の確認結果に更新 (`@UnionValue` の `default:` / `size:` と、`AppEntityContext` が `.audio(_:)` だけなのは正式版でも同じ)
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-01**: `.foreground(.dynamic)` の節を「値を返す Intent にアプリを開かせない」に書き換え。`.foreground` だけの `ShowTodosIntent` が前面に出せない経路で拒否され、dynamic にすると Siri から毎回アプリが開いたので、`.background` + スニペットに分けた経緯と、同じ変更で `[.main]` を外して Siri が失敗した反省を追加 (「当て先が無い」で閉じていた結論を撤回)。`[.main]` の固定数を 20 個に更新し、App Shortcut 登録の読み取り系の例外を反映。27.2 SDK の `@UnionValue` の追加と、27.1 / 27.2 beta でも `AppEntityContext` が変わらないことを追記
 - **2026-09-11**: `AppEntityContext` として使えるのは `.audio(.nowPlaying)` だけだと確定し、`.audio(.workout(activityType:))` の記述を取り下げ (Xcode 27 RC の公開 SDK に無い)。`PredictableIntent` を「寄付がゼロだから使えない」から「前提が崩れたので未着手」に格下げ

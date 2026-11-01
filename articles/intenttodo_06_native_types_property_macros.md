@@ -282,7 +282,7 @@ SSU の variable は「**App Shortcut が参照する Intent のパラメータ�
 
 #### Xcode 27.2 で直った、けどまだ戻さない
 
-正式版の Xcode 27.2 (27B52) で、同じ probe (`@Parameter var place: PlaceDescriptor?` の Intent を App Shortcut に登録) をクリーンビルドし直したら、**直っていました**。SSU の variable 名が `GeoToolbox_PlaceDescriptorEntity` とアンダースコア区切りになっていて、regex のエラーも出ず、en / ja の `nlu.appintents` もちゃんと生成されます。
+正式版の Xcode 27.2 (27B52) で、同じ形の probe (`@Parameter var place: PlaceDescriptor?` の Intent を App Shortcut に登録) をクリーンビルドし直したら、**直っていました**。SSU の variable 名が `GeoToolbox_PlaceDescriptorEntity` とアンダースコア区切りになっていて、regex のエラーも出ず、en / ja の `nlu.appintents` もちゃんと生成されます。
 
 それでも `AddTodoIntent.location` はまだ `String` のままにしています。このバグは OS ではなく **ビルド時の SSU training** で起きるので、効くのは「配布するバイナリをどの Xcode でビルドしたか」です。IntentTodo の配布ビルドは Xcode Cloud の Latest Release で回していて、それがまだ 27.1 を指しています。手元が 27.2 で緑でも、配ったアプリは学習アセットを失う側にいるわけです。3/N の `AppIntentsPackage` の件で「手元で正しいことと、配った先で読まれることは別」を踏んでいるので、Xcode Cloud が 27.2 に上がって、TestFlight 版で Siri のフレーズが通るのを見てから戻すつもりです。probe も別の Intent で試しただけで、`AddTodoIntent.location` 自体を戻した形はまだ試していません。
 

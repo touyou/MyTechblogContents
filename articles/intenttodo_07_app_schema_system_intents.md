@@ -178,7 +178,7 @@ extension WatchCategoryAppEntity: AssistantSchemaEntity {
 
 ### Apple には報告した
 
-「App Schema が watchOS に無い」ことと「埋め込んだ watch アプリのメタデータが iOS アプリにマージされる」ことが組み合わさると、**共有 entity を持つアプリは型を二重定義しない限りどのスキーマにも適合できません**。しかもエラーも出ずに壊れます。ここは Feedback (FB24570185) を出しました。正式版の Xcode 27.2 でも、型名を揃えた probe で同じように後勝ちで schema が落ちたので、watch 側に別の型名を付ける回避はまだ外せません。
+「App Schema が watchOS に無い」ことと「埋め込んだ watch アプリのメタデータが iOS アプリにマージされる」ことが組み合わさると、**共有 entity を持つアプリは型を二重定義しない限りどのスキーマにも適合できません**。しかもエラーも出ずに壊れます。ここは Feedback (FB24570185) を出しました。正式版の Xcode 27.2 でも、型名を揃えた probe で今も schema が黙って落ちたので、watch 側に別の型名を付ける回避はまだ外せません。
 
 裏付けとして、WWDC 2026 の App Intents 系公式サンプル 4 本 (Calendar / Messaging / Music / Photo) は **どれも watch ターゲットを持っていません**。この組み合わせは公式サンプルで一度も踏まれていない、ということみたいです。ドキュメントにも複数ターゲットのメタデータマージについての記述はありませんでした。
 

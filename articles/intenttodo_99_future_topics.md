@@ -168,7 +168,7 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 
 SSU training のバグで `PlaceDescriptor` を `String` に退避していた件は、**発火条件が分かったので entity 側だけ戻しました**。バグが出るのは App Shortcut に登録した Intent の `@Parameter` だけで、entity の `@Property` は SSU の variable にならないので踏みません。
 
-残っているのは `AddTodoIntent.location` の `@Parameter` だけです。Feedback (FB24548956) を出していたバグは **Xcode 27.2 で直りました** が、効くのはビルドする側の Xcode なので、配布ビルドの Xcode Cloud が 27.2 に上がって TestFlight で確かめるまでは戻さずにいます。バグが `PlaceDescriptor` 固有でもベータ特有でもない (リリース版の Xcode 26.6 でも再現する = iOS 26 世代から出荷されている) ことまで確かめてあります。詳細は [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)。
+残っているのは `AddTodoIntent.location` の `@Parameter` だけです。Feedback (FB24548956) を出していたバグは **Xcode 27.2 で直りました** が、効くのはビルドする側の Xcode なので、配布ビルドの Xcode Cloud が 27.2 に上がって TestFlight で確かめるまでは戻さずにいます。バグが `PlaceDescriptor` 固有でもベータ特有でもない (リリース版の Xcode 26.6 でも再現する = iOS 26 世代から出荷されていた) ことまで確かめてあります。詳細は [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)。
 
 ### K. `UndoableIntent` で取り消しに対応する (採用済み)
 
@@ -300,11 +300,11 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 - **SSU バグ (FB24548956) は直った**。ただし配布ビルドの Xcode Cloud がまだ 27.1 なので、`@Parameter` の退避は継続 → [6/N](https://zenn.dev/touyou/articles/intenttodo_06_native_types_property_macros)
 - **watch のメタデータ上書き (FB24570185) は直っていない**。型名を揃えると今も後勝ちで schema が落ちる → [7/N](https://zenn.dev/touyou/articles/intenttodo_07_app_schema_system_intents)
 - スキーマ適合の要求は変化なし。iOS / watchOS / macOS / visionOS のクリーンビルドは警告ゼロ
-- **beta で増えていた 3 つのうち、`get(as:)` は正式版に入らなかった** → [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)。代わりに、受け取り専用の `ValueRepresentation(importing:)` が `anyAppleOS 27.2` で足されていた
+- **beta で増えていた 3 つのうち、`get(as:)` は正式版に入らなかった** → [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)。別に、受け取り専用の `ValueRepresentation(importing:)` が `anyAppleOS 27.2` で足されていた (beta には無かったように見える)
 
 測る前に旧版の Xcode を消してしまっていたので、正式版はソート差分が取れず、宣言ごとに grep で確かめています。**次の版が出るまで旧版の swiftinterface を退避しておく** のも、測り方の小技に足しておきます。
 
-「変わっていない」の確認に丸一日使うのはもったいなく感じるんですが、**制約の側が古びていないかを定期的に測るのは、新機能を追うのと同じくらい大事** だと思っています (6 つ目の型のとおりです)。今回は変わっていなかった代わりに、自分の測り方の方が壊れていました。
+「変わっていない」の確認に丸一日使うのはもったいなく感じるんですが、**制約の側が古びていないかを定期的に測るのは、新機能を追うのと同じくらい大事** だと思っています (6 つ目の型のとおりです)。RC のときは制約が変わっていなかった代わりに、自分の測り方の方が壊れていました。
 
 ### 実機検証待ちに積み増しになったもの
 

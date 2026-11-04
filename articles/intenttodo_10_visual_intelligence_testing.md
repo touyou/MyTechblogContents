@@ -252,11 +252,45 @@ watch アプリの UI から前提データを作る道もあるんですが、w
 
 大事なのが 1 段目の位置づけで、AppIntentsTesting は "entirely in isolation. No Siri involved." と言われています。セッション 295 (24:46) も "test your intents manually with Siri" と、**Siri は手動** だと明示していました。実際 AppIntentsTesting の公開 API を全文検索しても shortcut / phrase / siri / utterance に相当するシンボルは 0 件で、型名で intent を引く設計上フレーズ経路は通りません。
 
-なので「App Shortcut のフレーズが Siri で正しくルーティングされるか」だけは、どうやっても手で確認するしかない領域ということになります。自動化できないのが自分の怠慢に思えていたんですが、**Apple の想定どおりの分担** だと分かってちょっと安心しました。
+なので 27.2 までは「App Shortcut のフレーズが Siri で正しくルーティングされるか」は、どうやっても手で確認するしかない領域でした。自動化できないのが自分の怠慢に思えていたんですが、**Apple の想定どおりの分担** だと分かってちょっと安心しました。この梯子には 27.3 beta で 2 段が加わったので、次の節に書きます。
 
 AppIntentsTesting の具体的な使い方は、iOSDC Japan 2026 の [パンフレット記事](https://fortee.jp/iosdc-japan-2026/proposal/79048b55-a6ca-4d73-8cde-ec9858e48957) でも解説されているので、あわせて読んでみてください。それと、梯子のどの段で何かがおかしいと分かったときに見にいくのは結局メタデータになるので、仕組みの方は [kntk さんのセッション](https://speakerdeck.com/kntkymt/app-intents-no-o-sasaeru-gijutsu) を見ておくとどこを読めばいいのかが分かりやすくなると思います。
 
 ただ、この梯子は **全段が Xcode からインストールしたアプリの上に立っていました**。3/N に書いたとおり、IntentTodo は `AppIntentsPackage` の宣言のせいで、TestFlight / App Store から入れたアプリだけ App Intents がまるごと読まれない、という状態で出荷していました。宣言を入れたときはこの梯子の下 2 段を登って「害は無い」と判断していて、どの段でも見えなかったわけです。今は梯子のいちばん上に **配布ビルド (TestFlight) で面に出るところまで見る** を足して、App Intents の構成を変えたらそこまで確かめるようにしています。
+
+### 27.3 beta で梯子に 2 段増えた: sirimetadataanalyzer と SiriEvaluations
+
+:::message
+ここは **Xcode 27.3 beta (27C5020n) の Siri AI Developer Preview** で測った内容です。ルールセットは `2027.0-draft` とあり、beta の間に変わる前提で読んでください。
+:::
+
+27.3 beta の Siri AI Developer Preview で、上の梯子の「Siri は手動」という前提も変わりました。増えたのは次の 2 段です。
+
+| 段 | 道具 | 実機 | 見るもの |
+|---|---|---|---|
+| 0.5 (ビルドの直後) | `xcrun sirimetadataanalyzer <App>.app` | **要らない** | ツール (7/N) の有無、Intent・パラメータ・entity プロパティの説明文の抜け、システムのスキーマとの酷似など |
+| 4 の自動化 | [SiriEvaluations](https://developer.apple.com/documentation/sirievaluations) | **必須** | 発話を本物の Siri に流して、呼ばれた Intent と引数 (`Calls`)、見つかった entity (`Finds`)、読まれた app skill (`Loads`)、画面上の entity (`OnScreen`)、返答の文言 (`SiriResponse`) を判定する |
+
+analyzer は 27.3 beta のツールチェーンにだけ入っています。IntentTodo を変更なしで回したときの結果がこれです。
+
+- 指摘は「34 本ある Intent がどれもツールではない」(SMA109) の 1 件だけ
+- **ツールが 0 本だと、ほかのルールは対象が無いので何も見ない**。指摘 0 件は「質が良い」ではなく「まだ測れていない」という意味でした
+- `--language ja` で回すと、英語専用のルール (SMA105 / 204 / 205 / 603) が飛ばされる
+
+12 本をツールにして回し直すと、中身のある指摘が出てきました。パラメータの説明文の抜け (SMA202) は直しました。ほかに、Intent の説明文にある「todo」を **書きかけの目印の `TODO`** と読み違える SMA206 が 10 件、「タグの名前を変える」がファイル名の変更のスキーマに似ているという SMA701 が 1 件出ました。この 2 つは誤検知なので、`--config` の抑止リストに理由を添えて入れています。entity プロパティの説明文の抜け (SMA203) が 13 件残っているのは、最小 OS が 27.0 だと `description:` がビルドエラーになるためです (7/N)。
+
+SiriEvaluations は Evaluations と Swift Testing の上で動き、Intent と entity は AppIntentsTesting と同じ `IntentDefinitions` で引きます。
+
+```swift
+UserTurn("In IntentTodo, mark Buy milk as done") {
+    Calls { toggleTodoCompletionIntent }
+    Calls(.disallowed) { deleteTodosIntent }
+}
+```
+
+ただし実行は **iPhone / iPad / Vision Pro の実機だけ** (Simulator と Mac Catalyst は不可) です。テストターゲットの最小 OS は 27.3 以上にする必要があって、`@Suite` に `@available` を付ける回避は Swift Testing に弾かれます。最小 OS が 27.0 の IntentTodo では、既存の UI テストバンドルに同居させられず、別のターゲットが要ります。Siri の返答は毎回揺れるので、何度か回して通過率で見る前提の道具です。IntentTodo ではまだシナリオを回せていません。
+
+フレーズのルーティングまで SiriEvaluations で見られるかは、ドキュメントの例がどれも自由な言い方の発話なので、まだ分かりません。
 
 ## 「呼ばれていない」と「呼ばれて 0 件」を見分ける
 
@@ -449,7 +483,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 - AppIntentsTesting は実経路で intent を動かせるが **UI テストバンドル必須**、かつテストランナーとアプリの署名チームを揃える必要がある。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
 - `entity.id` は `NSNull` で、id は `entity.identifier.instanceIdentifier` から取る。`makeIntent(x: nil)` は `.unset` になるので明示クリアは型付き nil で渡す。`requestChoice` を使う Intent は run できない
 - `viewAnnotations()` で画面が publish している entity を検証できる。ただし **watchOS では `run()` が code 4025 で落ちて前提データを作れない** ので、そこは手動確認に回す。`forSelectionType:` も「`List` なら効く」ではなく「**selection のある `List` なら効く**」
-- Apple が示す検証の順番は **AppIntentsTesting → Shortcuts → Spotlight → Siri**。フレーズのルーティングだけは手動確認の領域と割り切ってよい。ただし全段が Xcode からのインストールの上に立っているので、構成を変えたら **配布ビルドで面に出るところ** まで見る
+- Apple が示す検証の順番は **AppIntentsTesting → Shortcuts → Spotlight → Siri**。27.2 までは、フレーズのルーティングは手動確認の領域と割り切ってよかった。**27.3 beta で、実機の要らない `sirimetadataanalyzer` と、Siri の段を自動化する SiriEvaluations (実機のみ) が加わった**。analyzer はツールが 0 本だと SMA109 しか見ないし、ja では英語専用のルールが飛ぶ。ただし全段が Xcode からのインストールの上に立っているので、構成を変えたら **配布ビルドで面に出るところ** まで見る
 - query が呼ばれた記録をアプリに残すと、「呼ばれていない」と「呼ばれて 0 件」を見分けられる。行が出れば証拠になるが、行が無いことは証拠にならない
 - テスト基盤も壊れる。**スキームに入っていないテストは「落ちる」のではなく「存在しないことになる」**。並列実行は速いとは限らず、共有ストアはテスト間で積み上がる。ローカライズを入れるとテストの前提が知らないうちに変わる
 - **`xcodebuild test` に `CODE_SIGNING_ALLOWED=NO` を付けない**。ランナーの再署名ごと飛んで AppIntentsTesting が 803 で全滅する。`build` (SSU / メタデータの確認) に付けるのは正しいので、フラグの流用が事故になる
@@ -460,6 +494,8 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 ## 更新履歴
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
+
+- **2026-11-04**: Xcode 27.3 beta の Siri AI Developer Preview を反映。「27.3 beta で梯子に 2 段増えた: sirimetadataanalyzer と SiriEvaluations」の節を新設 (IntentTodo の基準値 / ツール化した後の指摘と誤検知の抑止 / SiriEvaluations の実機要件とテストターゲットの最小 OS)
 
 - **2026-11-01**: 27.2 beta で見つけた `DynamicPropertyPath.get(as:)` が正式版に入らなかったことを反映
 - **2026-10-31**: 「梯子の下 3 段」を 2 段に、洗い出した嘘テストの件数を 5 件から 6 件に訂正 (箇条書きと一致させた)

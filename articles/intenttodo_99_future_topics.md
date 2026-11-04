@@ -324,6 +324,18 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 このうち **Control まわりは実機で決着しました**。dialog も snippet も Control では提示されないこと、Control のフィードバックは `perform()` 完了時の自動リロードによるコントロール自身の再描画であること、それにともなって `.controlWidgetStatus(_:)` を撤去したことまで含めて [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書き直しました。実機の Control Center を触って初めて分かったことが多くて、シミュレータのビルドが通ったところで満足していると、到達不能なコードにも気付けないんだなというのは反省点です。
 
+### 27.3 beta (Siri AI Developer Preview) で増えた検証待ち
+
+:::message
+**Xcode 27.3 beta (27C5020n)** 時点の内容です。IntentTodo の対応は `feature/siri-ai-tools` ブランチに置いていて、27.3 の正式版と Xcode Cloud の更新を待ってからマージします。
+:::
+
+- **実機で Siri からツールを呼ぶ**: アプリを起動していないときに、読み取り系のツールがどのプロセスで走るか。Live Activity が出ている間に、アプリ名を言わずに呼べるか。app skill (`tidy-lists-and-tags`) が読まれるか。プレビューが動くのは開発署名のビルドと TestFlight の内部テスターだけです
+- **SiriEvaluations のテストターゲット**: 最小 OS 27.3 の別のターゲットを、正式版の Xcode で足す (10/N)
+- **entity プロパティの `description:`**: 27.3 より前の OS にも出す entity では使えない。最小 OS を 27.3 に上げるときにまとめて付ける (analyzer の SMA203 が 13 件残っている)
+- **ドキュメントがまだ無い 27.3 の追加 API**: SDK の差分で見つけたもの。`SnippetRepresentableEntity` (entity ごとの標準スニペット)、`DeleteIntent` の `Target` (`EntityCollection` / `Set` を受け取れる)、`EntityCollectionSearchCriteria`、新しいスキーマドメイン `.video`。27.2 から 27.3 の AppIntents の差分は追加だけで、削除や変更はありませんでした
+- **SDK の見分け方**: `ToolIntent` は 27.2 の SDK に無い。27.2 と 27.3 beta はどちらも Swift 6.4.2 なので `#if compiler` では見分けられず、見分けられたのは `#if canImport(AppIntents, _version: 301.2)` だけでした。今回はこれを使わず、ブランチを分けています
+
 ## 公式サンプル 4 本と突き合わせた
 
 セッションの書き起こしを洗い直したのに続いて、WWDC 2026 の App Intents 系 **公式サンプル 4 本** (CometCal / UnicornChat / CosmoTunes / PhotosDomainExample) を落としてきて、自分の実装と 1 項目ずつ突き合わせるということもやりました。
@@ -350,6 +362,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 ## 更新履歴
 
+- **2026-11-04**: 「27.3 beta (Siri AI Developer Preview) で増えた検証待ち」の節を追加
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
 - **2026-11-01**: Xcode 27.2 正式版での測り直しを RC の節に追加 (FB24548956 は直った・配布ビルドが 27.1 なので退避は継続 / FB24570185 は未解消 / `get(as:)` は正式版に無く `ValueRepresentation(importing:)` が増えた)。トピック J とまとめの SDK 待ちを更新

@@ -252,7 +252,7 @@ watch アプリの UI から前提データを作る道もあるんですが、w
 
 大事なのが 1 段目の位置づけで、AppIntentsTesting は "entirely in isolation. No Siri involved." と言われています。セッション 295 (24:46) も "test your intents manually with Siri" と、**Siri は手動** だと明示していました。実際 AppIntentsTesting の公開 API を全文検索しても shortcut / phrase / siri / utterance に相当するシンボルは 0 件で、型名で intent を引く設計上フレーズ経路は通りません。
 
-なので 27.2 までは「App Shortcut のフレーズが Siri で正しくルーティングされるか」は、どうやっても手で確認するしかない領域でした。自動化できないのが自分の怠慢に思えていたんですが、**Apple の想定どおりの分担** だと分かってちょっと安心しました。この梯子には 27.3 beta で 2 段が加わったので、次の節に書きます。
+なので「App Shortcut のフレーズが Siri で正しくルーティングされるか」は、どうやっても手で確認するしかない領域です。自動化できないのが自分の怠慢に思えていたんですが、**Apple の想定どおりの分担** だと分かってちょっと安心しました。27.3 beta では、Siri の段そのものを自動化する道具が加わりました (フレーズまで見られるかはまだ分かりません)。次の節に書きます。
 
 AppIntentsTesting の具体的な使い方は、iOSDC Japan 2026 の [パンフレット記事](https://fortee.jp/iosdc-japan-2026/proposal/79048b55-a6ca-4d73-8cde-ec9858e48957) でも解説されているので、あわせて読んでみてください。それと、梯子のどの段で何かがおかしいと分かったときに見にいくのは結局メタデータになるので、仕組みの方は [kntk さんのセッション](https://speakerdeck.com/kntkymt/app-intents-no-o-sasaeru-gijutsu) を見ておくとどこを読めばいいのかが分かりやすくなると思います。
 
@@ -483,7 +483,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 - AppIntentsTesting は実経路で intent を動かせるが **UI テストバンドル必須**、かつテストランナーとアプリの署名チームを揃える必要がある。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
 - `entity.id` は `NSNull` で、id は `entity.identifier.instanceIdentifier` から取る。`makeIntent(x: nil)` は `.unset` になるので明示クリアは型付き nil で渡す。`requestChoice` を使う Intent は run できない
 - `viewAnnotations()` で画面が publish している entity を検証できる。ただし **watchOS では `run()` が code 4025 で落ちて前提データを作れない** ので、そこは手動確認に回す。`forSelectionType:` も「`List` なら効く」ではなく「**selection のある `List` なら効く**」
-- Apple が示す検証の順番は **AppIntentsTesting → Shortcuts → Spotlight → Siri**。27.2 までは、フレーズのルーティングは手動確認の領域と割り切ってよかった。**27.3 beta で、実機の要らない `sirimetadataanalyzer` と、Siri の段を自動化する SiriEvaluations (実機のみ) が加わった**。analyzer はツールが 0 本だと SMA109 しか見ないし、ja では英語専用のルールが飛ぶ。ただし全段が Xcode からのインストールの上に立っているので、構成を変えたら **配布ビルドで面に出るところ** まで見る
+- Apple が示す検証の順番は **AppIntentsTesting → Shortcuts → Spotlight → Siri**。フレーズのルーティングは手動確認の領域と割り切ってよい。**27.3 beta で、実機の要らない `sirimetadataanalyzer` と、Siri の段を自動化する SiriEvaluations (実機のみ) が加わった**。analyzer はツールが 0 本だと SMA109 しか見ないし、ja では英語専用のルールが飛ぶ。ただし全段が Xcode からのインストールの上に立っているので、構成を変えたら **配布ビルドで面に出るところ** まで見る
 - query が呼ばれた記録をアプリに残すと、「呼ばれていない」と「呼ばれて 0 件」を見分けられる。行が出れば証拠になるが、行が無いことは証拠にならない
 - テスト基盤も壊れる。**スキームに入っていないテストは「落ちる」のではなく「存在しないことになる」**。並列実行は速いとは限らず、共有ストアはテスト間で積み上がる。ローカライズを入れるとテストの前提が知らないうちに変わる
 - **`xcodebuild test` に `CODE_SIGNING_ALLOWED=NO` を付けない**。ランナーの再署名ごと飛んで AppIntentsTesting が 803 で全滅する。`build` (SSU / メタデータの確認) に付けるのは正しいので、フラグの流用が事故になる
@@ -496,7 +496,6 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
 - **2026-11-04**: Xcode 27.3 beta の Siri AI Developer Preview を反映。「27.3 beta で梯子に 2 段増えた: sirimetadataanalyzer と SiriEvaluations」の節を新設 (IntentTodo の基準値 / ツール化した後の指摘と誤検知の抑止 / SiriEvaluations の実機要件とテストターゲットの最小 OS)
-
 - **2026-11-01**: 27.2 beta で見つけた `DynamicPropertyPath.get(as:)` が正式版に入らなかったことを反映
 - **2026-10-31**: 「梯子の下 3 段」を 2 段に、洗い出した嘘テストの件数を 5 件から 6 件に訂正 (箇条書きと一致させた)
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

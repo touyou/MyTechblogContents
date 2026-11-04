@@ -15,7 +15,7 @@ WWDC 2026 編の 2 本目です (この編の前提は 6/N の冒頭を見てく
 
 今回は、IntentTodo の Entity と Intent を **システムのドメインに意味で適合させる** 話 (App Schema) と、「開く」「削除する」「検索する」を **system intent** に乗せた話です。
 
-App Schema はしばらく「カテゴリだけ適合できて、Todo 本体は無理」という状態が続いていたんですが、据え置きの理由を測り直したら **塞いでいると思っていたものが塞いでいなかった** ことが分かって、本体も適合できました。代わりに出てきた本当の壁が watchOS だったので、そこも書きます。後半は Intent 側の適合で、セッション 240 の「Siri が実行できるのはスキーマに適合したアクション」という説明と、手元で測ったメタデータの差を受けて、追加・更新・削除・開くなど 7 本を新たに適合させた話です。
+App Schema はしばらく「カテゴリだけ適合できて、Todo 本体は無理」という状態が続いていたんですが、据え置きの理由を測り直したら **塞いでいると思っていたものが塞いでいなかった** ことが分かって、本体も適合できました。代わりに出てきた本当の壁が watchOS だったので、そこも書きます。後半は Intent 側の適合で、セッション 240 の「Siri が実行できるのはスキーマに適合したアクション」という説明と、手元で測ったメタデータの差を受けて、追加・更新・削除・開くなど 7 本を新たに適合させた話です。最後に、27.3 beta でスキーマ外のアクションも「ツール」として Siri に開けるようになった話を足しました。
 
 ## ドメインに意味で適合させると何が起きるか
 
@@ -25,7 +25,7 @@ App Schema (assistant schema) は、自分の Entity や Intent を `reminders` 
 IntentTodo は Todo アプリなので、いちばん近いのは `reminders` ドメインです。
 カテゴリは reminders で言う「リスト」、Todo 本体は「リマインダー」に対応します。
 
-なお App Schema は **新しい Siri への入場券** であって、既存の経路を格下げするものではありません。適合が無くても、discoverable な自前 Intent 群と後述の system intent、それに Spotlight のセマンティックインデックスで、意味理解・検索・遷移は成立します。実際このアプリは長いこと `list` だけの適合で回っていましたし、スキーマを持てない watchOS でも機能は落ちていません。ただし Siri に自然な言い方で頼んでアクションを実行してもらう経路だけは、スキーマに適合した Intent にしか開きません (App Shortcut のフレーズは別です)。これは後半の Intent 側の話で書きます。
+なお App Schema は **新しい Siri への入場券** であって、既存の経路を格下げするものではありません。適合が無くても、discoverable な自前 Intent 群と後述の system intent、それに Spotlight のセマンティックインデックスで、意味理解・検索・遷移は成立します。実際このアプリは長いこと `list` だけの適合で回っていましたし、スキーマを持てない watchOS でも機能は落ちていません。ただし Siri に自然な言い方で頼んでアクションを実行してもらう経路は、27.2 まではスキーマに適合した Intent にしか開いていませんでした (App Shortcut のフレーズは別です)。**27.3 beta の Siri AI Developer Preview からは、スキーマに当てはまらない Intent も「ツール」として Siri に開けます**。どちらも後半の Intent 側の話で書きます。
 
 ## 小さいスキーマは素直: Category = reminders の list
 
@@ -194,7 +194,7 @@ App Intents には「開く」「削除する」みたいな共通アクショ�
 | `OpenIntent` に適合するだけ | `OpenEntity` | `[]` (空) |
 | `+ @AppIntent(schema: .system.open)` | `OpenEntity` + **`AssistantIntent`** | `{system, OpenIntent}` |
 
-SDK を見ると `.system.open` はプロトコルと同じ `OpenIntent` という名前に解決されるので、同じものだと思い込んでいました。でもプロトコルだけだと「開く」の意味は伝わっても、**Siri が実行できる宣言 (`AssistantIntent` と schema のエントリ) は付きません**。セッション 240 (9:41〜15:10) が "actions use schemas to become executable by Siri" と言っているのがこの差で、素の App Intent は Shortcuts / Spotlight / ウィジェットには出るけれど、Siri の自然言語での実行には載らない、ということでした。詳しくは後半の「Intent 側のスキーマ適合」に書きます。
+SDK を見ると `.system.open` はプロトコルと同じ `OpenIntent` という名前に解決されるので、同じものだと思い込んでいました。でもプロトコルだけだと「開く」の意味は伝わっても、**Siri が実行できる宣言 (`AssistantIntent` と schema のエントリ) は付きません**。セッション 240 (9:41〜15:10) が "actions use schemas to become executable by Siri" と言っているのがこの差で、素の App Intent は Shortcuts / Spotlight / ウィジェットには出るけれど、Siri の自然言語での実行には載らない、ということでした (27.2 まで。27.3 beta ではツールにすれば載ります)。詳しくは後半の「Intent 側のスキーマ適合」に書きます。
 
 というわけで今は両方付けています。プロトコルの形がスキーマの要求とそのまま一致するので、足したのはマクロの 1 行だけです。
 
@@ -316,7 +316,7 @@ UI 側では **絞り込み中であることの表示と、その場での解�
 
 ## Intent 側のスキーマ適合
 
-ここまでの App Schema は entity / enum の話で、Intent 側の適合は `.system.searchInApp` と、10/N に書く Visual Intelligence の 2 本しかありませんでした。上の `.system.open` の表を作ったのをきっかけに Intent 側も見直しました。セッション 240 によると **Intent を Siri から実行できるようにするのはスキーマ適合の方** で、手元で確かめられたのは、適合したときだけメタデータに `AssistantIntent` と schema のエントリが付く、というところまでです。
+ここまでの App Schema は entity / enum の話で、Intent 側の適合は `.system.searchInApp` と、10/N に書く Visual Intelligence の 2 本しかありませんでした。上の `.system.open` の表を作ったのをきっかけに Intent 側も見直しました。セッション 240 によると **Intent を Siri から実行できるようにするのはスキーマ適合の方** で、手元で確かめられたのは、適合したときだけメタデータに `AssistantIntent` と schema のエントリが付く、というところまでです。この「スキーマ適合だけ」という前提は 27.3 beta で変わったので、節の最後に書きます。
 
 ### 要求はビルドでしか出てこない
 
@@ -404,11 +404,54 @@ IntentTodo が直接作り直せたのは、1.0.0 がまだ公開前だったか
 
 「確認はメタデータで行う」の対象は、出荷メタデータとシステム側の登録の 2 つあったわけです。前者が正しくても後者が古いと、実装のせいに見える失敗が出ます。これは開発中の話で、アップデートで配った先の端末に同じことが起きるのかはまだ確かめられていません。
 
+### 27.3 beta: スキーマに当てはまらないアクションは「ツール」で Siri に開く
+
+:::message
+ここは **Xcode 27.3 beta (27C5020n) の Siri AI Developer Preview** で測った内容です。beta の間に API や挙動が変わる可能性があります。IntentTodo 側も、27.3 の正式版が出るまでは別ブランチに置いています。
+:::
+
+27.3 beta で [Siri AI Developer Preview](https://developer.apple.com/documentation/appintents/siri-ai-developer-preview) が始まり、上で書いた「Siri が実行できるのはスキーマに適合したアクションだけ」は、もう言い切れなくなりました。`@AppIntent(.tool)` を付けた Intent は `ToolIntent` になり、スキーマが無くても Siri が「ツール」として呼べます。Siri がツールを呼ぶのは、リクエストでアプリ名が出たとき、アプリが前面にあるとき、アプリの Live Activity が動いているとき、検索でアプリの entity が出てきたとき、の 4 つの場面です。
+
+スキーマとツールは役割が分かれています。
+
+| 宣言 | 何で Siri に開くか | 併用 |
+|---|---|---|
+| `@AppIntent(schema: .reminders.createReminder)` など (primary domain) | ドメインの語彙で | **`.tool` を足すとビルドエラー** |
+| `@AppIntent(.tool, schema: .journal.createEntry)` など (Shortcuts 専用ドメイン) | 語彙 + ツール | できる |
+| `@AppIntent(.tool)` だけ | ツールとして | — |
+
+primary domain のスキーマに適合した Intent をツールにすると、こういうエラーになります。
+
+```
+error: 'ToolIntent' can't be adopted by an intent that conforms to '.reminders.createReminder' because the schema is in a primary domain
+appintentsmetadataprocessor: error: At least one halting error was produced during export, so no AppIntents metadata have been exported ...
+```
+
+ここでも **エラーが 1 つあるだけでターゲットのメタデータが丸ごと出なくなる** のは、スキーマ適合のときと同じです。
+
+IntentTodo では、スキーマに適合していない Intent のうち 12 本 (完了の切り替え、スヌーズ、お気に入り、一覧、サマリ、リストやタグの整理など) をツールにしました。検索系の Intent はツールにしていません。Apple のガイドが「検索のツールは作らない。entity は Siri が Spotlight と `EnumerableEntityQuery` で自分で探す」と言っているためです。最小 OS は 27.0 のままなので、既存の型には手を付けず、適合だけを別に足しています。
+
+```swift
+#if !os(watchOS) && !os(tvOS)
+@available(iOS 27.3, macOS 27.3, visionOS 27.3, *)
+extension ToggleTodoCompletionIntent: ToolIntent {}
+#endif
+```
+
+`ToolIntent` は App Schema と同じく watchOS / tvOS に無いので、`#if` で外します。ただし `@available` を付けていても、**27.2 の SDK では型そのものが無いのでビルドが通りません**。`#if compiler(>=…)` は 27.2 と 27.3 beta のどちらも Swift 6.4.2 なので使えず、区別できたのは `#if canImport(AppIntents, _version: 301.2)` だけでした (引数ラベル `_version:` が下線で始まる、非公開扱いの書き方です)。IntentTodo ではこれを使わず、27.3 の正式版まではブランチを分けて待つことにしました。
+
+出荷メタデータの変化は、`systemProtocols` に `com.apple.link.systemProtocol.ToolIntent` が 1 つ足されるだけでした。スキーマのときのように `assistantDefinedSchemas` が増えるわけではありません。
+
+27.3 beta にはほかに、モデルが会話から値を組み立てる `@AppEntity(.generable)`、`@Property(description:visibility:)`、複数のツールをつなぐ手順を Siri に教える app skills (`Skills.skillsbundle` / `SKILL.md`) も入っています。プロパティの `description:` は、27.3 より前の OS にも出す entity に付けるとビルドエラーになるので、最小 OS が 27.0 の IntentTodo ではまだ使えていません。確かめ方 (`sirimetadataanalyzer` と SiriEvaluations) は 10/N に書きました。
+
+なお、プレビューが動くのは開発署名のビルドと TestFlight の内部テスターだけです。外部テスターと App Store 版では動きません。
+
 ## 検証できた深さ
 
 - **ビルド成立 (B)**: entity 側の `.reminders.reminder` / `.reminders.list` / `.reminders.listType` / `.reminders.section` / `.reminders.locationTrigger` / `.reminders.locationTriggerEvent`、Intent 側で新たに適合させた 7 本、`OpenIntent` / `DeleteIntent`、`SetFocusFilterIntent` はすべて OK。iOS / macOS / visionOS / watchOS の 4 destination でクリーンビルド緑。
 - **単体 (U)**: 出荷メタデータの検査で、各スキーマを主張する型が 1 つずつ登録されていることまで確認。AppIntentsTesting のスイートも全緑です。
-- **実機 (R)**: 一部だけ。TestFlight のビルドで Siri から App Shortcut の一覧表示が通るところまでは見ました (5/N / 9/N) が、「スキーマ適合が Siri / Apple Intelligence でどう使われるか」はまだです。AppIntentsTesting は型名で intent を引くのでスキーマの経路を通らず、ここは手動確認の領域です (10/N)。
+- **ツール (27.3 beta)**: 4 destination のクリーンビルドが緑、`sirimetadataanalyzer` で 12 本がツールとして数えられることまで確認 (10/N)。実機の Siri から呼んだ結果はまだです。
+- **実機 (R)**: 一部だけ。TestFlight のビルドで Siri から App Shortcut の一覧表示が通るところまでは見ました (5/N / 9/N) が、「スキーマ適合が Siri / Apple Intelligence でどう使われるか」はまだです。AppIntentsTesting は型名で intent を引くのでスキーマの経路を通りません。27.3 beta の SiriEvaluations ならこの段を自動化できますが、まだ回せていません (10/N)。
 
 ## まとめ
 
@@ -421,7 +464,7 @@ IntentTodo が直接作り直せたのは、1.0.0 がまだ公開前だったか
 - スキーマ適合の entity では `typeDisplayRepresentation` を上書きしない (警告になる)。マクロが生成するのは **空** の表現で、出荷メタデータ側は上書きの有無にかかわらず最初から空
 - `__appSchemaEntity` の手書きは「動くけれど採ってはいけない」形。プロトコル要求ですらない非公開の申し合わせで、名前が変わればエラーも出ずに壊れる
 - system intent (`OpenIntent` / `DeleteIntent`) は **プロトコルに適合するだけでは Siri が実行できる宣言が付かない**。スキーマのマクロも足す。プロトコルの形が要求と一致していればマクロ 1 行で済む。AppShortcuts への登録は要らない
-- **Siri が実行できるのはスキーマに適合したアクション** (セッション 240。手元で確かめたのはメタデータの差まで)。Intent 側の要求はビルドでしか出ず、ライブ診断と `swift build` は形を検証しない。Intent は `#if` をマクロの行だけに掛ければよく、型名を分けなくていい
+- 27.2 までは **Siri が実行できるのはスキーマに適合したアクション** だった (セッション 240。手元で確かめたのはメタデータの差まで)。**27.3 beta からは、スキーマ外のアクションも `@AppIntent(.tool)` で Siri に開ける**。primary domain のスキーマに適合した Intent をツールにするとビルドエラーになり、メタデータが丸ごと出なくなる。`ToolIntent` は 27.2 の SDK に無いので、`@available` だけでは 27.2 でビルドが通らない。Intent 側の要求はビルドでしか出ず、ライブ診断と `swift build` は形を検証しない。Intent は `#if` をマクロの行だけに掛ければよく、型名を分けなくていい
 - Intent のスキーマ適合では、スキーマ外のパラメータは optional 必須、名前は `@ComputedProperty` で逃げられずリネームが要る、非 optional のコレクションには `default: []`。要求を満たすためにモデルに足すなら、書き込み経路まで通す (カテゴリは公開していたのに付ける経路が無かった)
 - **公開済みの Intent は形を変えない**。合わないなら別の Intent を作って `isAssistantOnly = true` にする。パラメータをリネームした直後のシミュレータは `simctl erase` しないと古い登録が残ることがある
 - `SetFocusFilterIntent` は「実行先を選べない Intent」。`notificationFilterPredicate` を返すと **criteria の無い通知が全部消える** ので、自分の失敗通知は許可リストに常置する
@@ -432,6 +475,7 @@ IntentTodo が直接作り直せたのは、1.0.0 がまだ公開前だったか
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-04**: Xcode 27.3 beta の Siri AI Developer Preview を反映。「Siri が実行できるのはスキーマ適合したアクションだけ」を 27.2 までの話に改め、「27.3 beta: スキーマに当てはまらないアクションは『ツール』で Siri に開く」の節を新設 (primary domain との併用はビルドエラー / 12 本をツール化 / 27.2 の SDK では通らない / メタデータの差)
 - **2026-11-01**: Xcode 27.2 正式版で確かめた結果を反映 (FB24570185 は 27.2 でも再現 / `caseDisplayRepresentations` の既定実装は正式版にも入っている)
 - **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した
 - **2026-10-30**: 校正。AppShortcuts の 10 件上限を「5/N で書いたとおり」としていたが 5/N には書いていなかったので、参照を外した。あわせて表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃えた

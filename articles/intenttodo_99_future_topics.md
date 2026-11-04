@@ -313,7 +313,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 - **App Shortcut のフレーズ**: TestFlight の実機で "Show todos in Intento" がアプリを開かずに一覧のスニペットを出すところまでは確かめました (9/N)。パラメータを埋めたフレーズ (「Complete 〜 in Intento」) の候補の解決と、日本語のフレーズはまだです。Siri の言語が英語だと日本語のフレーズは照合に使われないので (5/N)、日本語は Siri を日本語にした端末で見る必要があります。AppIntentsTesting は型名で intent を引くのでこの経路を通りません
 - **`allowedExecutionTargets` 未指定の読み取り系 Intent**: アプリが起動していないときは `linkd` が Extension に回すことが、App Shortcut の件の実機ログで見えました (2/N)。残っているのは、アプリが起動しているときにどちらで perform され、entity 解決がどこで走るか、です
 - **Control をアプリ完全終了状態で叩いたときの体感**: 書き込み系を `[.main]` に固定したことで、アプリのバックグラウンド起動が挟まるようになりました。dialog も snippet も出ない面なので、遅延が実用上どうかは実機で見るしかありません
-- **スキーマ適合が実機の Siri / Apple Intelligence でどう使われるか**: entity は `.reminders.reminder` 本体まで、Intent も作成・更新・削除・開くなど 7 本を新たに適合させたので (7/N)、見たい範囲がむしろ広がりました。統合メタデータに載っていることまでは確定していますが、AppIntentsTesting は型名で intent / entity を引くのでスキーマ経路を通らず、ここから先は手動確認の領域です。外部で「`.system.open` を複数宣言すると Siri から動かない」という報告もあって、IntentTodo は 2 本 (`OpenTodoIntent` / `OpenCategoryIntent`) 持っているので、ここも見たいところです
+- **スキーマ適合が実機の Siri / Apple Intelligence でどう使われるか**: entity は `.reminders.reminder` 本体まで、Intent も作成・更新・削除・開くなど 7 本を新たに適合させたので (7/N)、見たい範囲がむしろ広がりました。統合メタデータに載っていることまでは確定していますが、AppIntentsTesting は型名で intent / entity を引くのでスキーマ経路を通りません。ここから先は、27.3 beta の SiriEvaluations が使えるようになるまで手動確認の領域です。外部で「`.system.open` を複数宣言すると Siri から動かない」という報告もあって、IntentTodo は 2 本 (`OpenTodoIntent` / `OpenCategoryIntent`) 持っているので、ここも見たいところです
 - **アップデートで配った先の App Intents の登録**: 開発中は、パラメータをリネームするとシミュレータの登録が古いまま残って `simctl erase` が要りました (7/N)。アップデートを受け取った利用者の端末で同じことが起きるのかは分かっていません
 - **Siri が読み上げる文言の日本語**: Shortcuts アプリでアクション名や型名が日本語で出ることは実機で確かめましたが (3/N)、Siri が読み上げる `IntentDialog` の方はまだ推論です
 - **Widget / Control / Live Activity 起点の donation**: アプリ内 `Button(intent:)` の実行がシステムに寄付されていることは実測できたんですが (8/N)、別プロセス起点は測れていません。シミュレータでは合成タップでコントロールが発火せず、ホームウィジェットの行は `Link` なので `Button(intent:)` がありません。`callAsFunction(donate:)` への載せ替えは不採用で決着したので、これは **「別プロセス起点だけ明示的な寄付が要るのか」という独立した問い** として残っています
@@ -323,6 +323,18 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 待ちのタスクとして 1 つ増えたのが **App Schema と watch ターゲットの両立** です。iOS アプリが watch アプリを埋め込む構成だと、共有 entity は型を二重定義しない限りどのスキーマにも適合できません (7/N)。回避策は入れましたが、公開の解決手段が無いので Apple 側の対応待ちで、Feedback (FB24570185) を出しました。
 
 このうち **Control まわりは実機で決着しました**。dialog も snippet も Control では提示されないこと、Control のフィードバックは `perform()` 完了時の自動リロードによるコントロール自身の再描画であること、それにともなって `.controlWidgetStatus(_:)` を撤去したことまで含めて [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) に書き直しました。実機の Control Center を触って初めて分かったことが多くて、シミュレータのビルドが通ったところで満足していると、到達不能なコードにも気付けないんだなというのは反省点です。
+
+### 27.3 beta (Siri AI Developer Preview) で増えた検証待ち
+
+:::message
+**Xcode 27.3 beta (27C5020n)** 時点の内容です。IntentTodo の対応は `feature/siri-ai-tools` ブランチに置いていて、27.3 の正式版と Xcode Cloud の更新を待ってからマージします。
+:::
+
+- **実機で Siri からツールを呼ぶ**: アプリを起動していないときに、読み取り系のツールがどのプロセスで走るか。Live Activity が出ている間に、アプリ名を言わずに呼べるか。app skill (`tidy-lists-and-tags`) が読まれるか。プレビューが動くのは開発署名のビルドと TestFlight の内部テスターだけです
+- **SiriEvaluations のテストターゲット**: 最小 OS 27.3 の別のターゲットを、正式版の Xcode で足す (10/N)
+- **entity プロパティの `description:`**: 27.3 より前の OS にも出す entity では使えない。最小 OS を 27.3 に上げるときにまとめて付ける (analyzer の SMA203 が 13 件残っている)
+- **ドキュメントがまだ無い 27.3 の追加 API**: SDK の差分で見つけたもの。`SnippetRepresentableEntity` (entity ごとの標準スニペット)、`DeleteIntent` の `Target` (`EntityCollection` / `Set` を受け取れる)、`EntityCollectionSearchCriteria`、新しいスキーマドメイン `.video`。27.2 から 27.3 の AppIntents の差分は追加だけで、削除や変更はありませんでした
+- **SDK の見分け方**: `ToolIntent` は 27.2 の SDK に無い。27.2 と 27.3 beta はどちらも Swift 6.4.2 なので `#if compiler` では見分けられず、見分けられたのは `#if canImport(AppIntents, _version: 301.2)` だけでした。今回はこれを使わず、ブランチを分けています
 
 ## 公式サンプル 4 本と突き合わせた
 
@@ -352,6 +364,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-04**: 「27.3 beta (Siri AI Developer Preview) で増えた検証待ち」の節を追加
 - **2026-11-01**: Xcode 27.2 正式版での測り直しを RC の節に追加 (FB24548956 は直った・配布ビルドが 27.1 なので退避は継続 / FB24570185 は未解消 / `get(as:)` は正式版に無く `ValueRepresentation(importing:)` が増えた)。トピック J とまとめの SDK 待ちを更新
 - **2026-10-01**: **「8 つ目の型: 手元で正しいことを、配った先でも正しいと思う」** を追加 (`AppIntentsPackage` が配布したアプリでだけ App Intents を読ませなくしていた件と、`ShowTodosIntent` で 2 つの変数を一緒に動かした件)。`.foreground(.dynamic)` と寄付の項を、それぞれの結論の撤回に合わせて書き直し。`AppIntentsPackage` の断定取り下げの項を「今は 1 つも宣言しない」に更新。Xcode 27.1 / 27.2 beta の SDK 棚卸しを RC の節に追加。実機検証待ちを現状に更新 (フレーズ / 未指定の読み取り系 / Intent のスキーマ適合 / 配った先の登録 / 読み上げの日本語)。external storage を採用済みに。タイトルからダッシュを外した
 - **2026-09-12**: `AppIntentsPackage` の断定取り下げの項に、静的リンクなら宣言が無くてもメタデータは集約される (宣言は中身に触っていなかった) ことを追記。「7 つ目の型」に、インクリメンタルビルドの古いメタデータで `persistentIdentifier` の追従を読み違えかけた件を追加

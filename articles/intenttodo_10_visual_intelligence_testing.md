@@ -258,6 +258,24 @@ AppIntentsTesting の具体的な使い方は、iOSDC Japan 2026 の [パンフ�
 
 ただ、この梯子は **全段が Xcode からインストールしたアプリの上に立っていました**。3/N に書いたとおり、IntentTodo は `AppIntentsPackage` の宣言のせいで、TestFlight / App Store から入れたアプリだけ App Intents がまるごと読まれない、という状態で出荷していました。宣言を入れたときはこの梯子の下 2 段を登って「害は無い」と判断していて、どの段でも見えなかったわけです。今は梯子のいちばん上に **配布ビルド (TestFlight) で面に出るところまで見る** を足して、App Intents の構成を変えたらそこまで確かめるようにしています。
 
+### 梯子のどの段にテストを厚く置くか
+
+梯子は「どの順番で確かめるか」は教えてくれますが、「どこにテストをたくさん書くか」は教えてくれません。ここの考え方をくれたのが、Shopify Engineering の [Reflex](https://shopify.engineering/reflex) という記事でした。
+
+Reflex は、iOS / Android アプリを「エージェントが UI を描かずに動かせる形」にする設計です。画面ごとに「見えているもの (state)」と「できること (actions)」を JSON で出して、CLI から `ls` で一覧、`do` で実行できるようにしています。テストはピラミッドではなくトロフィー型で、いちばん厚いのは真ん中の **その action の面からアプリを動かす振る舞いテスト** です (1,700 件以上が、両 OS で 4 分ほどで回るそうです)。CLI は View が呼ぶのと同じ `send(action:)` しか通れないので、View にできないことはテストにもできません。
+
+読んでいて、これは App Intents 中心設計がもう持っているものだなと思いました。「できることは全部 Intent」で、UI も `Button(intent:)` 経由でしか動かさないなら、Intent の一覧がそのまま Reflex の action の面になります。AppIntentsTesting で Intent を `run()` して、システムから見える結果 (`result.value` や entity / query の結果、Spotlight、画面遷移) を確かめるテストが、Reflex の真ん中の層に当たります。ただしアプリ内の `Button(intent:)` を押す経路は `run()` では通らないので、そこは UI テストのままです。
+
+なので、テストの重心はこう置くことにしました。
+
+- **すべての Intent を `run()` する**: AppIntentsTesting で Intent を 1 つずつ実行し、システムから見える結果を確かめる
+- **ロジックの境界値は単体テストで**: `TodoService` の細かい場合分けは速い単体テストに残す。watchOS は `run()` が落ちるので、単体テストが唯一の自動化された層になる
+- **システムの段はもっと薄く**: Siri や Shortcuts の見え方は手で確かめる (梯子の上の段)
+
+Reflex には、もう 1 つ真似したいルールがありました。**テスト中にネットワークへ出たら、アプリがうまく立ち直ったとしても失敗にする** というものです。通信に失敗しても空のリストやキャッシュで動くアプリだと、テストはどちらの経路を通っても緑になってしまいます。IntentTodo は外部と通信しないのでまだ試していませんが、フィードを読むアプリ (Patchday など) では試してみるつもりです。AppIntentsTesting はアプリと別プロセスなので、launch 引数を見て DEBUG のときだけアプリ側で `URLProtocol` を差し込み、出ようとした通信の記録を App Group 経由でテストから読む形になります。
+
+逆に、Reflex の「クロスプラットフォームの橋を作るより、各 OS でコードを重複させる」という主張は、そのままは持ち込みません。Reflex が避けているのは UI と状態を共通化する層で、App Intents の宣言とは話の層が違うからです。
+
 ### 27.3 beta で梯子に 2 段増えた: sirimetadataanalyzer と SiriEvaluations
 
 :::message
@@ -483,6 +501,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 - AppIntentsTesting は実経路で intent を動かせるが **UI テストバンドル必須**、かつテストランナーとアプリの署名チームを揃える必要がある。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
 - `entity.id` は `NSNull` で、id は `entity.identifier.instanceIdentifier` から取る。`makeIntent(x: nil)` は `.unset` になるので明示クリアは型付き nil で渡す。`requestChoice` を使う Intent は run できない
 - `viewAnnotations()` で画面が publish している entity を検証できる。ただし **watchOS では `run()` が code 4025 で落ちて前提データを作れない** ので、そこは手動確認に回す。`forSelectionType:` も「`List` なら効く」ではなく「**selection のある `List` なら効く**」
+- Intent の一覧はそのまま「アプリでできること」の面なので、AppIntentsTesting ですべての Intent を `run()` して結果を確かめる (Shopify の Reflex と同じ考え方)。ロジックの境界値は単体テスト、アプリ内のボタン経路は UI テストに残す。テスト中にネットワークへ出たら失敗にする
 - Apple が示す検証の順番は **AppIntentsTesting → Shortcuts → Spotlight → Siri**。フレーズのルーティングは手動確認の領域と割り切ってよい。**27.3 beta で、実機の要らない `sirimetadataanalyzer` と、Siri の段を自動化する SiriEvaluations (実機のみ) が加わった**。analyzer はツールが 0 本だと SMA109 しか見ないし、ja では英語専用のルールが飛ぶ。ただし全段が Xcode からのインストールの上に立っているので、構成を変えたら **配布ビルドで面に出るところ** まで見る
 - query が呼ばれた記録をアプリに残すと、「呼ばれていない」と「呼ばれて 0 件」を見分けられる。行が出れば証拠になるが、行が無いことは証拠にならない
 - テスト基盤も壊れる。**スキームに入っていないテストは「落ちる」のではなく「存在しないことになる」**。並列実行は速いとは限らず、共有ストアはテスト間で積み上がる。ローカライズを入れるとテストの前提が知らないうちに変わる
@@ -495,6 +514,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-07**: 「梯子のどの段にテストを厚く置くか」の節を新設。Shopify Engineering の Reflex を読んで、AppIntentsTesting の振る舞いテストを中心に置く考え方と、テスト中のネットワークを失敗にするルールを追加
 - **2026-11-04**: Xcode 27.3 beta の Siri AI Developer Preview を反映。「27.3 beta で梯子に 2 段増えた: sirimetadataanalyzer と SiriEvaluations」の節を新設 (IntentTodo の基準値 / ツール化した後の指摘と誤検知の抑止 / SiriEvaluations の実機要件とテストターゲットの最小 OS)
 - **2026-11-01**: 27.2 beta で見つけた `DynamicPropertyPath.get(as:)` が正式版に入らなかったことを反映
 - **2026-10-31**: 「梯子の下 3 段」を 2 段に、洗い出した嘘テストの件数を 5 件から 6 件に訂正 (箇条書きと一致させた)

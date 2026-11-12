@@ -41,7 +41,7 @@ UI クローム (装飾) が透明化していくと、相対的に「ユーザ�
 
 特に 4 番目が大事で、アプリを「画面の集まり」ではなく「Entity (名詞) と Intent (動詞) の集合」として考えはじめると、自然に複数プラットフォーム展開につながります。
 
-逆に 2 番目と 3 番目は、自分が一貫性を守るために選んだ手段です。IntentTodo ではこのプロセス自体を Claude Code の Skills にまとめていますが、それも含めて真似しなくても大丈夫で、ユーザーに届けたい価値が App Intents で表現できていれば、ユーザーはどの面からでもその価値に辿り着けます。守ってほしい理想というより、そうしておくと勝手に価値の届く先が増える近道くらいに思ってもらえればと思います。
+逆に 2 番目と 3 番目は、自分が一貫性を守るために選んだ手段です。IntentTodo ではこの設計の進め方自体を Claude Code の Skills にまとめていますが、それも含めて真似しなくても大丈夫で、ユーザーに届けたい価値が App Intents で表現できていれば、ユーザーはどの面からでもその価値に辿り着けます。守ってほしい理想というより、そうしておくと勝手に価値の届く先が増える近道くらいに思ってもらえればと思います。
 
 ## モデルベース UI デザインとの対応
 
@@ -56,9 +56,9 @@ UI クローム (装飾) が透明化していくと、相対的に「ユーザ�
 
 `App Intents 中心設計` でアプリを作るとき、自分は以下の順序で進めています。
 
-1. **最小のスクリーンから設計開始**: Apple Watch など、もっとも制約の厳しい環境で本質的なアクションを特定する
+1. **最小のスクリーンから設計開始**: Apple Watch など、最も制約の厳しい環境で本質的なアクションを特定する
 2. **アクションを Intent 化**: 特定したアクションを App Intent として定義する
-3. **プラットフォーム固有の実装へ展開**: Widget / Live Activity / Control Center / メインアプリへ
+3. **プラットフォーム固有の実装へ展開**: Widget / Live Activity / Control (コントロールセンター) / メインアプリへ
 4. **メインアプリ UI は最後**: 複数のアクションをクラスター化してスクリーンを設計
 
 iPhone やデスクトップから設計を始めると、画面の中に置きたい要素を全部詰め込みがちで、本質的な「これは Apple Watch でも一発で操作できるか?」という問いを立てにくくなります。
@@ -75,21 +75,21 @@ IntentTodo で参考にしている指針は以下です。
 | 頻繁に変わる情報 | watchOS Complication | 次の期限 |
 | 繰り返しのアクション | Shortcuts / Siri | Todo 追加 |
 | 常時追跡が必要な情報 | Live Activity | 期限 1 時間以内の Todo |
-| 素早いアクセスが必要 | Control Center | クイック追加 |
+| 素早いアクセスが必要 | Control | クイック追加 |
 | 物理的なトリガーが自然 | Action Button | 新規 Todo 作成 |
 | 没入型・空間的な体験 | visionOS | 空間 UI |
 
 「全部のサーフェスに同じ Intent を実装する」必要はありません。
-「期限が来そうな Todo を完了する」というアクションは Live Activity と Control Center には合いますが、メインアプリの中ではタップで完了できるので Intent からの呼び出しは不要、というように、アクションごとに展開先を選びます。
+「期限が来そうな Todo を完了する」というアクションは Live Activity と Control には合いますが、メインアプリの中ではそれぞれの Todo をタップして完了できるので、この Intent をアプリ内から呼ぶ必要はない、というように、アクションごとに展開先を選びます。
 
 ## 何が嬉しいか
 
 実際にこの設計で IntentTodo を作ってきて、いま実感している「良かった」ポイントは:
 
-- **ロジックの単一経路化**: たとえば `toggleCompletion(todoId:)` 1 つを Siri / Shortcuts / アプリ内のチェックボックス / Widget / Live Activity / Watch / Snippet / macOS のメニューの **8 系統が呼ぶ**。UseCase 層をパッケージとして別に立てるアプローチでは得にくい密度。Control だけは「オンにして」と状態を指定してくるので、裏返す `toggleCompletion` ではなく値を指定する `setCompletion(todoId:isCompleted:)` を呼んでいます
-- **Apple Intelligence との接続が自然**: Intent と Entity を定義しておくと、将来 Apple Intelligence が拡張されたときの恩恵を受けやすい
+- **ロジックの単一経路化**: たとえば `toggleCompletion(todoId:)` 1 つを Siri / Shortcuts / アプリ内のチェックボックス / Widget / Live Activity / Watch / Snippet / macOS のメニューの **8 系統が呼ぶ**。UseCase 層をパッケージとして別に立てるアプローチでは、ここまで 1 か所に寄せるのは難しい。Control だけは「オンにして」と状態を指定してくるので、裏返す `toggleCompletion` ではなく値を指定する `setCompletion(todoId:isCompleted:)` を呼んでいます
+- **Apple Intelligence との接続が自然**: Intent と Entity を定義しておくと、Siri AI のように Apple Intelligence 側が広がったとき、その恩恵をそのまま受けやすい
 - **プラットフォーム展開のコスト低減**: 新しいサーフェスが追加されたとき、既存の Intent を呼ぶだけで済むケースが多い
-- **テストの入口にもなる**: Intent の一覧は「このアプリでできること」の全部なので、AppIntentsTesting のテストは同じ Intent からアプリを動かせる。コーディングエージェントに渡す入口にもなりそう。Shopify の [Reflex](https://shopify.engineering/reflex) が画面ごとに作っている「できること (actions)」の一覧を、App Intents では最初から持っている形 (画面ごとの state にあたるものは無い。10/N)
+- **テストの入口にもなる**: Intent の一覧は「このアプリでできること」の全部なので、AppIntentsTesting のテストは同じ Intent からアプリを動かせる。コーディングエージェントに渡す入口にもなりそう。Shopify の [Reflex](https://shopify.engineering/reflex) が画面ごとに作っている「できること (actions)」の一覧を、App Intents では最初から持っている形 (画面ごとの state にあたるものは無い。詳しくは 10/N)
 
 逆に **実装する側で大変なところ** もあります。
 
@@ -99,7 +99,7 @@ IntentTodo で参考にしている指針は以下です。
 - `perform()` を手で呼べない (`@Dependency` はシステム経由の実行でしか注入されない) ので、確定は `Button(intent:)` を押す形になる (ドラッグの並べ替えのように Button に載せられないものは例外で、`TodoService` を直接呼んでいる)。たとえば「return で確定して次の行へ」というインライン編集は `onSubmit` に確定を載せられないので成立しない
 - `Button(intent:)` は完了を教えてくれないので、シートを出すと閉じる責任の置き場に困る。IntentTodo は `NavigationModel` 経由で Intent に閉じさせるか、どのボタンでも自分で閉じる `.alert` の中に `Button(intent:)` を置く形で逃げている
 
-このトレードオフは、今のところメリット側に振り切れていますが、設計を「とりあえず Intent にする」と機械的に当てはめるのではなく、本質的なアクションだけを Intent 化するという判断は引き続き必要です。
+このトレードオフは、今のところメリット側に振り切れていますが、「とりあえず Intent にする」を機械的に当てはめるのではなく、本質的なアクションだけを Intent 化するという判断は引き続き必要です。
 
 ## 実プロダクトでどう優先度を上げるか
 
@@ -123,7 +123,7 @@ IntentTodo で参考にしている指針は以下です。
 |---|---|---|
 | 切っている軸 | 抽象度・依存方向 | **呼出面 (誰が呼ぶか)** |
 | 最外周の想定 | Presentation は「自分が書くドライバ」1 個 | UI / Siri / Spotlight / Widget / Control / Live Activity / 他アプリの **N 個。しかも能力が違う** |
-| 境界の性質 | 内部の継ぎ目 (自由にリファクタできる) | **公開契約** (ユーザーのショートカットに焼き付く) |
+| 境界の性質 | 内部の継ぎ目 (自由にリファクタできる) | **外に公開した名前** (ユーザーのショートカットに保存されて変えられない) |
 
 軸が 2 本あるものを同心円 1 枚に押し込もうとしていたので、`AppIntent` の置き場所が決まらなかったわけです。実際 `AppIntent` は Clean Architecture の語彙で言うと 3 役を同時に担っています。
 
@@ -139,18 +139,18 @@ IntentTodo で参考にしている指針は以下です。
 |---|---|
 | Entity | `Domain` (`@Model TodoItem` / `Category` / `SubTask`) |
 | UseCase の**宣言** (入力ポート・名前・引数) | `AppIntent` 型 + `@Parameter` |
-| UseCase の**実装** (interactor の中身) | `TodoService` のメソッド |
+| UseCase の**実装** (Interactor の中身) | `TodoService` のメソッド |
 | Controller | `perform()` の前半 + `EntityQuery` |
 | Presenter / ViewModel | `IntentDialog` / Snippet / `DisplayRepresentation` / SwiftUI View |
 | Gateway (Repository interface) | `TodoRepositoryProtocol` |
 | DB / Framework | `SwiftDataTodoRepository` |
 
-図にするなら同心円ではなく **砂時計 (bowtie)** だなと思っています。同心円は「リング」を強調しますが、この設計で言いたいのは真ん中の **くびれ** の方なので、形が合いません。
+図にするなら同心円ではなく **砂時計 (hourglass)** だなと思っています。同心円は「リング」を強調しますが、この設計で言いたいのは真ん中の **くびれ** の方なので、形が合いません。
 
 ```
  UI  Siri  Spotlight  Widget  Control  LiveActivity  他アプリ   ← 呼出面 (対等・能力が違う)
   \    \      |         |        |          /          /
-   ────────── Intent + Entity ──────────                      ← くびれ = 公開契約 (最も凍る)
+   ────────── Intent + Entity ──────────                      ← くびれ = 公開した名前 (いちばん変えられない)
                     │  ┊
               TodoService  ┊                                  ← 1 行為の不変条件・副作用
                     │      ┊ ← 読み取り (EntityQuery) は Service を通らない
@@ -169,7 +169,7 @@ IntentTodo で参考にしている指針は以下です。
 
 Layered の説明が「UseCase と Repository の使い分けが分からない」と言われがちなのは、例として `createTodo()` → `repository.create()` みたいな **素通し** を出してしまうからだと思っていて、差が出るものを並べた方が早いです。`toggleMostUrgentTodo()` は fetch + mutate の 2 呼び出しがユーザーには 1 行為だし、undo 用の `snapshot()` / `restore()` は「**同じ id で**戻す」という不変条件を持っていて、Repository は id の意味論を知りません。いちばん強いのが変更後の後処理 (`dataDidChange()`) で、**「1 行為が完了した」ことを知っているのは UseCase 層だけ** です。Repository の `update()` は自分が行為の途中なのか終端なのかを判別できません。
 
-最後に、Clean Architecture と本質的に反転しているところが 2 つあります。1 つは **凍る方向が逆** なこと。Clean Architecture は「内側 = 安定した方針、外側 = 揺れる詳細」ですが、App Intents 中心だと外周の Intent 型名・parameter 名・`AppEnum` の raw value が **ユーザーのショートカットに永続化されていて、いちばんリファクタできません**。内側の `TodoService` の方がよっぽど自由に触れます。もう 1 つは **依存逆転の目的** で、Clean Architecture の「DB を差し替えられる」はほぼ使われない口実になりがちですが、ここでは `TodoRepositoryProtocol` が **プロセス境界** で意味を持ちます (Widget Extension とメインアプリで同じロジックが別プロセスに載る、という 2/N の話です)。層の対価が実際に回収されている感じがあります。
+最後に、Clean Architecture と本質的に反転しているところが 2 つあります。1 つは **変えられない側が逆** なこと。Clean Architecture は「内側 = 安定した方針、外側 = 揺れる詳細」ですが、App Intents 中心だと外周の Intent 型名・parameter 名・`AppEnum` の raw value が **ユーザーのショートカットに永続化されていて、いちばんリファクタできません**。内側の `TodoService` の方がよっぽど自由に触れます。もう 1 つは **依存逆転の目的** で、Clean Architecture の「DB を差し替えられる」はほぼ使われない口実になりがちですが、ここでは `TodoRepositoryProtocol` が **プロセス境界** で意味を持ちます (Widget Extension とメインアプリで同じロジックが別プロセスに載る、という 2/N の話です)。層を立てた分のコストが、ちゃんと回収されている感じがあります。
 
 非対称も 1 つ残っていて、`TodoEntityQuery` のような **読み取り経路は `TodoService` を飛ばして** Repository を直接呼んでいます。書き込み経路は必ず `TodoService` を通るので、実態は「書き込み側だけ層が厚い」CQRS 的な非対称です。理由は 9/N で書く「読み取り系 Intent は (App Shortcut に登録したもの以外は) 実行プロセスを固定せず Extension で応答させたい」なので、図でも読みは Service の横を通る細い線、書きは Service 経由、と分けて描いています。同心円 1 枚だとこの線が引けないのも、砂時計にした理由のひとつでした。
 

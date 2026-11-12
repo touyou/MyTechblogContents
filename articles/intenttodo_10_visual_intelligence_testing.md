@@ -21,7 +21,7 @@ Visual Intelligence は、カメラやスクショの visual search に対して
 入口になるのが `IntentValueQuery` で、システムが visual search のたびに呼んでくれます。
 
 ```swift
-#if canImport(VisualIntelligence)
+#if canImport(VisualIntelligence) && !os(visionOS)
 import AppIntents
 import VisualIntelligence
 
@@ -68,7 +68,7 @@ visual search の結果から「More results」をタップしたときに対応
 これは `@AppIntent(schema: .visualIntelligence.semanticContentSearch)` でスキーマに適合させます。
 
 ```swift
-#if canImport(VisualIntelligence)
+#if canImport(VisualIntelligence) && !os(visionOS)
 @AppIntent(schema: .visualIntelligence.semanticContentSearch)
 public struct TodoSemanticContentSearchIntent: AppIntent {
     @Parameter(title: "Semantic Content")
@@ -89,7 +89,7 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 7/N で reminder 本体スキーマに手こずったので身構えていたんですが、こっちは `@Parameter var semanticContent: SemanticContentDescriptor` を持つ形を要求してくるだけで、**entity プロパティを 1 つも要求しません**。
 7/N のスキーマが重かったのは、要求プロパティの型がまた別のスキーマ entity で、**適合がサブグラフ全体に及ぶ** からでした。同じ「スキーマ適合」でも、entity プロパティを要求するかどうかで難易度が全然違う、というのが対比で見えたのは収穫です。
 
-なお `VisualIntelligence` は **iOS 専用** のフレームワークです。このパッケージは macOS / watchOS / visionOS / Widget Extension でもビルドするので、Visual Intelligence 関連のファイルは丸ごと **`#if canImport(VisualIntelligence)`** でガードしています。
+なお `VisualIntelligence` は **iOS 専用** のフレームワークです。このパッケージは macOS / watchOS / visionOS / Widget Extension でもビルドするので、Visual Intelligence 関連のファイルは丸ごと **`#if canImport(VisualIntelligence) && !os(visionOS)`** でガードしています (最初は `canImport` だけで、`!os(visionOS)` を足した経緯はこのあと書きます)。
 
 ### beta 2 で「iOS 専用」ではなくなった
 
@@ -336,11 +336,11 @@ AppIntentsTesting の話とは別に、テストを増やしたり日本語を�
 
 いちばん堪えたのがこれです。`TodoAppEntity.dueDate` の型を変えたとき、SPM パッケージ側のユニットテスト 4 箇所がコンパイルできない状態のまま `main` にマージされていました。
 
-原因は Xcode のスキームで、テストアクションに入っている `TestableReference` が **UI テストバンドル 1 つだけ** で、SPM パッケージのテストターゲットが 1 つも入っていなかったことでした。**137 テストが `xcodebuild test` からも CI からも走らない** 状態です。テストは「落ちる」のではなく「存在しないことになる」ので、赤くなりません。
+原因は Xcode のスキームで、テストアクションに入っている `TestableReference` が **UI テストバンドル 1 つだけ** で、SPM パッケージのテストターゲットが 1 つも入っていなかったことでした。**241 件 (そのうち `TodoAppIntentsTests` が 137 件) のテストが `xcodebuild test` からも CI からも走らない** 状態です。テストは「落ちる」のではなく「存在しないことになる」ので、赤くなりません。
 
 スキームに 4 ターゲットを足したら、そのとたんに 11 件落ちました (後述)。「テストがある」と「テストが走っている」は別で、後者は明示的に確かめないと分からないんだなと思います。
 
-追加のコストは +32.5 秒 / +11% でした。見立てでは「パッケージのユニットテストは 0.2 秒程度」と書いていたんですが、それは `swift test` の数字で、Xcode のテストアクション経由だと **バンドルごとのインストールと起動** が 1 本あたり 5 秒前後乗ります。実行そのものは 241 件で 1.08 秒、残りの 19 秒は全部オーバーヘッドでした。それでも 241 件が常時走る対価としては安いので、テストプランを分けたりはしていません。
+追加のコストは +32.5 秒 / +11% でした。見立てでは「パッケージのユニットテストは 0.2 秒程度」と書いていたんですが、それは `swift test` の数字で、Xcode のテストアクション経由だと **バンドルごとのインストールと起動** が 1 本あたり 5 秒前後乗ります。実行そのものは 241 件で 1.08 秒、4 ターゲットの経過時間は 19.9 秒で、残りの 19 秒は全部オーバーヘッドでした。それでも 241 件が常時走る対価としては安いので、テストプランを分けたりはしていません。
 
 ### 並列実行は速くしていなかった
 
@@ -514,6 +514,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 校正。Visual Intelligence のコード片のガードを今のコード (`&& !os(visionOS)` 付き) に合わせ、走っていなかったテストの件数 (4 ターゲットで 241 件) とオーバーヘッドの計算の元 (19.9 秒) を書き足した
 - **2026-11-07**: 「梯子のどの段にテストを厚く置くか」の節を新設。Shopify Engineering の Reflex を読んで、AppIntentsTesting の振る舞いテストを中心に置く考え方と、テスト中のネットワークを失敗にするルールを追加
 - **2026-11-04**: Xcode 27.3 beta の Siri AI Developer Preview を反映。「27.3 beta で梯子に 2 段増えた: sirimetadataanalyzer と SiriEvaluations」の節を新設 (IntentTodo の基準値 / ツール化した後の指摘と誤検知の抑止 / SiriEvaluations の実機要件とテストターゲットの最小 OS)
 - **2026-11-01**: 27.2 beta で見つけた `DynamicPropertyPath.get(as:)` が正式版に入らなかったことを反映

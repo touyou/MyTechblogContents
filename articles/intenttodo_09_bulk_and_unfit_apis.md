@@ -109,7 +109,7 @@ IntentTodo は App Intents Extension を持っていないし、バルクの Swi
 
 IntentTodo も共有パッケージが Widget Extension にリンクされていて、そこで読み書きできる `TodoService` を登録しているので、未指定のままだと **アプリ未起動時に Extension プロセスが同じストアの書き手になり得ます**。3/N や 4/N で書いた「マイグレーションはアプリ本体に寄せる」と同じ危うさです。
 
-なので **「`TodoService` の変更メソッドを呼ぶ Intent はすべて `[.main]`、読み取り系は未指定」** に統一しました。そのあとリスト・タグ・セクションを管理する Intent が増えて、今は 20 個です。例外として、App Shortcut に登録した読み取り系 (`ShowTodosIntent` / `ShowTodoCountIntent`) も `[.main]` にしています (理由は下の `.foreground(.dynamic)` の節と 2/N)。読み取り系をあえて固定しないのは、Extension で応答できた方がアプリを起こさずに済んで速いからで、Widget 側の依存登録も「読み取り専用の利用」として残っています。詳しくは 2/N に書きました。
+なので **「`TodoService` の変更メソッドを呼ぶ Intent はすべて `[.main]`、読み取り系は未指定」** に統一しました。そのあとリスト・タグ・セクションを管理する Intent が増えて、今は 20 個です。例外として、App Shortcut に登録した読み取り系 (`ShowTodosIntent` / `ShowTodoCountIntent`) も `[.main]` にしています (理由は下の `.foreground(.dynamic)` の節と 2/N。合わせると `[.main]` は 22 個です)。読み取り系をあえて固定しないのは、Extension で応答できた方がアプリを起こさずに済んで速いからで、Widget 側の依存登録も「読み取り専用の利用」として残っています。詳しくは 2/N に書きました。
 
 宣言漏れはエラーを出さずに壊れる (Extension で書けてしまうだけ) ので、`Intents/` のソースを走査して「変更メソッドを呼ぶのに `allowedExecutionTargets` を宣言していないファイル」を検出するテストを足しました。わざと違反する probe intent を置いて、**実際に落ちることを確認してから** 入れています。
 
@@ -182,7 +182,7 @@ Apple が todo / reminders 向けの `AppEntityContext` を追加してくれる
 
 この結論、SDK が上がるたびに確かめ直しているんですが、今のところ変わっていません。iOS 27 で **寄付を取り消す側** の API (`removeAllEntities(for:)` など) が増えましたが、寄付する側の context が無い以上は出番がありません。`AppEntityContext` のファクトリも `.audio(_:)` 1 つのままです。
 
-ついでに、SDK の公開シンボルを全部並べて「リポジトリのどこにも名前が出てこないもの」を洗ったこともあるんですが、iOS 27 で入っていて記録が無かったのは 4 つだけで (RC で測り直しても増えていません)、どれも採用する筋がありませんでした (`.requiresGPU` を宣言する `LongRunningTaskOptions`、公開イニシャライザが無くてアプリからは値を作れない `RunSystemShortcutIntent`、下線付きで公開 API として使えない `IntentResponseStream`、`@UnionValue` が生成する裏側のプロトコル)。**「まだ使っていない API」を数えるより、使えない理由を 1 行ずつ書き残す方が後で役に立つ** な、というのがこの棚卸しの感想です。
+ついでに、SDK の公開シンボルを全部並べて「リポジトリのどこにも名前が出てこないもの」を洗ったこともあるんですが、iOS 27 で入っていて記録が無かったのは 4 つだけで (RC で測り直しても増えていません)、どれも採用する筋がありませんでした (`.requiresGPU` を宣言する `LongRunningTaskOptions`、公開イニシャライザが無くてアプリからは値を作れない `RunSystemShortcutIntent`、下線付きの `_ModelDelegationIntent` と組で使う前提で、公開 API としては使えない `IntentResponseStream`、`@UnionValue` が生成する裏側のプロトコル)。**「まだ使っていない API」を数えるより、使えない理由を 1 行ずつ書き残す方が後で役に立つ** な、というのがこの棚卸しの感想です。
 
 ## 「使えるけど使わない」を決めた API の棚卸し
 
@@ -274,6 +274,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 校正。`[.main]` の総数 (例外を合わせて 22 個) と、`IntentResponseStream` が使えない理由 (下線付きなのは組になる `_ModelDelegationIntent` の方) をリポジトリの記録に合わせた
 - **2026-11-01**: Xcode 27.2 の記述を beta から正式版の確認結果に更新 (`@UnionValue` の `default:` / `size:` と、`AppEntityContext` が `.audio(_:)` だけなのは正式版でも同じ)
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-01**: `.foreground(.dynamic)` の節を「値を返す Intent にアプリを開かせない」に書き換え。`.foreground` だけの `ShowTodosIntent` が前面に出せない経路で拒否され、dynamic にすると Siri から毎回アプリが開いたので、`.background` + スニペットに分けた経緯と、同じ変更で `[.main]` を外して Siri が失敗した反省を追加 (「当て先が無い」で閉じていた結論を撤回)。`[.main]` の固定数を 20 個に更新し、App Shortcut 登録の読み取り系の例外を反映。27.2 SDK の `@UnionValue` の追加と、27.1 / 27.2 beta でも `AppEntityContext` が変わらないことを追記

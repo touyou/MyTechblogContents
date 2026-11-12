@@ -86,7 +86,7 @@ IntentTodo で参考にしている指針は以下です。
 
 実際にこの設計で IntentTodo を作ってきて、いま実感している「良かった」ポイントは:
 
-- **ロジックの単一経路化**: たとえば `toggleCompletion(todoId:)` 1 つを Siri / Shortcuts / UI Button / Widget Button / Live Activity Button / Control Widget の **6 系統が呼ぶ**。UseCase 層をパッケージとして別に立てるアプローチでは得にくい密度
+- **ロジックの単一経路化**: たとえば `toggleCompletion(todoId:)` 1 つを Siri / Shortcuts / アプリ内のチェックボックス / Widget / Live Activity / Watch / Snippet / macOS のメニューの **8 系統が呼ぶ**。UseCase 層をパッケージとして別に立てるアプローチでは得にくい密度。Control だけは「オンにして」と状態を指定してくるので、裏返す `toggleCompletion` ではなく値を指定する `setCompletion(todoId:isCompleted:)` を呼んでいます
 - **Apple Intelligence との接続が自然**: Intent と Entity を定義しておくと、将来 Apple Intelligence が拡張されたときの恩恵を受けやすい
 - **プラットフォーム展開のコスト低減**: 新しいサーフェスが追加されたとき、既存の Intent を呼ぶだけで済むケースが多い
 - **テストの入口にもなる**: Intent の一覧は「このアプリでできること」の全部なので、AppIntentsTesting のテストは同じ Intent からアプリを動かせる。コーディングエージェントに渡す入口にもなりそう。Shopify の [Reflex](https://shopify.engineering/reflex) が画面ごとに作っている「できること (actions)」の一覧を、App Intents では最初から持っている形 (画面ごとの state にあたるものは無い。10/N)
@@ -122,7 +122,7 @@ IntentTodo で参考にしている指針は以下です。
 | | Clean Architecture | App Intents 中心 |
 |---|---|---|
 | 切っている軸 | 抽象度・依存方向 | **呼出面 (誰が呼ぶか)** |
-| 最外周の想定 | Presentation は「自分が書くドライバ」1 個 | UI / Siri / Spotlight / Widget / Control / Live Activity / 他アプリ の **N 個。しかも能力が違う** |
+| 最外周の想定 | Presentation は「自分が書くドライバ」1 個 | UI / Siri / Spotlight / Widget / Control / Live Activity / 他アプリの **N 個。しかも能力が違う** |
 | 境界の性質 | 内部の継ぎ目 (自由にリファクタできる) | **公開契約** (ユーザーのショートカットに焼き付く) |
 
 軸が 2 本あるものを同心円 1 枚に押し込もうとしていたので、`AppIntent` の置き場所が決まらなかったわけです。実際 `AppIntent` は Clean Architecture の語彙で言うと 3 役を同時に担っています。
@@ -153,9 +153,9 @@ IntentTodo で参考にしている指針は以下です。
    ────────── Intent + Entity ──────────                      ← くびれ = 公開契約 (最も凍る)
                     │  ┊
               TodoService  ┊                                  ← 1 行為の不変条件・副作用
-                    │      ┊ ← 読み取り (EntityQuery) は直通
+                    │      ┊ ← 読み取り (EntityQuery) は Service を通らない
            TodoRepositoryProtocol
-                    │      ┊
+                    │
               SwiftData / CloudKit
 ```
 
@@ -171,7 +171,7 @@ Layered の説明が「UseCase と Repository の使い分けが分からない�
 
 最後に、Clean Architecture と本質的に反転しているところが 2 つあります。1 つは **凍る方向が逆** なこと。Clean Architecture は「内側 = 安定した方針、外側 = 揺れる詳細」ですが、App Intents 中心だと外周の Intent 型名・parameter 名・`AppEnum` の raw value が **ユーザーのショートカットに永続化されていて、いちばんリファクタできません**。内側の `TodoService` の方がよっぽど自由に触れます。もう 1 つは **依存逆転の目的** で、Clean Architecture の「DB を差し替えられる」はほぼ使われない口実になりがちですが、ここでは `TodoRepositoryProtocol` が **プロセス境界** で意味を持ちます (Widget Extension とメインアプリで同じロジックが別プロセスに載る、という 2/N の話です)。層の対価が実際に回収されている感じがあります。
 
-非対称も 1 つ残っていて、`TodoEntityQuery` のような **読み取り経路は `TodoService` も Repository も飛ばして** ストアに直接到達しています。書き込み経路は必ず `TodoService` を通るので、実態は「書き込み側だけ層が厚い」CQRS 的な非対称です。理由は 9/N で書く「読み取り系 Intent は (App Shortcut に登録したもの以外は) 実行プロセスを固定せず Extension で応答させたい」なので、図でも読みは細い直通線、書きは Service 経由、と分けて描いています。同心円 1 枚だとこの線が引けないのも、砂時計にした理由のひとつでした。
+非対称も 1 つ残っていて、`TodoEntityQuery` のような **読み取り経路は `TodoService` を飛ばして** Repository を直接呼んでいます。書き込み経路は必ず `TodoService` を通るので、実態は「書き込み側だけ層が厚い」CQRS 的な非対称です。理由は 9/N で書く「読み取り系 Intent は (App Shortcut に登録したもの以外は) 実行プロセスを固定せず Extension で応答させたい」なので、図でも読みは Service の横を通る細い線、書きは Service 経由、と分けて描いています。同心円 1 枚だとこの線が引けないのも、砂時計にした理由のひとつでした。
 
 ## 次回以降
 
@@ -202,6 +202,7 @@ WWDC 2026 編 (6〜10) は、新しい App Intents の API を試してみて分
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 今のコードに合わせて直した。`toggleCompletion` を呼ぶ経路 (Control は `setCompletion` を呼ぶので外し、Watch / Snippet / macOS のメニューを足した)、読み取り経路は Repository を通っていること
 - **2026-11-07**: 「何が嬉しいか」に、Intent の一覧がテストの入口にもなる話を追加 (Shopify の Reflex との比較)
 - **2026-11-05**: 校正。「払っている税」を「実装する側で大変なところ」に言い換えた
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

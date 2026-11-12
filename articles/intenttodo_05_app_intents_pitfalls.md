@@ -47,8 +47,8 @@ published: true
 
 | 分けている Intent | 残した理由 |
 |---|---|
-| `SnoozeTodoIntent` / `QuickSnoozeTodoIntent` | 前者は `requestChoice` で期間を選ばせます。Live Activity のボタンは背景実行で問い合わせる面が無いので、後者が既定 30 分で即実行する |
-| `ToggleTodoCompletionIntent` / `SetTodoCompletionIntent` | 前者はトグル、後者は絶対値セット (`SetValueIntent`)。落とし穴 2 に書いたとおり `ControlWidgetToggle` は on/off を渡してくるので、トグルでは表現できない |
+| `SnoozeTodoIntent` / `QuickSnoozeTodoIntent` | 前者は `requestChoice` で期間を選ばせます。Live Activity のボタンはバックグラウンド実行で問い合わせる面が無いので、後者が既定 30 分で即実行する |
+| `ToggleTodoCompletionIntent` / `SetTodoCompletionIntent` | 前者はトグル、後者は絶対値セット (`SetValueIntent`)。落とし穴 2 で書くとおり `ControlWidgetToggle` は on/off を渡してくるので、トグルでは表現できない |
 
 `SnoozeTodoFromExtensionIntent` は `QuickSnoozeTodoIntent` に改名しました。名前に "FromExtension" と付いていると「呼出元プロセスの都合で複製したもの」に読めますが、実際に残す理由は **対話できる呼出元かどうか** という振る舞いの違いなので、名前を実態に寄せた形です。
 
@@ -218,11 +218,12 @@ public enum WidgetReloader {
 原因は `perform()` の実装漏れでした。
 
 ```swift
+navigationModel.navigateToRoot()
 switch target {
 case .addTodo:
     navigationModel.showAddTodo()
 case .todoList, .incompleteTodos, .favoriteTodos:
-    break        // ← 何もしていない
+    break        // ← ルートに戻すだけで、絞り込みを書いていない
 }
 ```
 
@@ -427,7 +428,7 @@ LNPerformActionErrorCodeUnsupportedValueType
 
 ### 見逃していた理由は条件付き assert
 
-もう 1 つ反省があって、この経路には UI テストがありました。それなのに緑のまま何年も気付かなかったのは、テストがこう書いてあったからです。
+もう 1 つ反省があって、この経路には UI テストがありました。それなのに緑のまま長いこと気付かなかったのは、テストがこう書いてあったからです。
 
 ```swift
 if deleteButton.waitForExistence(timeout: 3) {
@@ -575,7 +576,7 @@ IntentTodo は長らく `SiriTipView` (「"やることを追加" と言って�
 - `StaticControlConfiguration(kind:provider:)` + `ControlValueProvider` パターンで body を薄く保つ。provider のエラーは `try?` で潰さず throw する
 - **Spotlight は IndexedEntity だけでは index されない** → `indexAppEntities(...)` の明示登録が必要。index は名前付きにして、受け側の `IndexedEntityQuery` もセットで実装する。起動時の全件 index は client state で省けるが、**省略と fire-and-forget を組み合わせると壊れたまま復旧しない** ので連続失敗を数える
 - **アプリ内の `Button(intent:)` から `requestConfirmation` は失敗する** → 確認を提示する面が無いため。Siri / Shortcuts / AppIntentsTesting では通るので気付きにくい。確認なし版を分けて、UI 側は `.confirmationDialog` で確認する
-- ただし **逃げ先の SwiftUI 側にも罠がある**。`dismissalConfirmationDialog(_:shouldPresent:)` は iOS のシートでは発火しない (ビルドは通る)。「dismiss しようとした」を観測する公開 API が無いので、`interactiveDismissDisabled` で塞ぐところまでが限界
+- ただし **逃げ先の SwiftUI 側にも罠がある**。`dismissalConfirmationDialog(_:shouldPresent:actions:message:)` は iOS のシートでは (少なくともシミュレータでは) 発火しない (ビルドは通る)。「dismiss しようとした」を観測する公開 API が無いので、`interactiveDismissDisabled` で塞ぐところまでが限界
 - **失敗が無音になる経路を塞ぐ** → `@Dependency` の登録漏れはクラッシュせず「何も起きない」で終わる。通知の許可が無いと Control の失敗報告は消える (`add` は error を返さない)。伝える手段が 1 つしか無いところは、塞がれたときの記録と設定誘導までセットで作る
 - **Siri は Intent を呼ばずに答えることがある** → 一覧の依頼に OmniSearch が Spotlight の横断検索で答えていて、`ShowTodosIntent` は走っていなかった。Siri の言語が英語なら日本語のフレーズは照合に使われない。「呼ばれていない」と「呼ばれて 0 件」は、アプリ側で記録しないと区別できない
 - 確認を Intent に持たせるかは呼出元だけでなく **失うものがあるか** でも決まる。`.confirmationDialog` のアクションは `Text` で書く (`Label` は消える)
@@ -588,6 +589,7 @@ IntentTodo は長らく `SiriTipView` (「"やることを追加" と言って�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 校正。おまけ 2 のコード片を本文 (ルートに戻すだけだった) と合わせ、「背景実行」を「バックグラウンド実行」に、まだ出てきていない落とし穴 2 への参照の時制を直した。まとめの `dismissalConfirmationDialog` は確かめたのがシミュレータだけだと分かる書き方に。「何年も」はリポジトリの期間と合わないので直した
 - **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した
 - **2026-10-30**: 校正。Mac のメニューの節で落とし穴 4 を「上の」と書いていたのを「後で書く」に、8/N への参照を「書いたとおり」から「書くとおり」に訂正。あわせて表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃えた
 - **2026-10-02**: タイトルが Zenn の上限 (70 文字) を超えてデプロイできなくなっていたので、`Control Widget` を `Control` に縮めた

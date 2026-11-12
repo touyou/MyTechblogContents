@@ -24,7 +24,7 @@ CloudKit 互換にするためには次を満たす必要がありました。
 5. `@Attribute(.unique)` / `DeleteRule.deny` は使わない
 6. 旧スキーマで作られた既存ストアは削除する
 
-ハマりどころは 3 と 4 と 6。順に書きます。あわせて、CloudKit とは直接関係ないけれど同じ「モデルに何を置けるか」の話として踏んだものや、SwiftData 自体の性質で踏んだものも足しています。
+上の 6 つのうち、ハマったのは 3 と 4 と 6 です。順に書きます。あわせて、CloudKit とは直接関係ないけれど同じ「モデルに何を置けるか」の話として踏んだものや、SwiftData 自体の性質で踏んだものも足しています。
 
 ## entitlements とコード設定
 
@@ -41,7 +41,7 @@ public static var configuration: ModelConfiguration {
             cloudKitDatabase: .automatic
         )
     }
-    // production では fatalError、DEBUG では fallback (本記事末尾)
+    // production では fatalError、DEBUG では fallback (ハマりどころ 4)
 }
 ```
 
@@ -85,9 +85,6 @@ The following attributes are marked non-optional but do not have a default value
   Category: name
   SubTask: id
   ...
-CloudKit integration requires that all relationships be optional, the following are not:
-  Category: todos
-  TodoItem: subTasks
 ```
 
 メッセージのとおりですが、init で値を設定しているだけでは CloudKit 互換チェックを通りません。
@@ -166,9 +163,9 @@ find ~/Library/Developer/CoreSimulator/Devices -name "IntentTodo.store*" -delete
 
 production でユーザーに同じ問題を起こしたくない場合は、本来は migration プランを書く必要がありますが、IntentTodo は個人プロジェクトなのでこの問題は今のところ無視しています。
 
-この「将来 migration プランを書くとき」については、WWDC 2026 の SwiftData Group Lab で 1 つ指針が示されていた、という話を見かけました。複数プロセス (アプリ本体 / Widget / Live Activity) が同じ App Group のストアを共有する構成では、**マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。理由は、アプリ更新直後は **アプリ本体より先に Widget / Extension プロセスが起動し得る** ため。両方がマイグレーションプランを持っていると、Extension が先に移行を試みて本体の移行と競合する危険があります。なので将来 `SchemaMigrationPlan` を導入するときは、**プランを渡すのはアプリ本体の `ModelContainer` だけ** にして、Widget / Live Activity 側はプラン無し (= 移行済みファイルを読むだけ) で構成する方針にしました。この別プロセス前提の話は [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) 側にも要点を書いています。
+この「将来 migration プランを書くとき」については、1 つ指針として聞いた話があります。複数プロセス (アプリ本体 / Widget / Live Activity) が同じ App Group のストアを共有する構成では、**マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。理由は、アプリ更新直後は **アプリ本体より先に Widget / Extension プロセスが起動し得る** ため。両方がマイグレーションプランを持っていると、Extension が先に移行を試みて本体の移行と競合する危険があります。なので将来 `SchemaMigrationPlan` を導入するときは、**プランを渡すのはアプリ本体の `ModelContainer` だけ** にして、Widget / Live Activity 側はプラン無し (= 移行済みファイルを読むだけ) で構成する方針にしました。この別プロセス前提の話は [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) 側にも要点を書いています。
 
-ただしこの指針、**一次資料で裏を取れていません**。当初はセッション 8017 として書いていたんですが、あとで手元のアーカイブを漁り直したら書き起こしが見つかりませんでした (出てくるのは別テーマの 8011 だけです)。Group Lab はライブ Q&A なので公式の書き起こしが出ないことも多いみたいです。内容自体は SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので方針は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。実際に導入する段になったら API 名と挙動は公式ドキュメントで確認し直すつもりです。
+ただしこの指針、**一次資料で裏を取れていません**。当初は WWDC 2026 の SwiftData Group Lab (セッション 8017) で示されたものとして書いていたんですが、あとで調べ直したら、Apple の公開セッション一覧にも手元のアーカイブにも 8017 というセッションがありませんでした (Group Lab は Apple Intelligence の 8011 だけです)。出どころを辿れないので、出典は外しています。内容自体は SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので方針は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。実際に導入する段になったら API 名と挙動は公式ドキュメントで確認し直すつもりです。
 
 ## ハマりどころ 4: フォールバックが気付かないうちにデータを分裂させる
 
@@ -204,7 +201,7 @@ public static var configuration: ModelConfiguration {
     logger.warning("App Group container unavailable — using non-shared fallback (DEBUG only)")
     return ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
     #else
-    logger.critical("App Group container unavailable in production — entitlement misconfig")
+    logger.critical("App Group container unavailable in production build — entitlement misconfig")
     fatalError("App Group missing in production build — check entitlements for \(appGroupIdentifier)")
     #endif
 }
@@ -243,9 +240,9 @@ EXC_BREAKPOINT (SIGTRAP) / libswiftCore _assertionFailure
 
 落ちる場所が `ModelContainer` 生成 **より前** の、schema の一度きりの初期化なので、症状がかなり分かりにくいです。自分の場合は UI テストが全ケース「起動直後にクラッシュ」になって、原因の当たりが全然つきませんでした。フィールドを外して単一の `testAppLaunches` を通すことで、ようやく切り分けています。
 
-対処は、この記事でずっと書いている **CloudKit 互換 primitive + 境界で組み立て** と同じ形にすることでした。`recurrenceFrequency: String?` + `recurrenceInterval: Int = 1` で保存して、Entity の境界で `Calendar.RecurrenceRule` に組み直します。場所 (`locationName` + 緯度経度) や担当者と同じパターンです。
+対処は、**CloudKit 互換 primitive + 境界で組み立て** の形にすることでした。`recurrenceFrequency: String?` + `recurrenceInterval: Int = 1` で保存して、Entity の境界で `Calendar.RecurrenceRule` に組み直します。場所 (`locationName` + 緯度経度) や担当者と同じパターンです。
 
-CloudKit 互換のために primitive に落とす、という制約のおかげで、結果的にこっちの地雷も避けられていた、というのはちょっと面白いところでした。「モデルは枯れた primitive、リッチな型は境界で作る」を守っていれば、そもそも踏まなかったやつです。
+CloudKit 互換のために primitive に落とす、という制約のおかげで、結果的にこっちの地雷も避けられる、というのはちょっと面白いところでした。「モデルは枯れた primitive、リッチな型は境界で作る」を守っていれば、そもそも踏まなかったやつです。
 
 ## ハマりどころ 6: 削除済みオブジェクトの配列属性を読むと trap する
 
@@ -347,7 +344,7 @@ do {
 
 ## WWDC 2026 の SwiftData レビューを受けて
 
-WWDC 2026 の SwiftData / Widget まわりのセッションと Group Lab を見直したので、この記事に関係する差分を反映しておきます。マイグレーション分離は上のハマりどころ 3 に書いたとおりで、ここでは残り 2 つです。
+WWDC 2026 の SwiftData / Widget まわりのセッションを見直したので、この記事に関係する差分を反映しておきます。マイグレーション分離は上のハマりどころ 3 に書いたとおりで、ここでは残り 2 つです。
 
 1 つ目、**CloudKit 互換の制約は 2026 でも据え置き** でした。`@Attribute(.unique)` が enforce されない・リレーションは全部 Optional・プロパティはデフォルト値か Optional 必須、というこの記事の要件はそのまま有効です。新しい回避策が増えたわけではないので、ここで書いたワークアラウンドは引き続き必要、という確認になりました。
 
@@ -363,7 +360,7 @@ public func incompleteCount() throws -> Int {
 }
 ```
 
-`fetchCount` はモデルを materialize せずストアレベルで件数だけ返すので、件数しか要らないところはこちらが素直です。これ自体は iOS 17 からある既存 API で WWDC 2026 の新規ではないんですが、Group Lab で「件数だけ欲しいときは件数取得 API を使う」と改めて念押しされていたので、意図を明確にするクリーンアップとして入れました。なお IntentTodo は実データ量が小さいので、体感差はほぼありません。
+`fetchCount` はモデルを materialize せずストアレベルで件数だけ返すので、件数しか要らないところはこちらが素直です。これ自体は iOS 17 からある既存 API で WWDC 2026 の新規ではないんですが、件数だけ欲しいところでは件数を取る API を使う、という意図をはっきりさせるクリーンアップとして入れました。なお IntentTodo は実データ量が小さいので、体感差はほぼありません。
 
 ## まとめ
 
@@ -383,6 +380,7 @@ public func incompleteCount() throws -> Int {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 校正。マイグレーションの指針の出典 (セッション 8017 は公開一覧に無く、出典を外したこと) をほかの節とも揃え、Group Lab で聞いたように読める箇所を直した。最初のエラーログからリレーションの行を外し (ハマりどころ 2 と重複していた)、ログの文言を今のコードに合わせた。「ハマりどころは 3 と 4 と 6」が節の番号に読める書き方を直した
 - **2026-11-05**: 校正。打ち明け話の体裁になる「正直なところ」を外した
 - **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

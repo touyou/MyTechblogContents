@@ -14,7 +14,7 @@ published: true
 WWDC 2026 編の 3 本目です (この編の前提は 6/N 冒頭を見てください)。
 
 今回は、Intent を **対話的・予測的に賢くする** ための新 API をまとめて試した話です。
-具体的には `requestConfirmation` / `requestChoice` で `perform()` を一旦止めてユーザーに聞く話、`IntentDialog(full:supporting:)` で返事を出し分ける話、Interactive Snippet でその場で操作させる話、そして `IntentDonationManager` で寄付する話 (結論が何度か動いて、今は Intent を通らない UI 操作だけ寄付しています) の 4 本立てです。
+具体的には `requestConfirmation` / `requestChoice` で `perform()` を一旦止めてユーザーに聞く話、`IntentDialog(full:supporting:)` で返事を出し分ける話、Interactive Snippet でその場で操作させる話、そして `IntentDonationManager` で寄付する話 (結論が何度か動いて、今は Intent を通らない UI 操作だけ寄付しています) の 4 つが中心です。
 
 ## `perform()` を止めてユーザーに聞く
 
@@ -189,7 +189,7 @@ Button(intent: ToggleTodoCompletionIntent(todo: entity)) {
 
 ## 寄付は、Intent を通らない UI 操作のぶんだけする
 
-最後が寄付です。アクションを `IntentDonationManager` に寄付しておくと、システムが「この人はこの時間帯によく Todo を追加するな」みたいに学習して、先回りで提案してくれるようになります。
+4 つ目が寄付です。アクションを `IntentDonationManager` に寄付しておくと、システムが「この人はこの時間帯によく Todo を追加するな」みたいに学習して、先回りで提案してくれるようになります。
 
 ここは結論が何度か動いていて、今は **Intent を通らない UI 操作だけを、UI 側から寄付** しています。途中に「明示的な寄付はゼロでいい」と結論していた時期があって、そこに至る理由とそれが崩れた理由の両方が本題なので、順に書きます。
 
@@ -420,7 +420,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 - `UndoableIntent` も iOS 26 (セッション 275) です。取り消しの実装形そのものは WWDC 2026 の公式サンプル (CosmoTunes の `DeleteAlarmIntent`) が見せてくれているので、API と実例の年が離れている、という点では `IntentDialog(full:supporting:)` と同じ形になっています。
 - `IntentDonationManager` と、本文で `deleteDonations(matching:)` に渡している `IntentDonationMatchingPredicate` は、**どちらもセッションの書き起こしには出てこず、API ドキュメント由来** です。WWDC 2023 (セッション 10103) にあるのは `RelevantIntent` / `RelevantIntentManager` / `RelevantContext` の方で、自分は隣にあったこれらと混ぜて覚えていました。
 
-自分のアプリに入れる分には「今の SDK で使えるか」しか見ていなかったので気にしていなかったんですが、記事として読むと「WWDC 2026 で何が増えたのか」の情報として不正確なので直しておきます。ベースラインが iOS 26 のプロジェクトに iOS 27 の新要素を足していく作り方をしていると、この 2 世代の境目は自分でも結構あいまいになるなと思いました。
+自分のアプリに入れる分には「今の SDK で使えるか」しか見ていなかったので気にしていなかったんですが、記事として読むと「WWDC 2026 で何が増えたのか」の情報として不正確なので直しておきます。ベースラインが iOS 26 だったころに iOS 27 の新要素を足していく作り方をしていたので、この 2 世代の境目は自分でも結構あいまいになっていたなと思いました。
 
 そしてもう 1 つ、「API ドキュメントを読んで知ったこと」と「セッションで説明されていたこと」を、自分の中で一緒くたに『WWDC のあの回で見た』として覚えていたのが、出典を間違えた主な原因でした。出典として書くならこの 2 つは分けておかないといけないなと思います。
 
@@ -429,7 +429,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 今回は以下です。
 
 - **ビルド成立 (B)**: `requestConfirmation` / `requestChoice` / `IntentDialog(full:supporting:)` / `SnippetIntent` / `UndoableIntent` / `CustomAppIntentErrorConvertible` はすべて OK。
-- **単体 (U)**: `valueState` の三状態と `UndoableIntent` の復元は AppIntentsTesting で確認済みです (10/N)。`requestChoice` を使う Intent だけはテストから run できません。
+- **単体 (U)**: `valueState` の三状態は AppIntentsTesting で (10/N)、`UndoableIntent` の復元は `TodoService` の単体テストで確認済みです。`requestChoice` を使う Intent だけはテストから run できません。
 - **観測 (シミュレータ)**: `Button(intent:)` の実行がシステムの donation に記録されること、UI 側から寄付したフィルタ選択と行の選択が `Button(intent:)` と同じ形で記録されることは実測しました。ただし Widget / Control / Live Activity 起点は測れていません。
 - **実機 (R)**: Siri が実際に確認 UI / 選択 UI を出すか、スニペットが応答に出るかは未確認です。端末で触れたら追記します。
 
@@ -452,6 +452,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 校正。あとから節を足して「4 本立て」「最後が寄付」と構成が合わなくなっていたのを直し、`UndoableIntent` の復元を確かめたテストの種類を今のリポジトリに合わせた
 - **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し
 - **2026-10-01**: 寄付の節に「第 4 段階」を追加。「UI が全部 `Button(intent:)`」は確かめていない前提で、フィルタの選択と行の選択が Intent を通っていなかったので、その 2 つを Binding の setter から寄付するようにした (明示的な寄付ゼロという結論を撤回)。`ShowTodosIntent` のスニペットと dialog のコードを現行に、`valueState` のコード例を 7/N のリネーム後の名前に更新。タイトルと見出しからダッシュを外した

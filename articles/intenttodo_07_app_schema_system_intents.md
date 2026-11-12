@@ -316,7 +316,7 @@ UI 側では **絞り込み中であることの表示と、その場での解�
 
 ## Intent 側のスキーマ適合
 
-ここまでの App Schema は entity / enum の話で、Intent 側の適合は `.system.searchInApp` と、10/N に書く Visual Intelligence の 2 本しかありませんでした。上の `.system.open` の表を作ったのをきっかけに Intent 側も見直しました。セッション 240 によると **Intent を Siri から実行できるようにするのはスキーマ適合の方** で、手元で確かめられたのは、適合したときだけメタデータに `AssistantIntent` と schema のエントリが付く、というところまでです。この「スキーマ適合だけ」という前提は 27.3 beta で変わったので、節の最後に書きます。
+ここまでの App Schema は entity / enum の話で、Intent 側の適合は `.system.searchInApp` と、10/N に書いた Visual Intelligence の 2 本しかありませんでした。上の `.system.open` の表を作ったのをきっかけに Intent 側も見直しました。セッション 240 によると **Intent を Siri から実行できるようにするのはスキーマ適合の方** で、手元で確かめられたのは、適合したときだけメタデータに `AssistantIntent` と schema のエントリが付く、というところまでです。この「スキーマ適合だけ」という前提は 27.3 beta で変わったので、節の最後に書きます。
 
 ### 要求はビルドでしか出てこない
 
@@ -448,7 +448,7 @@ extension ToggleTodoCompletionIntent: ToolIntent {}
 
 ## 検証できた深さ
 
-- **ビルド成立 (B)**: entity 側の `.reminders.reminder` / `.reminders.list` / `.reminders.listType` / `.reminders.section` / `.reminders.locationTrigger` / `.reminders.locationTriggerEvent`、Intent 側で新たに適合させた 7 本、`OpenIntent` / `DeleteIntent`、`SetFocusFilterIntent` はすべて OK。iOS / macOS / visionOS / watchOS の 4 destination でクリーンビルド緑。
+- **ビルド成立 (B)**: entity 側の `.reminders.reminder` / `.reminders.list` / `.reminders.listType` / `.reminders.section` / `.reminders.locationTrigger` / `.reminders.locationTriggerEvent`、Intent 側で新たに適合させた 7 本 (`OpenIntent` / `DeleteIntent` への準拠を含む)、`SetFocusFilterIntent` はすべて OK。iOS / macOS / visionOS / watchOS の 4 destination でクリーンビルド緑。
 - **単体 (U)**: 出荷メタデータの検査で、各スキーマを主張する型が 1 つずつ登録されていることまで確認。AppIntentsTesting のスイートも全緑です。
 - **ツール (27.3 beta)**: 4 destination のクリーンビルドが緑、`sirimetadataanalyzer` で 12 本がツールとして数えられることまで確認 (10/N)。実機の Siri から呼んだ結果はまだです。
 - **実機 (R)**: 一部だけ。TestFlight のビルドで Siri から App Shortcut の一覧表示が通るところまでは見ました (5/N / 9/N) が、「スキーマ適合が Siri / Apple Intelligence でどう使われるか」はまだです。AppIntentsTesting は型名で intent を引くのでスキーマの経路を通りません。27.3 beta の SiriEvaluations ならこの段を自動化できますが、まだ回せていません (10/N)。
@@ -475,6 +475,7 @@ extension ToggleTodoCompletionIntent: ToolIntent {}
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 校正。公開済みの 10/N への参照の時制と、検証の深さの節で `OpenIntent` / `DeleteIntent` が 7 本とは別に数えたように読める書き方を直した
 - **2026-11-04**: Xcode 27.3 beta の Siri AI Developer Preview を反映。「Siri が実行できるのはスキーマ適合したアクションだけ」を 27.2 までの話に改め、「27.3 beta: スキーマに当てはまらないアクションは『ツール』で Siri に開く」の節を新設 (primary domain との併用はビルドエラー / 12 本をツール化 / 27.2 の SDK では通らない / メタデータの差)
 - **2026-11-01**: Xcode 27.2 正式版で確かめた結果を反映 (FB24570185 は 27.2 でも再現 / `caseDisplayRepresentations` の既定実装は正式版にも入っている)
 - **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した

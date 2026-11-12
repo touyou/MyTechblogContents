@@ -177,7 +177,7 @@ struct IntentTodoWidgetBundle: WidgetBundle {
 
 きっかけはセッション 345 (16:30) を読み直したことで、そこで挙げられている動機がこのアプリの構成そのままでした。曰く「ウィジェットはアプリとデータモデルを共有しているが、2 つのプロセスが同じストアに書くと衝突しうるので、ウィジェットには読み取り専用のアクセスを与えて、書き込みは全部メインアプリに任せた」。IntentTodo も共有パッケージが Widget Extension にリンクされていて、`WidgetBundle.init()` で **読み書きできる `TodoService`** を登録していたので、アプリ未起動時に変更系 Intent が Extension へ振られると、そこが SwiftData の書き手になり得ました。3/N や 4/N で書く「マイグレーションはアプリ本体に寄せる」と同じ危うさです。
 
-なので方針を **「`TodoService` の変更メソッドを呼ぶ Intent はすべて `allowedExecutionTargets = [.main]`、読み取り系は未指定のまま」** に決めました。最初に固定したのは 13 個で、その後リスト・タグ・セクションを管理する Intent が 7 つ増えたので、今は 20 個です (watchOS には管理系が無いので 13 個)。
+なので方針を **「`TodoService` の変更メソッドを呼ぶ Intent はすべて `allowedExecutionTargets = [.main]`、読み取り系は未指定のまま」** に決めました。最初に固定したのは 13 個で、その後リスト・タグ・セクションを管理する Intent が 7 つ増えたので、今は 20 個です (watchOS には管理系が無いので 13 個)。このあと書く、App Shortcut に登録した読み取り系の 2 個を足すと、`[.main]` を宣言している Intent は 22 個になります。
 
 ```swift
 public struct ToggleTodoCompletionIntent: UndoableIntent {
@@ -229,7 +229,7 @@ public func create(...) throws -> TodoAppEntity {
 }
 ```
 
-逆に `delete` は、あえて `defer` を unconditional に置いています。
+逆に `delete` は、ID の形を確かめたあとは、削除が throw しても必ず走るように `defer` を置いています。
 Spotlight の deindex はそもそも idempotent だし、CloudKit の merge で既に消えていて `repository.delete` が throw したケースでも、ローカルの index と Widget は更新しておく方が整合が取れるからです。
 「`defer` に何を入れるか」は副作用の冪等性しだいで変わる、と書いてみて分かりました。
 
@@ -238,7 +238,8 @@ Spotlight の deindex はそもそも idempotent だし、CloudKit の merge で
 この `dataDidChange()`、最初は `WidgetReloader.reloadAllWidgets()` 1 行だったんですが、今は 2 つになっています。
 
 ```swift
-private static func dataDidChange() {
+// TodoService+Organize.swift (リスト・タグの操作) からも呼ぶので private にしていない
+static func dataDidChange() {
     WidgetReloader.reloadAllWidgets()
     AppShortcutParameterUpdater.notifyEntitiesChanged()
 }
@@ -261,7 +262,7 @@ WindowGroup {
 
 **呼び忘れを構造で防ぐ集約点を作っておくと、後から足すものが 1 箇所で済みます**。逆に集約点が無いまま「変更系メソッド 9 箇所に 2 行ずつ足す」をやっていたら、たぶんどこかを取りこぼしていました。5/N には集約先の中身が片肺だった (ウィジェットはリロードしていたのにコントロールはしていなかった) という失敗も書いていて、集約点があること自体は正しいんだけど、中身が正しいかは別途見ないといけない、というのが今の実感です。
 
-## ファクトリで「Repository を知らない」 caller を作る
+## ファクトリで「Repository を知らない」caller を作る
 
 最後に `TodoService.swiftDataBacked(container:)` ファクトリの話。
 
@@ -293,6 +294,7 @@ public extension TodoService {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 今のコードに合わせて直した。`dataDidChange()` は `TodoService+Organize.swift` からも呼ぶので `private` ではないこと、`delete` の `defer` は ID の形を確かめたあとに置いていること、`[.main]` の総数 (22 個) の内訳。見出しの空白の誤字
 - **2026-10-30**: 誤字・文の呼応の校正。まとめの「コンパイル時に消せる」が冒頭の「コンパイル時には強制できない」と食い違っていたので「構造で防げる」に訂正。あわせて表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃えた
 - **2026-10-01**: 「App Shortcut に登録した Intent は、読み取り系でもアプリ本体に固定する」の節を追加 (未指定だとアプリ未起動時に Extension へ回り、`AppShortcutsProvider` が無くて Siri が失敗する)。実行プロセスの表に Siri / Shortcuts (未指定) と App Shortcut の行を追加。固定数を 13 → 20 に更新し、ガードテストを 4 本立てに。`updateAppShortcutParameters()` の初回呼び出しを `App.init()` からシーンの `.task` へ移した話を追加
 - **2026-08-28**: 書き込み系 13 Intent を `allowedExecutionTargets = [.main]` に固定した方針を反映。二重登録の説明を「畳めない」から「役割が分かれた (Widget 側は読み取り専用)」へ書き換え。`defer` の集約先が `dataDidChange()` に育った話 (App Shortcut のパラメータ更新) を追加

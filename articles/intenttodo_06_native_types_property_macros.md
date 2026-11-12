@@ -239,7 +239,7 @@ extension TodoAppEntity: Transferable {
 
 細かい気付きも 2 つ書いておきます。
 
-- `IntentPerson(identifier:name:handle:)` は **全引数が必須** でした。`handle` を省くと `Missing arguments for parameters 'identifier', 'handle'` になるので、無いものは明示的に `nil` を渡します。
+- `IntentPerson(identifier:name:handle:)` は **全引数が必須** でした。`identifier` や `handle` を省くと `Missing arguments for parameters 'identifier', 'handle'` になるので、無いものは明示的に `nil` を渡します。
 - export closure は `async throws` なので、担当者や場所が無い Todo は **`throw` してその表現ごと出さない** 形にしました。空っぽの `IntentPerson` を返すより、「この Todo に人の表現は無い」とシステムに伝わる方が筋がいいと思います。
 
 ### SDK バグで `@Parameter` だけ `String` に退避している
@@ -266,7 +266,7 @@ SSU の variable は「**App Shortcut が参照する Intent のパラメータ�
 
 逆に、対象の型は `PlaceDescriptor` 固有ではありませんでした。SDK の swiftinterface をなめると `_SystemIntentValue` に適合する型は 5 つあって、確かめた 4 つが全部同じ形で落ちます (`LinkPresentation.LinkMetadata` / `MediaIntents.AudioSearch` / `Photos.PHAsset` も同様)。どれも公式が「サポートされるパラメータ型」の **Other system types** として明記しているものです。
 
-さらに、**リリース版の Xcode 26.6 でも再現しました**。`PlaceDescriptor` の `_SystemIntentValue` 適合は iOS 26 からなので、ベータ特有の話ではなく **26 世代から出荷されているバグ** だった、ということになります。Apple の公式サンプル (UnicornChat) に 13 行足すだけでも同じエラーが出ます。
+さらに、**リリース版の Xcode 26.6 でも再現しました**。`PlaceDescriptor` の `_SystemIntentValue` 適合は iOS 26 からなので、ベータ特有の話ではなく **26 世代から出荷されているバグ** だった、ということになります。Apple の公式サンプル (UnicornChat) に、`PlaceDescriptor` を `@Parameter` に持つ Intent を 13 行足して App Shortcut に 1 つ登録するだけでも同じエラーが出ます。
 
 そして **Xcode 27 が RC (27A266a) になっても直っていません**。`@Parameter` を `PlaceDescriptor?` に戻した probe を、共有 DerivedData を汚さない別ディレクトリでクリーンビルドし直したんですが、同じ regex のエラーが出て `nlu.appintents` の生成数は 0 のままでした。その後の Xcode 27.1 は App Intents の SDK 差分がゼロでした。
 
@@ -298,7 +298,7 @@ Entity の話から少し逸れますが、`@Parameter` を足すときにセッ
 
 > `ParameterSummary` is not cosmetic — it is the allowlist for which parameters the Shortcuts editor surfaces. […] every other `@Parameter` is **silently omitted** from the editor UI, even though it still exists and still resolves.
 
-編集行になるのは **`Summary("...")` の補間に出てくるもの** と **trailing のブロックに列挙したもの** だけです。`AddTodoIntent` の summary は `Summary("Add todo titled \(\.$title)")` だけだったので、`dueDate` / `isFavorite` / `estimatedDuration` / `assignee` / `location` は **Shortcuts からそもそも設定できませんでした**。`UpdateTodoIntent` に至っては、8/N で書いた「部分更新の三状態」を作り込んだ 6 パラメータが全部隠れています。
+編集行になるのは **`Summary("...")` の補間に出てくるもの** と **trailing のブロックに列挙したもの** だけです。`AddTodoIntent` の summary は `Summary("Add todo titled \(\.$title)")` だけだったので、`note` / `dueDate` / `isFlagged` / `estimatedDuration` / `assignee` / `location` は **Shortcuts からそもそも設定できませんでした**。`UpdateTodoIntent` に至っては、8/N で書いた「部分更新の三状態」を作り込んだ 6 パラメータが全部隠れています。
 
 ```swift
 public static var parameterSummary: some ParameterSummary {
@@ -326,7 +326,7 @@ public static var parameterSummary: some ParameterSummary {
 Entity のプロパティマクロで、もう 1 つ試したのが `@ComputedProperty` と `@DeferredProperty` です。
 どちらも「スナップショットに持っていない値を、導出 / 取得してシステムに公開する」ためのものですが、性格が違います。
 
-この 2 つは WWDC 2026 編に入れて書いていますが **出自は iOS 26 (WWDC 2025 セッション 275)** で、2026 の新 API ではありません。セッション 345 で増えているのは `RelevantEntities` まわりや `EntityCollection` などの方です。ベースラインが iOS 26 のプロジェクトに iOS 27 の新要素を足していく作り方をしていると、手元では「今の SDK で使えるか」しか見ないので、この 2 世代の境目が自分の中でもあいまいになっていました。
+この 2 つは WWDC 2026 編に入れて書いていますが **出自は iOS 26 (WWDC 2025 セッション 275)** で、2026 の新 API ではありません。セッション 345 で増えているのは `RelevantEntities` まわりや `EntityCollection` などの方です。ベースラインが iOS 26 だったころに iOS 27 の新要素を足していく作り方をしていたので、手元では「今の SDK で使えるか」しか見ておらず、この 2 世代の境目が自分の中でもあいまいになっていました。
 
 `@ComputedProperty` は同期 getter で、スナップショットが持っている値から軽く導出できるもの向け。
 IntentTodo では「期限切れかどうか」を `dueDate` と `isCompleted` から計算しています。
@@ -430,7 +430,7 @@ public func hash(into hasher: inout Hasher) {
 
 ちなみに `location` (`PlaceDescriptor`) は `Equatable` が保証されていないので等価比較からは外しています。保存している name / 緯度経度はモデル経由で結局反映されるので、実害は無いと判断しました。
 
-この `Hashable` 合成の問題は Xcode 27 beta 2 でも直っていませんでした。beta 2 対応のついでに明示実装を外してビルドし直してみたら、やっぱり `does not conform to protocol 'Hashable'` で落ちたので、当面は明示実装が必要なままです。
+この `Hashable` 合成の問題は Xcode 27 beta 2 でも直っていませんでした。beta 2 対応のついでに明示実装を外してビルドし直してみたら、やっぱり `does not conform to protocol 'Hashable'` で落ちたので、今のコードも明示実装のままにしています (27.2 で外せるかはまだ試していません)。
 
 ## 関連を Entity 化する: Category / SubTask
 
@@ -452,7 +452,7 @@ public struct CategoryAppEntity: Hashable {
 ## ついでに足せた SyncableEntity
 
 WWDC 2026 の `SyncableEntity` (セッション 345) も、Phase 1 のついでに適合できました。
-これは「デバイスをまたいで同じ Entity を一貫して参照できる」ためのプロトコルですが、`TodoAppEntity` の `id` が SwiftData + CloudKit のレコード id をそのまま文字列化したもので、もともとデバイス間で一致しているので、**プロトコル適合を書き足すだけ** で済みました。
+これは「デバイスをまたいで同じ Entity を一貫して参照できる」ためのプロトコルですが、`TodoAppEntity` の `id` は `TodoItem` の UUID を文字列化したもので、SwiftData + CloudKit が同じレコードを各デバイスに複製するのでもともとデバイス間で一致していて、**プロトコル適合を書き足すだけ** で済みました。
 
 ```swift
 public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
@@ -615,7 +615,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 - `@ComputedProperty` (同期・軽い導出) と `@DeferredProperty` (非同期・要求時フェッチ、Spotlight 非 index) を使い分ける。どちらも出自は iOS 26 で、2026 の新 API ではない。**スナップショットに値を持たない** という性質は、スキーマ要求名の付け替え (entity だけ) や、削除済みオブジェクトを読まないための逃がしにも使える
 - Entity は `@Dependency` を使えないので、共有コンテナは `TodoEntityStore` に置いて参照する。`AppDependencyManager` とは別々の登録なので、アプリと Widget Extension の両プロセスで登録する
 - プロパティマクロは `Hashable` 自動合成を壊すので `==` / `hash(into:)` を明示実装する
-- `SyncableEntity` は CloudKit id をそのまま使っていれば適合を書き足すだけで済む
+- `SyncableEntity` は、CloudKit で複製されるモデルの UUID を id にしていれば適合を書き足すだけで済む
 - 集計値のように後から id で引かれないものは `TransientAppEntity` にすると、`EntityQuery` も永続化も無しで Shortcuts の条件分岐に載せられる
 - 表示表現は **ランタイム値を補間形式で渡す** (`stringLiteral:` はキー扱いになる)。subtitle は Siri が読み上げるので位置指定の書式を避ける。候補一覧は `displayRepresentations(for:)` で entity を作らずに返す
 - `indexingKey:` と `attributeSet` で同じ Spotlight キーを二重に埋めない。人が読む文字列の突き合わせは全部 `localizedStandardContains(_:)` に揃える
@@ -626,6 +626,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 今のコードとリポジトリの記録に合わせて直した。`AddTodoIntent` のパラメータ名、`TodoAppEntity` の id が何か (モデルの UUID)、`IntentPerson` のエラーが出る条件、UnicornChat での再現条件 (App Shortcut への登録)、`Hashable` の明示実装の今の状態
 - **2026-11-05**: 校正。打ち明け話の体裁になる「正直に」「正直なところ」を外した
 - **2026-11-01**: SSU バグ (FB24548956) が Xcode 27.2 正式版で直ったことを反映し、「Xcode 27.2 で直った、けどまだ戻さない」の節を追加 (配布ビルドの Xcode Cloud がまだ 27.1 なので `@Parameter` の退避は継続)
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

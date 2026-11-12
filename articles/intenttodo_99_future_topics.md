@@ -31,8 +31,8 @@ published: true
 
 最初にこの記事を書いた時点で「将来」に置いていたもののうち、以下は 6〜10/N で扱いました。
 
-- **Visual Intelligence 連携** (旧トピック F の一部): `IntentValueQuery` + `SemanticContentDescriptor` でカメラ / スクショ中の対象から該当 Todo を返す入口を実装しました。詳細は 10/N に書きます。
-- **Interactive Snippets** (旧トピック F の一部): `SnippetIntent` で、追加した Todo をその場で完了 / お気に入り操作できるスニペットを返すところまでやりました。8/N で触れます。
+- **Visual Intelligence 連携** (旧トピック F の一部): `IntentValueQuery` + `SemanticContentDescriptor` でカメラ / スクショ中の対象から該当 Todo を返す入口を実装しました。詳細は 10/N に書いています。
+- **Interactive Snippets** (旧トピック F の一部): `SnippetIntent` で、追加した Todo をその場で完了 / お気に入り操作できるスニペットを返すところまでやりました。8/N で触れています。
 
 逆に、片付いたというより **「試したけど採用しなかった」「やらないと決めた」** ものもあります。
 
@@ -43,7 +43,7 @@ published: true
 
 ## WWDC 2026 の SwiftData レビューで整理できたもの
 
-WWDC 2026 の SwiftData 関連セッションと Group Lab を見直したら、「これまで微妙だと思っていた / 判断を保留していた」観点のいくつかが、公式の裏付けで整理できました。本編側に反映したもの (マイグレーションをアプリ本体に一本化する話 → [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) / [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)、WidgetKit 実行モデルの明文化 → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)) とは別に、ここに棚卸しとして残しておきます。
+WWDC 2026 の SwiftData 関連セッションを見直したら、「これまで微妙だと思っていた / 判断を保留していた」観点のいくつかが整理できました。本編側に反映したもの (マイグレーションをアプリ本体に一本化する話 → [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) / [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)。こちらは出どころを辿れない伝聞でした。WidgetKit 実行モデルの明文化 → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)) とは別に、ここに棚卸しとして残しておきます。
 
 ### View 外での SwiftData 監視に公式 API ができた
 
@@ -85,7 +85,7 @@ WWDC 2026 で `ResultsObserver` / `ModelResultsObserver` という、SwiftUI の
 
 Vision Pro 持ってないので、シミュレータで動いた範囲だけしか言及できない状態。
 実機は相変わらず無いままなんですが、**実機 SDK 向けのビルドだけが落ちる** という別種の問題は 1 つ直しました。`#if canImport(VisualIntelligence)` がシミュレータでは false、実機 SDK では true になってビルドが割れる話で、詳しくは [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing) に書いています。シミュレータで動いた範囲しか言えない、の前に「実機向けにビルドは通るのか」という段があったんだなと反省しました。
-visionOS でハマった「`NavigationSplitView.selection` の更新を NavigationModel に統合した」話 の続きは、実機検証ができたら書きたいです。
+visionOS でハマった「`NavigationSplitView.selection` の更新を NavigationModel に統合した」話の続きは、実機検証ができたら書きたいです。
 
 ### C. Spotlight の iOS 反映ラグ
 
@@ -160,7 +160,7 @@ WWDC 2026 編を公開したあと、セッション情報 (240 / 343 / 344 / 34
 - `@UnionValue` は WWDC 2024 (セッション 10134) で、345 は実装要件を提示した回 → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)
 - Visual Intelligence の `IntentValueQuery` / `SemanticContentDescriptor` も iOS 26 からで、297 は macOS 対応が増えた回 → [10/N](https://zenn.dev/touyou/articles/intenttodo_10_visual_intelligence_testing)
 
-ベースラインが iOS 26 のプロジェクトに iOS 27 の新要素を足していく作り方だと、手元では「今の SDK で使えるか」しか見ないので、この 2 世代の境目が自分の中でもあいまいになっていました。
+ベースラインが iOS 26 だったころは、そこに iOS 27 の新要素を足していく作り方をしていて、手元では「今の SDK で使えるか」しか見ていなかったので、この 2 世代の境目が自分の中でもあいまいになっていました。
 
 あわせて、**API は把握したうえでこのアプリには入れないと決めたもの** も記録しておきます。`DynamicOptionsProvider` と `IntentParameterDependency` (WWDC 2022 / 2023) は、パラメータの選択肢を動的に出したり、別パラメータの現在値に依存させたりするための道具ですが、IntentTodo にはそもそも **パラメータ間の動的依存が発生するユースケースが無い** です。フィルタや並び順は `AppEnum` の静的リストで足りていて、Todo やカテゴリの選択は `EntityQuery` が引き受けています。「使える API だけど要らない」というのも判断の記録なので、ここに残しておきます。
 
@@ -317,7 +317,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 - **アップデートで配った先の App Intents の登録**: 開発中は、パラメータをリネームするとシミュレータの登録が古いまま残って `simctl erase` が要りました (7/N)。アップデートを受け取った利用者の端末で同じことが起きるのかは分かっていません
 - **Siri が読み上げる文言の日本語**: Shortcuts アプリでアクション名や型名が日本語で出ることは実機で確かめましたが (3/N)、Siri が読み上げる `IntentDialog` の方はまだ推論です
 - **Widget / Control / Live Activity 起点の donation**: アプリ内 `Button(intent:)` の実行がシステムに寄付されていることは実測できたんですが (8/N)、別プロセス起点は測れていません。シミュレータでは合成タップでコントロールが発火せず、ホームウィジェットの行は `Link` なので `Button(intent:)` がありません。`callAsFunction(donate:)` への載せ替えは不採用で決着したので、これは **「別プロセス起点だけ明示的な寄付が要るのか」という独立した問い** として残っています
-- **`UISceneAppIntent`**: `#if canImport(_AppIntents_UIKit) && !os(watchOS)` という **ガードの形さえ間違えなければ Package スコープでも置ける** ことを確認したうえで、その後 `LaunchAppIntent` / `OpenTodoIntent` に採用しました。狙いはマルチウィンドウではなく cold start です (5/N)。実機で cold start の遷移を確かめるのが残りです
+- **`UISceneAppIntent`**: `#if canImport(_AppIntents_UIKit) && !os(watchOS)` という **ガードの形さえ間違えなければ Package スコープでも置ける** ことを確認したうえで、その後 `LaunchAppIntent` / `OpenTodoIntent` に採用しました (今のコードは `#if os(iOS) || os(visionOS)` で囲んでいます)。狙いはマルチウィンドウではなく cold start です (5/N)。実機で cold start の遷移を確かめるのが残りです
 - **`.onAppIntentExecution` の cold start 問題**: そもそも今のコードベースでは `.onAppIntentExecution` をどこでも使っていない (`@Dependency` + `perform()`、それに `AppIntentSceneDelegate` に移行済み) ので、現時点では検証対象が無い状態です。再導入するときに「`@State` の path が未構築」「シーンの activation conditions 未設定」「`supportedModes` に foreground が無い」の 3 仮説を順に確かめる、というメモだけ残しました
 
 待ちのタスクとして 1 つ増えたのが **App Schema と watch ターゲットの両立** です。iOS アプリが watch アプリを埋め込む構成だと、共有 entity は型を二重定義しない限りどのスキーマにも適合できません (7/N)。回避策は入れましたが、公開の解決手段が無いので Apple 側の対応待ちで、Feedback (FB24570185) を出しました。
@@ -364,6 +364,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 本文で予告形だった 8/N・10/N への参照を書いた後の形に。SwiftData の見直しの節から Group Lab と「公式の裏付け」を外し (4/N と揃えた)、`UISceneAppIntent` を採用したときのガードを今のコードに合わせて追記。誤字を修正
 - **2026-11-04**: 「27.3 beta (Siri AI Developer Preview) で増えた検証待ち」の節を追加
 - **2026-11-01**: Xcode 27.2 正式版での測り直しを RC の節に追加 (FB24548956 は直った・配布ビルドが 27.1 なので退避は継続 / FB24570185 は未解消 / `get(as:)` は正式版に無く `ValueRepresentation(importing:)` が増えた)。トピック J とまとめの SDK 待ちを更新
 - **2026-10-01**: **「8 つ目の型: 手元で正しいことを、配った先でも正しいと思う」** を追加 (`AppIntentsPackage` が配布したアプリでだけ App Intents を読ませなくしていた件と、`ShowTodosIntent` で 2 つの変数を一緒に動かした件)。`.foreground(.dynamic)` と寄付の項を、それぞれの結論の撤回に合わせて書き直し。`AppIntentsPackage` の断定取り下げの項を「今は 1 つも宣言しない」に更新。Xcode 27.1 / 27.2 beta の SDK 棚卸しを RC の節に追加。実機検証待ちを現状に更新 (フレーズ / 未指定の読み取り系 / Intent のスキーマ適合 / 配った先の登録 / 読み上げの日本語)。external storage を採用済みに。タイトルからダッシュを外した

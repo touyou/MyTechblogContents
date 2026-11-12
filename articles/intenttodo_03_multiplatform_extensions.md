@@ -64,35 +64,46 @@ Extension target には「ターゲット固有のスキャフォルド」 (`@ma
 
 `Packages/LiveActivity` を例にとると、こうなります。
 
+- `Domain/` パッケージ:
+  - `TodoDeadlineActivityAttributes` (ActivityAttributes。メインアプリからも Activity を起動するので Domain に置く)
 - `LiveActivity/` パッケージ:
-  - `TodoDeadlineActivityAttributes` (Domain と共有する ActivityAttributes)
   - `TodoLiveActivityManager` (`Activity<...>.request` などを叩く `@MainActor final class`)
-  - `LiveActivityMonitor` (`@Query` で Todo を購読し、期限が近いものに対して Activity を起動する View)
-  - ロック画面 / Dynamic Island 用の `View`
+  - `monitorLiveActivities(for:)` (Todo の一覧を受け取り、1 時間以内に期限が来るものの Activity を起動・終了する `ViewModifier`)
+  - ロック画面の `LockScreenLiveActivityView` と、残り時間を出す `TimeRemainingView`
 - `IntentTodoLiveActivity/` Extension target:
   - `IntentTodoLiveActivityBundle.swift` (`@main`)
-  - `TodoLiveActivity.swift` (`ActivityConfiguration` で `LiveActivity` の View を組み合わせるだけ)
+  - `TodoLiveActivity.swift` (`ActivityConfiguration` と Dynamic Island の配置)
 
-Extension target の `TodoLiveActivity.swift` はほぼこれだけになります。
+Extension target の `TodoLiveActivity.swift` は、ロック画面はパッケージの View を置くだけです。Dynamic Island だけは `DynamicIslandExpandedRegion` の並べ方を Extension 側に書いていて、中に置く `TimeRemainingView` はパッケージ側のものです。完了・スヌーズの `Button(intent:)` は Extension 側に書いていて、パッケージから持ってくるのは Intent の型 (`TodoAppIntents`) だけです。
 
 ```swift
 import ActivityKit
+import Domain
 import LiveActivity
 import SwiftUI
 import WidgetKit
 
-struct TodoLiveActivity: Widget {
+struct TodoDeadlineLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TodoDeadlineActivityAttributes.self) { context in
-            TodoLiveActivityLockScreenView(context: context)
+            LockScreenLiveActivityView(context: context)
         } dynamicIsland: { context in
-            todoDynamicIsland(for: context)
+            DynamicIsland {
+                // 展開時の leading / trailing / center / bottom に
+                // アイコン・TimeRemainingView・タイトル・Intent のボタンを置く
+            } compactLeading: {
+                // ...
+            } compactTrailing: {
+                TimeRemainingView(dueDate: context.state.dueDate, style: .minimal)
+            } minimal: {
+                // ...
+            }
         }
     }
 }
 ```
 
-これで View 周りはすべて `LiveActivity` パッケージのプレビューで触れるようになります。
+これでロック画面と残り時間の View は `LiveActivity` パッケージのプレビューで触れるようになります。
 
 ## macOS native への対応と Delegate 分離パターン
 
@@ -123,26 +134,35 @@ struct IntentTodoApp: App {
 }
 ```
 
-`AppDelegate` (iOS/visionOS) と `MacAppDelegate` (macOS) はそれぞれ薄い委譲を書くだけで、本体ロジックは `NotificationHandler` という cross-platform 共通クラスに集約します。
+`AppDelegate` (iOS/visionOS) と `MacAppDelegate` (macOS) は起動時に `NotificationHandler.shared.install()` を呼ぶだけで、本体ロジックは `NotificationHandler` という cross-platform 共通クラスに集約します。
 
 ```swift
-final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_: UIApplication, didFinishLaunchingWithOptions _: ...) -> Bool {
         NotificationHandler.shared.install()
         return true
     }
-    // delegate methods は NotificationHandler に委譲
 }
 
-final class MacAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+final class MacAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationHandler.shared.install()
     }
-    // 同上
+}
+
+// UNUserNotificationCenterDelegate はどのプラットフォームでも同じシグネチャなので、1 つのクラスで持つ
+final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = NotificationHandler()
+    @MainActor var navigationModel: NavigationModel?
+
+    func install() {
+        UNUserNotificationCenter.current().delegate = self
+        // 通知カテゴリの登録 ...
+    }
 }
 ```
 
-`NotificationHandler` は `@MainActor` なシングルトンとして、通知タップ時に NavigationModel を書き換える、という責務を持ちます。
+`NotificationHandler` は通知のデリゲートそのものを持つシングルトンで、`install()` で自分を通知センターのデリゲートにして、通知がタップされたら NavigationModel を書き換えます (`navigationModel` と `didReceive` だけを `@MainActor` にしています)。
 これでプラットフォーム固有のスキャフォルドだけ `#if` で分け、ロジックは 1 箇所にまとまります。
 
 ## プロジェクトファイル側の落とし穴: 埋め込みのプラットフォーム指定
@@ -179,7 +199,7 @@ IntentTodo.app/Watch/IntentTodoWatchApp.app/PrivacyInfo.xcprivacy
 
 理由コードも 1 つでは足りなくて、素の `UserDefaults.standard` は `CA92.1` (アプリ自身からしか見えない情報の読み書き)、App Group の `suiteName:` 付きは `1C8F.1` (同じ App Group のアプリ / Extension からしか見えない情報の読み書き) と使い分けます。この記事でずっと書いている「Extension は別プロセスだけど同じ App Group のストアを見る」という構成が、そのまま申告の形にも出てくる感じでした。
 
-置き場所の判定に使える小技も 1 つあって、**プロジェクトファイルに差分が出たら置き場所を間違えています**。4 ターゲットのフォルダは全部 file-system-synchronized group なので、正しい場所に置けばファイルを足すだけでリソースとしてバンドルに入って、プロジェクトファイルは 0 行しか動きません。自分は最初リポジトリ直下に置いてしまって、そこは同期グループの外なので (当時の pbxproj では)`PBXFileReference` だけが増えて、ターゲットには入っていない、という形になりました。すぐ上の `platformFilter` みたいに「プロジェクトファイルを直接触らないと解決しない」場面と、「触ったなら間違い」の場面が両方あるのがややこしいところです。
+置き場所の判定に使える小技も 1 つあって、**プロジェクトファイルに差分が出たら置き場所を間違えています**。4 ターゲットのフォルダは全部 file-system-synchronized group なので、正しい場所に置けばファイルを足すだけでリソースとしてバンドルに入って、プロジェクトファイルは 0 行しか動きません。自分は最初リポジトリ直下に置いてしまって、そこは同期グループの外なので (当時の pbxproj では) `PBXFileReference` だけが増えて、ターゲットには入っていない、という形になりました。すぐ上の `platformFilter` みたいに「プロジェクトファイルを直接触らないと解決しない」場面と、「触ったなら間違い」の場面が両方あるのがややこしいところです。
 
 ## ターゲット依存と TodoService ファクトリ
 
@@ -222,11 +242,11 @@ struct IntentTodoWatchApp: App {
 
 ## 別プロセス前提なので、マイグレーションはアプリ本体に寄せる
 
-ここまで書いたように Extension target は薄いスキャフォルドに留めますが、Widget / Live Activity は **アプリ本体とは別プロセス** で動く、という前提は変わりません。WWDC 2026 の SwiftData Group Lab で、この「別プロセスで同じ App Group のストアを共有する」構成のマイグレーション指針が示された、という話を見かけました。要は **マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。
+ここまで書いたように Extension target は薄いスキャフォルドに留めますが、Widget / Live Activity は **アプリ本体とは別プロセス** で動く、という前提は変わりません。この「別プロセスで同じ App Group のストアを共有する」構成について、マイグレーションの指針として聞いた話があります。要は **マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。
 
 アプリ更新直後は本体より先に Widget が起動し得るので、Extension 側にマイグレーションプランを持たせると本体の移行と競合し得る、というのが理屈です。Extension 構成の観点だと「View もデータ取得ロジックも SPM に寄せ、**マイグレーションの責務もアプリ本体に寄せる**」と覚えておくと収まりが良いです。SwiftData / CloudKit 側の具体的な書き方は [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) に書きました。
 
-ただこれ、**一次資料で裏を取れていない伝聞** です。当初はセッション 8017 として書いていたんですが、あとで手元に貯めたアーカイブを漁り直したら書き起こしが見つかりませんでした (出てくるのは別テーマの 8011 だけです)。Group Lab はライブ Q&A なので公式の書き起こしが出ないことも多いみたいです。指針そのものは SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので運用は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。
+ただこれ、**一次資料で裏を取れていない伝聞** です。当初は WWDC 2026 の SwiftData Group Lab (セッション 8017) で示されたものとして書いていたんですが、Apple の公開セッション一覧にも手元のアーカイブにも 8017 というセッションがなく、出どころを辿れませんでした (詳しくは [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit))。指針そのものは SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので運用は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。
 
 ## もう 1 つの例外: AppShortcutsProvider もアプリ本体に置く
 
@@ -337,7 +357,7 @@ iOS だけにある違いは「iOS アプリは watchOS アプリを `IntentTodo
 
 そして、このファイルリストは `WriteAuxiliaryFile ... DependencyMetadataFileList` として **Xcode が勝手に作っています**。こちらが書いたものではないし、除外する公開の手段もありません (`swift-build` 側にもプラットフォームのフィルタは無い)。**この制約はプロジェクトの構成ではなく Apple のビルドシステム側** です。裏付けとして、WWDC 2026 の App Intents 系公式サンプル 4 本は **どれも watch ターゲットを持っていません**。この組み合わせは公式サンプルで一度も踏まれていない、ということみたいです。Feedback (FB24570185) は出しました。
 
-対処は **フォールバック側の型名を分ける** ことでした。`WatchCategoryAppEntity` のように改名して、呼出側には `public typealias CategoryAppEntity = WatchCategoryAppEntity` で同じ名前を見せています。mangled type name が別物になるので衝突せず、2 つのエントリが共存してスキーマが残ります。代償は iOS 側のメタデータに 1 件増えることですが、スキーマ適合が出荷メタデータに届かない方がよっぽど重いので、そちらを取りました。
+対処は **フォールバック側の型名を分ける** ことでした。`WatchCategoryAppEntity` のように改名して、呼出側には `public typealias CategoryAppEntity = WatchCategoryAppEntity` で同じ名前を見せています。突き合わせのキーになる型名が別物になるので衝突せず、2 つのエントリが共存してスキーマが残ります。代償は iOS 側のメタデータに、改名した型 1 つにつき 1 件増えることですが、スキーマ適合が出荷メタデータに届かない方がよっぽど重いので、そちらを取りました。
 
 ついでに、フォールバック側にも `@Property(title:)` を明示しています。スキーマ版はマクロが `@Property` を生成してくれますが、素の `AppEntity` は自分で書かないと **プロパティ 0 件の entity** になります (渡せるけど何も読めない)。
 
@@ -430,6 +450,8 @@ StatusBadge(title: .copy("Completed"), ...)   // private let title: LocalizedStr
 読み上げ用のラベルを `label += ", completed"` みたいに連結するのも同じ理由で不可です (区切りと語順がロケール依存なので)。要素ごとに `String(localized:)` してから `parts.formatted(.list(type:width:))` で並べる形にしました。
 
 **3 つ目は、ソース言語の訳がパッケージに 1 つも無いと、英語でキーがそのまま出ること**でした。これは日本語化したあと、英語設定の iPhone で TestFlight 版を触ってもらって分かったんですが、リストの一覧に `^[0 todo](inflect: true)` というマークアップが生で表示されていました。
+
+アプリのバンドル名は、途中で App Store の名前に合わせて `Intento.app` に変えています (この記事のほかのログは変える前のものです)。
 
 ```
 $ ls Intento.app/UI_UI.bundle
@@ -531,6 +553,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12**: 今のコードに合わせて直した。Live Activity の切り出し (`TodoDeadlineActivityAttributes` は Domain、Dynamic Island の配置は Extension 側、型名) と、通知のデリゲートを `NotificationHandler` 自身が持つ形。watch 用の型を改名したときの衝突しない理由とメタデータが増える数を言い直し、`Intento.app` に変えたことを一言足した。マイグレーション指針の出どころの書き方を 4/N に揃えた
 - **2026-11-01**: 抜けていたキー数「134 件中 113 件」が開発記録の表と合わなかったので、「100 件以上」に改めた
 - **2026-10-31**: 検証の根拠を「梯子の下 3 段」と書いていたが、実際に通したのは AppIntentsTesting と Shortcuts の 2 段 (+ メタデータの件数) だったので訂正
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

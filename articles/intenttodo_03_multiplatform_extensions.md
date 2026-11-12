@@ -213,7 +213,12 @@ IntentTodo.app/Watch/IntentTodoWatchApp.app/PrivacyInfo.xcprivacy
 @main
 struct IntentTodoWatchApp: App {
     init() {
-        let container = try SharedModelContainer.createContainer()   // 失敗時の扱いは下記
+        let container: ModelContainer
+        do {
+            container = try SharedModelContainer.createContainer()
+        } catch {
+            fatalError("...")   // 実際はその前にログを残す。失敗時の扱いは下記
+        }
         AppDependencyManager.shared.add(dependency: container)
         MainActor.assumeIsolated {
             let todoService = TodoService.swiftDataBacked(container: container)
@@ -228,7 +233,7 @@ struct IntentTodoWatchApp: App {
 
 ### コンテナ生成が失敗したときの扱いは、プロセスごとに違う
 
-ここで各プロセスが `SharedModelContainer.createContainer()` を呼ぶわけですが、**`try!` は使わないようにしました**。`try!` はトラップするだけでメッセージを残さないので、Extension のクラッシュが「ウィジェットが白いまま」「Watch アプリを開いてすぐ落ちる」という見え方しかせず、理由が Console に出ないと切り分けようがありません。最低限 `Logger.critical` に error と `NSError` の domain / code / userInfo を吐いてから落とす、という形に揃えています (4/N に書いたログの話と同じです)。
+ここで各プロセスが `SharedModelContainer.createContainer()` を呼ぶわけですが、**`try!` は使わないようにしました**。`try!` はトラップするだけでメッセージを残さないので、Extension のクラッシュが「ウィジェットが白いまま」「Watch アプリを開いてすぐ落ちる」という見え方しかせず、理由が Console に出ないと切り分けようがありません。最低限 `Logger.critical` に error と `NSError` の domain / code / userInfo を吐いてから落とす、という形に揃えています (4/N に書いているログの話と同じです)。
 
 そのうえで、落とすか落とさないかは **「そのプロセスで表示できるものが残っているか」** で決めました。
 
@@ -238,13 +243,13 @@ struct IntentTodoWatchApp: App {
 | Widget Extension の共有コンテナ | ログ + `fatalError` | Extension 内の全ウィジェット / コントロールが対象で、代替表示が無い |
 | コンプリケーションの Provider | ログ + **`nil` を保持して `.unavailable()` の entry** | **ここだけ `fatalError` は不適切**。落とすとコンプリケーションが空白になり、それは「予定なし」と区別が付かない |
 
-コンプリケーションだけ扱いが違うのは、5/N で書く「fetch 失敗を 0 や空に潰さない」というのと同じ判断です。空白は「何も無い」に見えてしまうので、「不明」を出す口 (`loadFailed`) が既にあるならそちらに載せて、短い policy で再試行させた方がいい、ということでした。コンテナ生成の失敗も fetch の失敗も、ユーザーから見れば「情報が出てこない」という同じ現象なんだから、扱いも揃うべきだよなと思います。
+コンプリケーションだけ扱いが違うのは、5/N で書いている「fetch 失敗を 0 や空に潰さない」というのと同じ判断です。空白は「何も無い」に見えてしまうので、「不明」を出すためのフラグ (`loadFailed`) が既にあるならそちらに載せて、短い policy で再試行させた方がいい、ということでした。コンテナ生成の失敗も fetch の失敗も、ユーザーから見れば「情報が出てこない」という同じ現象なんだから、扱いも揃うべきだよなと思います。
 
 ## 別プロセス前提なので、マイグレーションはアプリ本体に寄せる
 
 ここまで書いたように Extension target は薄いスキャフォルドに留めますが、Widget / Live Activity は **アプリ本体とは別プロセス** で動く、という前提は変わりません。この「別プロセスで同じ App Group のストアを共有する」構成について、マイグレーションの指針として聞いた話があります。要は **マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。
 
-アプリ更新直後は本体より先に Widget が起動し得るので、Extension 側にマイグレーションプランを持たせると本体の移行と競合し得る、というのが理屈です。Extension 構成の観点だと「View もデータ取得ロジックも SPM に寄せ、**マイグレーションの責務もアプリ本体に寄せる**」と覚えておくと収まりが良いです。SwiftData / CloudKit 側の具体的な書き方は [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) に書きました。
+アプリ更新直後は本体より先に Widget が起動し得るので、Extension 側にマイグレーションプランを持たせると本体の移行と競合し得る、というのが理屈です。Extension 構成の観点だと「View もデータ取得ロジックも SPM に寄せ、**マイグレーションの責務もアプリ本体に寄せる**」と覚えておくと収まりが良いです。SwiftData / CloudKit 側の具体的な書き方は [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) に書いています。
 
 ただこれ、**一次資料で裏を取れていない伝聞** です。当初は WWDC 2026 の SwiftData Group Lab (セッション 8017) で示されたものとして書いていたんですが、Apple の公開セッション一覧にも手元のアーカイブにも 8017 というセッションがなく、出どころを辿れませんでした (詳しくは [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit))。指針そのものは SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので運用は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。
 
@@ -267,9 +272,9 @@ struct IntentTodoWatchApp: App {
 
 ### フレーズにパラメータを入れるなら、候補は絞る
 
-置き場所とは別に、フレーズの書き方でも 1 つ気を付けることがありました。フレーズには `"Complete \(\.$todo) in \(.applicationName)"` のように Intent のパラメータを埋め込めます (更新の通知が要る話は 2/N に書きました) が、セッション 244 (9:46) が **"If provided, an App Shortcut for each value of that type will be created."** と言っていて、つまり **`suggestedEntities()` が返した件数だけ App Shortcut が生える** ということになります。
+置き場所とは別に、フレーズの書き方でも 1 つ気を付けることがありました。フレーズには `"Complete \(\.$todo) in \(.applicationName)"` のように Intent のパラメータを埋め込めます (更新の通知が要る話は 2/N に書きました) が、WWDC 2025 のセッション 244 (9:46) が **"If provided, an App Shortcut for each value of that type will be created."** と言っていて、つまり **`suggestedEntities()` が返した件数だけ App Shortcut が生える** ということになります。
 
-なので全件返す実装のままフレーズだけパラメータ化すると、Shortcuts や Spotlight が自動生成された shortcut で埋まります。IntentTodo は `suggestedEntities()` を「直近の未完了 10 件」に絞りました (HIG の "not more than ten" に合わせています)。全件が要る用途は `EnumerableEntityQuery` の `allEntities()` が別に担当しているので、この 2 つは役割が違う、と考えるのが正しかったです。パラメータ無しのフレーズも各 shortcut に 1 つずつ残しています (指定なしで呼ばれたときに Siri が聞き返せるように、というのがセッション 10102 の 8:14 の指示です)。
+なので全件返す実装のままフレーズだけパラメータ化すると、Shortcuts や Spotlight が自動生成された shortcut で埋まります。IntentTodo は `suggestedEntities()` を「直近の未完了 10 件」に絞りました (HIG の "not more than ten" に合わせています)。全件が要る用途は `EnumerableEntityQuery` の `allEntities()` が別に担当しているので、この 2 つは役割が違う、と考えるのが正しかったです。パラメータ無しのフレーズも各 shortcut に 1 つずつ残しています (指定なしで呼ばれたときに Siri が聞き返せるように、というのが WWDC 2023 のセッション 10102 の 8:14 の指示です)。
 
 この不具合は **ビルドやコード補完のどのタイミングでも露見しません**。ビルドは通り、Intent 自体は Siri への直接指示や Widget からは機能し、警告も出ないので気付きにくいです。App Shortcut のフレーズだけがエラーも出さずに欠落しているので、Shortcuts アプリを開いて目視確認するか、統合メタデータの `autoShortcuts` 件数を直接見ないと気付けませんでした。
 
@@ -279,7 +284,7 @@ struct IntentTodoWatchApp: App {
 
 最初は「パッケージ側に 1 つだけ宣言して、**メインアプリターゲットには `includedPackages` 付きの `AppIntentsPackage` を重複宣言しない**」という運用でした。2026-04 に Shortcuts のルーティングが壊れた (`LNContextErrorDomain Code=2001`) ときに、重複宣言が原因だと判断したのが根拠です。ただ当時のコミットを読み返すと、Intent routing の修正・`@Dependency` パターンへの統一・重複 Intent の削除をまとめてやった大きな PR の中の出来事で、重複宣言だけを切り出して再現させた記録は残っていませんでした。デバッグログで疑っていたのも「Widget Extension が `TodoAppIntents` を import しているせいで、Shortcuts が Widget Extension を intent の提供元に選んだ」の方で、これは 2/N で書いた実行プロセス選択の話です。「壊れた記憶」をそのまま制約として書き残すと、何と何を切り分けたのかが後から辿れなくなるんだなというのが 1 つ目の反省でした。
 
-次に、公式手順どおりの形に切り替えました。セッション 244 (23:29〜24:00) やセッション 275 (25:50)、それに公式ドキュメントを読むと、アプリ / Widget / Live Activity / watchOS App の **利用側にも `includedPackages` 付きで宣言する** 形が標準手順として紹介されているからです。根拠は 3 つで、クリーンビルドでメタデータの件数が宣言前と完全一致したこと、AppIntentsTesting が全部グリーンだったこと、Shortcuts アプリでアクション一覧とパラメータ表示を目で見たこと、でした。10/N に書く検証の梯子 (AppIntentsTesting → Shortcuts → Spotlight → Siri) の下 2 段に、メタデータの件数を足した形です。
+次に、公式手順どおりの形に切り替えました。セッション 244 (23:29〜24:00) や同じ WWDC 2025 のセッション 275 (25:50)、それに公式ドキュメントを読むと、アプリ / Widget / Live Activity / watchOS App の **利用側にも `includedPackages` 付きで宣言する** 形が標準手順として紹介されているからです。根拠は 3 つで、クリーンビルドでメタデータの件数が宣言前と完全一致したこと、AppIntentsTesting が全部グリーンだったこと、Shortcuts アプリでアクション一覧とパラメータ表示を目で見たこと、でした。10/N に書いている検証の梯子 (AppIntentsTesting → Shortcuts → Spotlight → Siri) の下 2 段に、メタデータの件数を足した形です。
 
 ### 静的リンクなら、宣言が無くてもメタデータは集約される
 
@@ -329,7 +334,7 @@ Xcode の SPM は既定で静的リンクなので、`IntentTodo.app` にはそ�
 
 ## 統合メタデータのマージは「後勝ち」で、watchOS が必ず最後に来る
 
-`autoShortcuts` が集約されない話には続きがあって、**統合メタデータでもっと分かりにくい壊れ方** をもう 1 つ踏みました。7/N で書く `@AppEntity(schema: .reminders.list)` の適合が、**iOS アプリの出荷メタデータからだけ消えていた** というやつです。
+`autoShortcuts` が集約されない話には続きがあって、**統合メタデータでもっと分かりにくい壊れ方** をもう 1 つ踏みました。7/N で書いている `@AppEntity(schema: .reminders.list)` の適合が、**iOS アプリの出荷メタデータからだけ消えていた** というやつです。
 
 発端は「`CategoryAppEntity` のプロパティが 0 件で、スキーマも空になっている」という観測でした。最初は「`@Property` を書き忘れたか、マクロが面倒を見てくれる前提が間違っていたか」を疑ったんですが、全バンドルを並べたらどちらでもありませんでした。
 
@@ -343,7 +348,7 @@ Debug/IntentTodo.app                              プロパティ2件 schema=['L
 
 マクロはちゃんと仕事をしていて、パッケージ側の `.appintents` には `@Property` もスキーマ登録も出ています。落ちているのは **iOS アプリバンドルの統合メタデータだけ** で、macOS と visionOS のアプリバンドルは無事でした。自分が最初に見ていたのが iOS のバンドル 1 つだけだったので、「マクロが動いていない」ように見えていたわけです。
 
-iOS だけにある違いは「iOS アプリは watchOS アプリを `IntentTodo.app/Watch/` に埋め込む」ことでした。7/N に書くとおり watchOS では reminders スキーマが使えないので、そこだけスキーマ無しの形になります。それが iOS の統合結果に持ち込まれていた、という話です。
+iOS だけにある違いは「iOS アプリは watchOS アプリを `IntentTodo.app/Watch/` に埋め込む」ことでした。7/N に書いているとおり watchOS では reminders スキーマが使えないので、そこだけスキーマ無しの形になります。それが iOS の統合結果に持ち込まれていた、という話です。
 
 ここは一度 **「情報が少ない方が勝つ」というマージ規則だ** と書いたんですが、それは観測から一段飛んだ推論でした。あとで `appintentsmetadataprocessor` を直接叩いて、入力だけを変えた最小再現を取ったら、実際はこうです。
 
@@ -355,7 +360,7 @@ iOS だけにある違いは「iOS アプリは watchOS アプリを `IntentTodo
 
 つまり **勝敗はスキーマの有無ではなく、入力ファイルリストの後勝ち** でした。watchOS が勝つのは、Xcode が自動生成するファイルリストがパス順で `Debug-iphonesimulator` < `Debug-watchsimulator` になっていて、**watchOS が構造的に必ず最後に来る** からです。しかも失われるのはスキーマだけではなくて、**エントリが丸ごと置き換わります** (プロパティが 20 → 10 に減る)。突き合わせのキーもモジュール名を含まない型名なので、別モジュールで同名 entity を作っても衝突します。
 
-そして、このファイルリストは `WriteAuxiliaryFile ... DependencyMetadataFileList` として **Xcode が勝手に作っています**。こちらが書いたものではないし、除外する公開の手段もありません (`swift-build` 側にもプラットフォームのフィルタは無い)。**この制約はプロジェクトの構成ではなく Apple のビルドシステム側** です。裏付けとして、WWDC 2026 の App Intents 系公式サンプル 4 本は **どれも watch ターゲットを持っていません**。この組み合わせは公式サンプルで一度も踏まれていない、ということみたいです。Feedback (FB24570185) は出しました。
+そして、このファイルリストは `WriteAuxiliaryFile ... DependencyMetadataFileList` として **Xcode が勝手に作っています**。こちらが書いたものではないし、除外する公開の手段もありません (`swift-build` 側にもプラットフォームのフィルタは無い)。**この制約はプロジェクトの構成ではなく Apple のビルドシステム側** です。ちなみに、WWDC 2026 の App Intents 系公式サンプル 4 本は **どれも watch ターゲットを持っていません**。この組み合わせは公式サンプルで一度も踏まれていない、ということみたいです。Feedback (FB24570185) は出しました。
 
 対処は **フォールバック側の型名を分ける** ことでした。`WatchCategoryAppEntity` のように改名して、呼出側には `public typealias CategoryAppEntity = WatchCategoryAppEntity` で同じ名前を見せています。突き合わせのキーになる型名が別物になるので衝突せず、2 つのエントリが共存してスキーマが残ります。代償は iOS 側のメタデータに、改名した型 1 つにつき 1 件増えることですが、スキーマ適合が出荷メタデータに届かない方がよっぽど重いので、そちらを取りました。
 
@@ -365,7 +370,7 @@ iOS だけにある違いは「iOS アプリは watchOS アプリを `IntentTodo
 
 教訓は 2 つあります。**統合メタデータは「1 つのバンドルを見て正常だった」を根拠にしてはいけない**。自分は 2 回とも片側しか見ていなくて、並べたらすぐに答えが出ました。そしてもう 1 つ、**メカニズムは「変える要素を 1 つに絞った比較」でしか決まりません**。「スキーマ無しが勝つ」は結果としては合っていたけれど理由が違っていて、順序を逆にする実験を 1 回やれば分かったことでした。理由が違うと、Apple への要望の書き方まで変わります (「union を取れ」ではなく「後のエントリが前を丸ごと消さないこと / 消えるなら診断を出すこと」)。
 
-ついでに年代の整理も 1 つ。「Intent や Entity を Swift Package に置ける」ようになった時期を、自分はなんとなく WWDC 2024 (セッション 10134) 頃だと思っていたんですが、10134 が言っているのはむしろ逆で "Only frameworks are supported at this time. Libraries outside of a framework are not." でした。あの時点で対応していたのは Framework 形態だけで、SPM パッケージや static library に広がったのは 2025 のセッション 244 / 275 です。この記事で書いている「Intent をパッケージに置く」構成は、そんなに昔から成立していたわけではなかったんだなというのは、ちょっと意外でした。
+ついでに年代の整理も 1 つ。「Intent や Entity を Swift Package に置ける」ようになった時期を、自分はなんとなく WWDC 2024 (セッション 10134) 頃だと思っていたんですが、10134 が言っているのはむしろ逆で "Only frameworks are supported at this time. Libraries outside of a framework are not." でした。あの時点で対応していたのは Framework 形態だけで、SPM パッケージや static library に広がったのは WWDC 2025 のセッション 244 / 275 です。この記事で書いている「Intent をパッケージに置く」構成は、そんなに昔から成立していたわけではなかったんだなというのは、ちょっと意外でした。
 
 ## パッケージを組み替えたら、保存済みのショートカットは迷子になるか
 
@@ -401,7 +406,7 @@ public struct ShowTodoCountIntent: AppIntent {
 
 ## パッケージに View を置くと、UI コピーのローカライズで 3 回転ぶ
 
-View を SPM パッケージに移したことで踏んだ罠も書いておきます。ローカライズの話なんですが、**どちらも英語しか無いうちは何も起きません**。翻訳に着手した時点で初めて「一部の文言だけ英語のまま残る」という形で出てきます。
+View を SPM パッケージに移したことで踏んだ罠も書いておきます。ローカライズの話なんですが、**どれも英語しか無いうちは何も起きません**。翻訳に着手した時点で初めて「一部の文言だけ英語のまま残る」という形で出てきます。
 
 **1 つ目は、パッケージ自身に String Catalog が無いと文言がどこにも抽出されないこと**でした。`xcodebuild -exportLocalizations` で確認できます。`UI` パッケージに catalog を置く前は、`Text("Todos")` のような直書きのリテラルが xcloc に **1 件も** 出てきません (アプリターゲット側の catalog にも入りません)。抽出はターゲット単位で、受け皿の catalog を持つターゲットの分しか出てこない、ということでした。
 
@@ -419,7 +424,7 @@ let package = Package(
 
 ややこしいのが、`AppIntents` の `LocalizedStringResource` (Intent の title など) **だけは例外** で、catalog が無くてもアプリの統合メタデータ経由でアプリ側の catalog に出てくることです。これがあるせいで「パッケージの文言も抽出されている」と誤読しました。実際、自分は Intent のタイトルが xcloc に並んでいるのを見て、抽出はできていると思い込んでいました。
 
-**2 つ目は、`Text("...")` が実行時に `Bundle.main` を引くこと**でした。`LocalizedStringKey` の既定の bundle はメインバンドルなので、パッケージ同梱の catalog (`Bundle.module`) には当たりません。つまり 1 つ目を直して catalog に翻訳を入れても、引かれないままです。各パッケージにこういう口を 1 つ置いて、UI コピーは必ずここを通すようにしました。
+**2 つ目は、`Text("...")` が実行時に `Bundle.main` を引くこと**でした。`LocalizedStringKey` の既定の bundle はメインバンドルなので、パッケージ同梱の catalog (`Bundle.module`) には当たりません。つまり 1 つ目を直して catalog に翻訳を入れても、引かれないままです。各パッケージにこういうヘルパーを 1 つ置いて、UI コピーは必ずここを通すようにしました。
 
 ```swift
 extension LocalizedStringResource {
@@ -458,11 +463,11 @@ $ ls Intento.app/UI_UI.bundle
 Info.plist  _CodeSignature  ja.lproj        ← en.lproj が無い
 ```
 
-パッケージのバンドルには、カタログが列挙したロケールの `.lproj` しか入りません。カタログの `sourceLanguage` は `en` でも、`en` の訳を持つキーが 1 つも無いと `en.lproj` が作られなくて、英語では `.copy("…")` のルックアップが外れてキーそのものが返ります。素のコピーならキー = 英語なので見た目は変わらず、これまで誰も気付いていませんでした。inflection のマークアップを入れたキーで初めて表に出た、というわけです。アプリターゲット側は `en.lproj` を持っているので同じキーでも動き、**パッケージだけが踏む** 罠でした (ウィジェットの「ほか n 件」も同じ状態で出荷していて、日本語で使っていたので気付いていなかったです)。
+パッケージのバンドルには、catalog が列挙したロケールの `.lproj` しか入りません。catalog の `sourceLanguage` は `en` でも、`en` の訳を持つキーが 1 つも無いと `en.lproj` が作られなくて、英語では `.copy("…")` のルックアップが外れてキーそのものが返ります。素のコピーならキー = 英語なので見た目は変わらず、これまで誰も気付いていませんでした。inflection のマークアップを入れたキーで初めて表に出た、というわけです。アプリターゲット側は `en.lproj` を持っているので同じキーでも動き、**パッケージだけが踏む** 罠でした (ウィジェットの「ほか n 件」も同じ状態で出荷していて、日本語で使っていたので気付いていなかったです)。
 
-直し方は、パッケージのキーにはマークアップを書かず、カタログの `en` に `plural.one` / `plural.other` を持たせる形です。生成物に `en.lproj/Localizable.stringsdict` ができるのを確かめて、カタログにマークアップ入りのキーが残っていないかはテストで見張っています。
+直し方は、パッケージのキーにはマークアップを書かず、catalog の `en` に `plural.one` / `plural.other` を持たせる形です。生成物に `en.lproj/Localizable.stringsdict` ができるのを確かめて、catalog にマークアップ入りのキーが残っていないかはテストで確かめています。
 
-回帰は SwiftLint のカスタムルールで見張っています。`Text("...")` の直書きを検出するだけの雑なルールですが、**この壊れ方はビルドでもテストでも検出できない** ので、静的に引っかけるしかありませんでした。確認は結局 export の件数比較で、`UI` パッケージが 71 → 97 件になって、増えたのがまさに漏れていた文言 (`Completed` / `No Results` / `Newest First` など) でした。
+回帰は SwiftLint のカスタムルールで検出しています。`Text("...")` の直書きを検出するだけの雑なルールですが、**この壊れ方はビルドでもテストでも検出できない** ので、静的に引っかけるしかありませんでした。確認は結局 export の件数比較で、`UI` パッケージが 71 → 97 件になって、増えたのがまさに漏れていた文言 (`Completed` / `No Results` / `Newest First` など) でした。
 
 ## Intent のコピーは、リンク先ターゲットの main bundle にしか置けない
 
@@ -501,7 +506,7 @@ AppIntents requires 'LocalizedStringResource' to use the main bundle
 作業中に別の壊れ方も出てきました。
 
 ```swift
-// ❌ "s" や "is"/"are" は catalog に載らないまま %@ に差し込まれる
+// ❌ categoryLabel は catalog に載らないまま %@ に差し込まれる
 let categoryLabel = "incomplete todo"
 IntentDialog(full: "You have no \(categoryLabel)s.")
 ```
@@ -514,7 +519,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 
 最初に入れた訳は、ここで 1 回失敗しています。
 
-| キー | 入れた ja | 何が同じだったか |
+| キー | 入れた ja | 違いはここだけ |
 |---|---|---|
 | `Snooze ${todo}` | 〜をスヌーズ / 〜をスヌーズする | `する` の有無 |
 | `Delete ${todo}` | 〜の〜を削除 / 〜から〜を削除 | 助詞 |
@@ -530,7 +535,6 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 
 解決先はアプリターゲットの main bundle、つまり上で手動キーとして入れたものです。結果として **Siri とアプリ UI で同じ文言** が出ます。文言を 2 か所に持たなくていいのは地味に助かりました。
 
-
 ## まとめ
 
 - Extension target は薄いスキャフォルドに留めて、View / 状態管理 / データ取得は SPM パッケージに移送する
@@ -542,7 +546,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 - 保存済みショートカットが握っているのは **モジュール名を含まない素の型名**。パッケージへの切り出しやパッケージ名の変更では迷子にならず、危ないのは型名の変更 (`persistentIdentifier` で旧名を固定する)。確かめるときのメタデータはクリーンビルドで見る
 - 統合メタデータのマージは **同じ型名のエントリがあると後の入力が前を丸ごと置き換える**。iOS アプリは watch アプリを埋め込み、しかも watchOS が構造的に必ず最後に来るので、watchOS 用フォールバックの型名は分けておく
 - コンテナ生成の失敗は `try!` にしない。落とすかどうかは「そのプロセスで表示できるものが残っているか」で決める
-- パッケージに View を置いたら、`defaultLocalization` + String Catalog + `Bundle.module` を通す口 (`LocalizedStringResource.copy(_:)`) をセットで用意する。ソース言語の訳が 1 つも無いと `en.lproj` が作られず英語でキーが出るので、パッケージのキーに inflection のマークアップを書かない
+- パッケージに View を置いたら、`defaultLocalization` + String Catalog + `Bundle.module` を通すヘルパー (`LocalizedStringResource.copy(_:)`) をセットで用意する。ソース言語の訳が 1 つも無いと `en.lproj` が作られず英語でキーが出るので、パッケージのキーに inflection のマークアップを書かない
 - **Intent のコピーは仕組みが別**。メタデータ経由の文言は main bundle 一択で、コンパイラがそれを強制する。パッケージ側の catalog は使えないので、リンク先ターゲットに手動キーで持ってスクリプトで漏れを見る。自動抽出される `parameterSummary` のキーは手で直さない
 - Siri のフレーズ (`AppShortcuts.xcstrings`) は訳ではなく **言い方** を並べる。語彙を意図的に散らさないと、助詞違いを並べただけになる
 - 提出物側も同じ形で増える。`PrivacyInfo.xcprivacy` は **required reason API を使うバンドルごと** に要る (本アプリは 4 つ)。同期グループに正しく置けていればプロジェクトファイルは 1 行も動かない

@@ -19,7 +19,7 @@ CloudKit 互換にするためには次を満たす必要がありました。
 
 1. `cloudKitDatabase: .automatic` を `ModelConfiguration` に渡す
 2. すべての target の entitlements に iCloud container + CloudKit services + `aps-environment` を設定する
-3. **すべての属性に default value を持たせる** (もしくは Optional)
+3. **すべての属性にデフォルト値を持たせる** (もしくは Optional)
 4. **すべてのリレーションを Optional にする** (to-many も `[T]?`)
 5. `@Attribute(.unique)` / `DeleteRule.deny` は使わない
 6. 旧スキーマで作られた既存ストアは削除する
@@ -144,9 +144,9 @@ let count = (category.todos ?? []).count
 
 これで起動できるようになります。
 
-## ハマりどころ 3: 旧スキーマのストアは migration で詰む
+## ハマりどころ 3: 旧スキーマのストアはマイグレーションで詰む
 
-CloudKit 対応に切り替える前に既存のストアファイルがある状態だと、起動時に CoreData の migration がかかって、結局上記の schema 違反で落ちます。
+CloudKit 対応に切り替える前に既存のストアファイルがある状態だと、起動時に Core Data のマイグレーションがかかって、結局上記の schema 違反で落ちます。
 **App Group container 配下の `.store` を一度削除** して、新しいスキーマで作り直すのが現実的な解決策です。
 
 開発中なら以下で OK。
@@ -161,13 +161,13 @@ find ~/Library/Developer/CoreSimulator/Devices -name "IntentTodo.store*" -delete
 # iOS 実機の場合はアプリを削除 → 再インストール
 ```
 
-production でユーザーに同じ問題を起こしたくない場合は、本来は migration プランを書く必要がありますが、IntentTodo は個人プロジェクトなのでこの問題は今のところ無視しています。
+production でユーザーに同じ問題を起こしたくない場合は、本来はマイグレーションプランを書く必要がありますが、IntentTodo は個人プロジェクトなのでこの問題は今のところ無視しています。
 
-この「将来 migration プランを書くとき」については、1 つ指針として聞いた話があります。複数プロセス (アプリ本体 / Widget / Live Activity) が同じ App Group のストアを共有する構成では、**マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。理由は、アプリ更新直後は **アプリ本体より先に Widget / Extension プロセスが起動し得る** ため。両方がマイグレーションプランを持っていると、Extension が先に移行を試みて本体の移行と競合する危険があります。なので将来 `SchemaMigrationPlan` を導入するときは、**プランを渡すのはアプリ本体の `ModelContainer` だけ** にして、Widget / Live Activity 側はプラン無し (= 移行済みファイルを読むだけ) で構成する方針にしました。この別プロセス前提の話は [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) 側にも要点を書いています。
+この「将来マイグレーションプランを書くとき」については、1 つ指針として聞いた話があります。複数プロセス (アプリ本体 / Widget / Live Activity) が同じ App Group のストアを共有する構成では、**マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。理由は、アプリ更新直後は **アプリ本体より先に Widget / Extension プロセスが起動し得る** ため。両方がマイグレーションプランを持っていると、Extension が先に移行を試みて本体の移行と競合する危険があります。なので将来 `SchemaMigrationPlan` を導入するときは、**プランを渡すのはアプリ本体の `ModelContainer` だけ** にして、Widget / Live Activity 側はプラン無し (= 移行済みファイルを読むだけ) で構成する方針にしました。この別プロセス前提の話は [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) 側にも要点を書いています。
 
 ただしこの指針、**一次資料で裏を取れていません**。当初は WWDC 2026 の SwiftData Group Lab (セッション 8017) で示されたものとして書いていたんですが、あとで調べ直したら、Apple の公開セッション一覧にも手元のアーカイブにも 8017 というセッションがありませんでした (Group Lab は Apple Intelligence の 8011 だけです)。出どころを辿れないので、出典は外しています。内容自体は SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので方針は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。実際に導入する段になったら API 名と挙動は公式ドキュメントで確認し直すつもりです。
 
-## ハマりどころ 4: フォールバックが気付かないうちにデータを分裂させる
+## ハマりどころ 4: fallback が気付かないうちにデータを分裂させる
 
 最初は `SharedModelContainer.configuration` を以下のように書いていました。
 
@@ -207,7 +207,7 @@ public static var configuration: ModelConfiguration {
 }
 ```
 
-「production でだけ fatalError、DEBUG では fallback」 という分岐は、SPM テストやプレビューを動かしつつ、production の不整合は TestFlight や App Store 審査の段階で確実に表面化させたい、という意図です。
+「production でだけ fatalError、DEBUG では fallback」という分岐は、SPM テストやプレビューを動かしつつ、production の不整合は TestFlight や App Store 審査の段階で確実に表面化させたい、という意図です。
 
 ### ただしこの fallback、macOS では働かない
 
@@ -221,7 +221,7 @@ public static var configuration: ModelConfiguration {
 
 ## ハマりどころ 5: そもそも属性にできない型がある
 
-CloudKit 互換の話とは別に、**SwiftData の属性にできない型** でも 1 回転びました。7/N で書く reminders スキーマ適合のために、Todo に繰り返しルールを持たせようとしたときです。
+CloudKit 互換の話とは別に、**SwiftData の属性にできない型** でも 1 回転びました。7/N で書いている reminders スキーマ適合のために、Todo に繰り返しルールを持たせようとしたときです。
 
 ```swift
 @Model
@@ -242,7 +242,7 @@ EXC_BREAKPOINT (SIGTRAP) / libswiftCore _assertionFailure
 
 対処は、**CloudKit 互換 primitive + 境界で組み立て** の形にすることでした。`recurrenceFrequency: String?` + `recurrenceInterval: Int = 1` で保存して、Entity の境界で `Calendar.RecurrenceRule` に組み直します。場所 (`locationName` + 緯度経度) や担当者と同じパターンです。
 
-CloudKit 互換のために primitive に落とす、という制約のおかげで、結果的にこっちの地雷も避けられる、というのはちょっと面白いところでした。「モデルは枯れた primitive、リッチな型は境界で作る」を守っていれば、そもそも踏まなかったやつです。
+CloudKit 互換のために primitive に落とす、という制約のおかげで、結果的にこっちの地雷も避けられていたはず、というのはちょっと面白いところでした。「モデルは枯れた primitive、リッチな型は境界で作る」を守っていれば、そもそも踏まなかったやつです。
 
 ## ハマりどころ 6: 削除済みオブジェクトの配列属性を読むと trap する
 
@@ -261,7 +261,7 @@ libswiftCore _assertionFailure
 
 なぜ削除済みのオブジェクトを読むのかというと、詳細画面が削除直後にもう 1 度 body を評価するからです。そのとき `@Query` の結果にはまだ削除済みのオブジェクトが入っていて、そこで配列を読んで落ちます。
 
-厄介なのが、**`!todoItem.isDeleted` のガードが効かない** ことでした。同じトレースで再発します。この時点で `isDeleted` はまだ `false` なんです。
+厄介なのが、**`!todo.isDeleted` のガードが効かない** ことでした。同じトレースで再発します。この時点で `isDeleted` はまだ `false` なんです。
 
 うまくいったのは **その場のオブジェクトを読まずに、id から引き直す** 形でした。Entity 側は `@Property` をやめて `@DeferredProperty` にして (消えた Todo は「見つからない」に落ちるだけになります)、View 側は `body` の中で読まずに `@State` のスナップショットへ写して、`.task(id: todo.modifiedAt)` で更新します。契機に `modifiedAt` を使えるのは **スカラーだから** で、削除済みでも読めます。
 
@@ -275,12 +275,11 @@ if !todo.tags.isEmpty { TagRow(tags: todo.tags) }
 .task(id: todo.modifiedAt) { tags = await loadTags(id: todo.id) }
 ```
 
-いちばんの教訓は、**この trap は「1 回直した」では終わらない** ことでした。自分は Entity 側で直した数日後に、View 側で同じ罠を新しく作り込んでいます。読む場所を増やすたびに再発するので、**`@Model` の配列属性は `body` から読まない** をルールとして決めました。シートに渡すときも値渡しにしています (content クロージャは提示中に再評価されうるので、そこで読むと同じ口が残ります)。
+いちばんの教訓は、**この trap は「1 回直した」では終わらない** ことでした。自分は Entity 側で直した数日後に、View 側で同じ罠を新しく作り込んでいます。読む場所を増やすたびに再発するので、**`@Model` の配列属性は `body` から読まない** をルールとして決めました。シートに渡すときも値渡しにしています (content クロージャは提示中に再評価されうるので、そこで読むと同じように落ちます)。
 
 実際、そのあとにもう 1 回踏みかけています。一覧をタグで絞り込めるようにしたとき、素直に書くと「`@Query` の結果を回して `tags` を見る」になって、これは **削除したその 1 フレームだけ落ちる** 実装です。ここは `#Predicate` に押し込むより、**fetch 経由なら削除済みのオブジェクトは返ってこない** という性質を使う方が簡単でした。タグやリストの所属は `TodoService` が `fetchAll()` から 1 回で組んだスナップショットで持って、`@Query` は「変わったよ」の合図としてだけ使っています (合図の側はスカラーしか読みません)。
 
 この形には 1 つ落とし穴があって、合図に使うダイジェストに **リスト名と色を入れておく必要** がありました。リストの名前を変えても Todo は 1 件も触られないので、件数と `modifiedAt` の最大値だけだと合図が変わらず、管理画面が古い名前のまま表示されます。
-
 
 ## ハマりどころ 7: `ModelContainer` の init は、ストアのロードを待たずに返る
 
@@ -296,11 +295,11 @@ NSInternalInconsistencyException: No eligible connection available
 
 しかも落ちるのは **インストール直後の初回起動だけ** です。UI テストは毎回インストールし直すので毎回落ちるんですが、手元で `simctl launch` して確かめると (すでにインストール済みなので) 再現しません。UI テストからは「アプリがクラッシュしました」としか見えないので、フィクスチャの中身を疑ってずいぶん遠回りしました。シーンの `.task` に移したら解決です。
 
-同じ根で、もう 1 つ気付きにくい壊れ方もしていました。フィクスチャは「全部消してから 6 件入れる」形なんですが、**実行のたびにリストが 6 件ずつ増えていきます**。init 直後の fetch は、行があっても空で返るからです。削除が空振りして、挿入だけが通っていました。ここは 1 秒待ってから fetch → delete する形にしています。`deleteAllData()` で済ませるのは駄目で、こちらはコンテキストごと無効化するので、直後に `mainContext` を触ると SwiftData の中で trap します。
+原因は同じで、もう 1 つ気付きにくい壊れ方もしていました。フィクスチャは「全部消してから 6 件入れる」形なんですが、**実行のたびにリストが 6 件ずつ増えていきます**。init 直後の fetch は、行があっても空で返るからです。削除が空振りして、挿入だけが通っていました。ここは 1 秒待ってから fetch → delete する形にしています。`deleteAllData()` で済ませるのは駄目で、こちらはコンテキストごと無効化するので、直後に `mainContext` を触ると SwiftData の中で trap します。
 
 ついでに、まとめて消すつもりで書いた `context.delete(model: TodoItem.self)` も落ちました。バッチ削除は `NSBatchDeleteRequest` を通るので、失敗が Objective-C 例外で出てきて Swift 側の `do` / `catch` では拾えません。こちらも fetch して 1 件ずつ `delete` する形に変えています。
 
-症状は 3 つともバラバラ (初回起動だけ落ちる / 毎回増える / まとめ削除で落ちる) なんですが、**「init が返った = 使える」ではない** という 1 点に集約されます。`@Query` と `.modelContainer(_:)` に任せている限りは SwiftUI が面倒を見てくれるので表に出てこなくて、自分でコンテナを作って直後に触る形にしたときだけ顔を出す、という性格のものでした。
+症状は 3 つともバラバラ (初回起動だけ落ちる / 毎回増える / まとめ削除で落ちる) なんですが、**「init が返った = 使える」ではない** という 1 点に集約されます。`@Query` と `.modelContainer(_:)` に任せている限りは SwiftUI が面倒を見てくれるので表に出てこなくて、自分でコンテナを作って直後に触る形にしたときだけ表に出る、というものでした。
 
 ## ハマりどころ 8: in-memory のストアも、既定では iCloud と同期する
 
@@ -339,7 +338,7 @@ do {
 }
 ```
 
-これで CoreData が出している `CloudKit integration requires that all attributes be optional, or have a default value set. ...` を Console.app に拾えるようになります。
+これで Core Data が出している `CloudKit integration requires that all attributes be optional, or have a default value set. ...` を Console.app に拾えるようになります。
 詰まったらまずこれを仕込むのが回り道に見えて最短ルートでした。
 
 ## WWDC 2026 の SwiftData レビューを受けて
@@ -365,7 +364,7 @@ public func incompleteCount() throws -> Int {
 ## まとめ
 
 - `cloudKitDatabase: .automatic` + entitlements に container + APS + Portal 側の capability 設定が必要
-- 全属性に default value、全リレーションを Optional `[T]?` にする
+- 全属性にデフォルト値、全リレーションを Optional `[T]?` にする
 - 旧スキーマのストアは削除して作り直す (開発中)
 - production の fallback はエラーも出ずに壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく。ただし macOS は entitlement 無しでも `containerURL` がパスを返すので、この分岐自体が効かない
 - `Calendar.RecurrenceRule` のように **コンパイルは通るのに schema 初期化で trap する型** がある。CloudKit 互換のために primitive へ落としていると、結果的にこれも避けられる
@@ -374,7 +373,7 @@ public func incompleteCount() throws -> Int {
 - **in-memory のストアも既定では iCloud と同期する**。一時ストアには `cloudKitDatabase: .none` を明示する
 - ModelContainer の失敗ログは `String(reflecting:)` + `NSError.userInfo` まで吐く
 
-次回は [App Intents 運用で踏んだ落とし穴 (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Live Activity の entity 解決クラッシュ / Control Widget の結果表示 / Spotlight 統合の実装漏れ / 失敗が伝わらない経路 / Siri が Intent を呼ばずに答える件) をまとめて書きます。
+次回は [Live Activity / Control / Spotlight / Siri で踏んだ App Intents 運用の罠 (5/N)](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls) (Live Activity の entity 解決クラッシュ / Control Widget の結果表示 / Spotlight 統合の実装漏れ / 失敗が伝わらない経路 / Siri が Intent を呼ばずに答える件) をまとめて書きます。
 
 ## 更新履歴
 

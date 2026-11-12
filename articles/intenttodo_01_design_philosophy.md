@@ -154,8 +154,8 @@ IntentTodo で参考にしている指針は以下です。
                     │  ┊
               TodoService  ┊                                  ← 1 行為の不変条件・副作用
                     │      ┊ ← 読み取り (EntityQuery) は Service を通らない
-           TodoRepositoryProtocol
-                    │
+           TodoRepositoryProtocol  ┊
+                    │      ┊ ← Repository も通らないものがある
               SwiftData / CloudKit
 ```
 
@@ -171,7 +171,7 @@ Layered の説明が「UseCase と Repository の使い分けが分からない�
 
 最後に、Clean Architecture と本質的に反転しているところが 2 つあります。1 つは **変えられない側が逆** なこと。Clean Architecture は「内側 = 安定した方針、外側 = 揺れる詳細」ですが、App Intents 中心だと外周の Intent 型名・parameter 名・`AppEnum` の raw value が **ユーザーのショートカットに永続化されていて、いちばんリファクタできません**。内側の `TodoService` の方がよっぽど自由に触れます。もう 1 つは **依存逆転の目的** で、Clean Architecture の「DB を差し替えられる」はほぼ使われない口実になりがちですが、ここでは `TodoRepositoryProtocol` が **プロセス境界** で意味を持ちます (Widget Extension とメインアプリで同じロジックが別プロセスに載る、という 2/N の話です)。層を立てた分のコストが、ちゃんと回収されている感じがあります。
 
-非対称も 1 つ残っていて、`TodoEntityQuery` のような **読み取り経路は `TodoService` を飛ばして** Repository を直接呼んでいます。書き込み経路は必ず `TodoService` を通るので、実態は「書き込み側だけ層が厚い」CQRS 的な非対称です。理由は 9/N で書く「読み取り系 Intent は (App Shortcut に登録したもの以外は) 実行プロセスを固定せず Extension で応答させたい」なので、図でも読みは Service の横を通る細い線、書きは Service 経由、と分けて描いています。同心円 1 枚だとこの線が引けないのも、砂時計にした理由のひとつでした。
+非対称も 1 つ残っていて、**読み取り経路は `TodoService` を飛ばしています**。`TodoEntityQuery` は Repository を直接呼び、`CategoryEntityQuery` や `SubTaskEntityQuery` は Repository も通らずにストアから直接読んでいます。書き込み経路は必ず `TodoService` を通るので、実態は「書き込み側だけ層が厚い」CQRS 的な非対称です。理由は 9/N で書く「読み取り系 Intent は (App Shortcut に登録したもの以外は) 実行プロセスを固定せず Extension で応答させたい」なので、図でも読みは Service の横を通る細い線、書きは Service 経由、と分けて描いています。同心円 1 枚だとこの線が引けないのも、砂時計にした理由のひとつでした。
 
 ## 次回以降
 

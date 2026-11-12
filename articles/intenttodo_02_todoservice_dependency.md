@@ -74,7 +74,7 @@ public final class TodoService {
 ポイントは 2 つ。
 
 1. **Repository を init で注入**: 呼び出し側 (Intent) は repository を組み立てなくてよい
-2. **`defer { Self.dataDidChange() }`**: mutation 系メソッドの末尾で必ずデータ変更後の後処理が走る。Intent 側で呼び忘れる心配がなくなる
+2. **`defer { Self.dataDidChange() }`**: 変更系メソッドの末尾で必ずデータ変更後の後処理が走る。Intent 側で呼び忘れる心配がなくなる
 
 副次的に、Intent の `perform()` がぐっと薄くなりました。
 
@@ -105,7 +105,7 @@ public struct ToggleTodoCompletionIntent: AppIntent {
 }
 ```
 
-肝心な「TodoService を作るのは誰か」は、`App.init()` で 1 回だけやって `AppDependencyManager` に同期登録します。
+肝心な「TodoService を作るのは誰か」は `App.init()` で、1 回だけ作って `AppDependencyManager` に同期登録します。
 
 ```swift
 @main
@@ -144,13 +144,13 @@ struct IntentTodoApp: App {
 | Widget `Button` / Control Widget (読み取り系 = 未指定) | `.background` | **ヒューリスティクスで決定** (アプリ起動中はアプリ優先、未起動なら Widget Extension) | **両方** (`App.init()` と `WidgetBundle.init()`) |
 | 同上 (書き込み系 = `allowedExecutionTargets = [.main]`) | `.background` | メインアプリに固定 | `App.init()` だけ |
 | Live Activity ボタン | `LiveActivityIntent` | `perform()` は**メインアプリ** (Apple 公式が明言) | `App.init()` |
-| watchOS の Button(intent:) | 全モード | **watchOS App** | watchApp の `App.init()` |
+| watchOS の `Button(intent:)` | 全モード | **watchOS App** | watchOS App の `App.init()` |
 
-`.background` の行は、自分は最初「Widget から呼んだら必ず Widget Extension で実行される」という固定のものだと思っていたんですが、そうではありませんでした。セッション 345 (15:59〜16:55) によると、共有パッケージに置いた Intent がどのプロセスで実行されるかは **システムのヒューリスティクスで決まります**。アプリが既に起動していればアプリ側を優先する、そうでなければ Extension を起こす、という具合です。固定したいなら 9/N で書く `allowedExecutionTargets` (`.main` / `.appIntentsExtension` / `.widgetKitExtension`) を明示するしかありません。SDK 側を見ても `IntentExecutionTargets` は `.default` を独立したケースとして持つ `OptionSet` になっていて、「既定はシステムに委ねる」というのが型の上でも表現されていました。
+`.background` の行は、自分は最初「Widget から呼んだら必ず Widget Extension で実行される」という固定のものだと思っていたんですが、そうではありませんでした。WWDC 2026 のセッション 345 (15:59〜16:55) によると、共有パッケージに置いた Intent がどのプロセスで実行されるかは **システムのヒューリスティクスで決まります**。アプリが既に起動していればアプリ側を優先する、そうでなければ Extension を起こす、という具合です。固定したいなら 9/N で書いている `allowedExecutionTargets` (`.main` / `.appIntentsExtension` / `.widgetKitExtension`) を明示するしかありません。SDK 側を見ても `IntentExecutionTargets` は `.default` を独立したケースとして持つ `OptionSet` になっていて、「既定はシステムに委ねる」というのが型の上でも表現されていました。
 
 `supportedModes` が決めているのは「フォアグラウンドに遷移するかどうか」であって、実行プロセスそのものではない、というのが正確なところです。
 
-Live Activity の行も注釈が要ります。Apple のドキュメント ([Adding interactivity to widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities)) は "the system runs the app intent in the app's process" と明言していて、`LiveActivityIntent` の `perform()` はアプリプロセスでの実行が保証されています。ただしこれには続きがあって、`@Parameter` の entity を **`perform()` の前に解決するフェーズ** がどのプロセスで走るかは公式にどこにも書かれていません。5/N で書くクラッシュはそっち側で起きています。
+Live Activity の行も注釈が要ります。Apple のドキュメント ([Adding interactivity to widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities)) は "the system runs the app intent in the app's process" と明言していて、`LiveActivityIntent` の `perform()` はアプリプロセスでの実行が保証されています。ただしこれには続きがあって、`@Parameter` の entity を **`perform()` の前に解決するフェーズ** がどのプロセスで走るかは公式にどこにも書かれていません。5/N で書いているクラッシュはそっち側で起きています。
 
 なので、IntentTodo では `IntentTodoApp.init()` / `IntentTodoWidgetBundle.init()` / `IntentTodoWatchApp.init()` の 3 箇所で同じ TodoService を作って登録しています。
 
@@ -169,15 +169,15 @@ struct IntentTodoWidgetBundle: WidgetBundle {
 }
 ```
 
-`MainActor.assumeIsolated` は WidgetBundle.init が non-isolated context として評価されることがあるための保険です。
+`MainActor.assumeIsolated` は `WidgetBundle.init` が non-isolated context として評価されることがあるための保険です。
 
 ### 書き込む Intent はアプリ本体に固定して、読み取りは委ねる
 
 この二重登録、しばらくは「実行プロセスがヒューリスティクスで決まる以上、両方に登録しておくしかない」という消極的な理由で置いていました。今は理由が変わっていて、**登録が 2 つあるのは役割が違うから** という形になっています。
 
-きっかけはセッション 345 (16:30) を読み直したことで、そこで挙げられている動機がこのアプリの構成そのままでした。曰く「ウィジェットはアプリとデータモデルを共有しているが、2 つのプロセスが同じストアに書くと衝突しうるので、ウィジェットには読み取り専用のアクセスを与えて、書き込みは全部メインアプリに任せた」。IntentTodo も共有パッケージが Widget Extension にリンクされていて、`WidgetBundle.init()` で **読み書きできる `TodoService`** を登録していたので、アプリ未起動時に変更系 Intent が Extension へ振られると、そこが SwiftData の書き手になり得ました。3/N や 4/N で書く「マイグレーションはアプリ本体に寄せる」と同じ危うさです。
+きっかけはセッション 345 (16:30) を読み直したことで、そこで挙げられている動機がこのアプリの構成そのままでした。曰く「Widget はアプリとデータモデルを共有しているが、2 つのプロセスが同じストアに書くと衝突しうるので、Widget には読み取り専用のアクセスを与えて、書き込みは全部メインアプリに任せた」。IntentTodo も共有パッケージが Widget Extension にリンクされていて、`WidgetBundle.init()` で **読み書きできる `TodoService`** を登録していたので、アプリ未起動時に変更系 Intent が Extension へ振られると、Extension が SwiftData に書き込むことになり得ました。3/N や 4/N で書いている「マイグレーションはアプリ本体に寄せる」と同じ危うさです。
 
-なので方針を **「`TodoService` の変更メソッドを呼ぶ Intent はすべて `allowedExecutionTargets = [.main]`、読み取り系は未指定のまま」** に決めました。最初に固定したのは 13 個で、その後リスト・タグ・セクションを管理する Intent が 7 つ増えたので、今は 20 個です (watchOS には管理系が無いので 13 個)。このあと書く、App Shortcut に登録した読み取り系の 2 個を足すと、`[.main]` を宣言している Intent は 22 個になります。
+なので方針を **「`TodoService` の変更系メソッドを呼ぶ Intent はすべて `allowedExecutionTargets = [.main]`、読み取り系は未指定のまま」** に決めました。最初に固定したのは 13 個で、その後リスト・タグ・セクションを管理する Intent が 7 個増えたので、今は 20 個です (watchOS には管理系が無いので 13 個)。このあと書く、App Shortcut に登録した読み取り系の 2 個を足すと、`[.main]` を宣言している Intent は 22 個になります。
 
 ```swift
 public struct ToggleTodoCompletionIntent: UndoableIntent {
@@ -191,9 +191,9 @@ public struct ToggleTodoCompletionIntent: UndoableIntent {
 }
 ```
 
-読み取り系 (集計を返す / 検索する) は、下に書く例外を除いて **あえて固定していません**。Extension で応答できた方がアプリを起こさずに済んで速いからです。というわけで `WidgetBundle.init()` の `TodoService` 登録は残るんですが、用途が「読み取り専用の利用」に変わりました。二重登録は畳めないのではなくて、**役割が分かれた** という整理です。
+読み取り系 (集計を返す / 検索する) は、下に書く例外を除いて **あえて固定していません**。Extension で応答できた方がアプリを起こさずに済んで速いからです。というわけで `WidgetBundle.init()` の `TodoService` 登録は残るんですが、用途が読み取り専用に変わりました。二重登録は畳めないのではなくて、**役割が分かれた** という整理です。
 
-宣言漏れはエラーを出さずに壊れる (Extension で書けてしまうだけ) ので、テストで縛っています。①書き込み系の `allowedExecutionTargets == [.main]` を個別に assert、②登録していない読み取り系が `.default` のままか、③`Intents/` のソースを走査して「`todoService` の変更メソッドを呼ぶのに `allowedExecutionTargets` を宣言していないファイル」を検出、④`TodoAppShortcuts.swift` を読んで、登録された Intent が全部 `[.main]` か、の 4 本立てです。③ は 5/N に書いた「条件付き assert で空回りしていた UI テスト」の反省があるので、わざと違反する probe intent を置いて **実際に落ちることを確認** してから入れました。
+宣言漏れはエラーを出さずに壊れる (Extension で書けてしまうだけ) ので、テストで縛っています。①書き込み系の `allowedExecutionTargets == [.main]` を個別に assert、②登録していない読み取り系が `.default` のままか、③`Intents/` のソースを走査して「`todoService` の変更系メソッドを呼ぶのに `allowedExecutionTargets` を宣言していないファイル」を検出、④`TodoAppShortcuts.swift` を読んで、登録された Intent が全部 `[.main]` か、の 4 本立てです。③ は 5/N に書いている「条件付き assert で空回りしていた UI テスト」の反省があるので、わざと違反する probe intent を置いて **実際に落ちることを確認** してから入れました。
 
 ちなみに `ExecutionTargets` は `AppIntent` だけでなく **`EntityQuery` 側にも生えています** (公式が "available on both `AppIntent` and `EntityQuery`" と書いています)。IntentTodo の entity 解決は読み取りしかしないので、こちらは未指定のままにしています。
 
@@ -201,17 +201,17 @@ public struct ToggleTodoCompletionIntent: UndoableIntent {
 
 「読み取りは Extension に任せる」には例外が 1 つありました。**App Shortcut のフレーズから呼ばれる Intent** です。
 
-これは TestFlight のビルドで踏みました。Siri に "Show todos in Intento" と話しかけると "something went wrong" になって、取ってもらったログにはこう出ていました。アプリが起動していなかったので、`linkd` (App Intents の実行を仲介するシステムのデーモン) が `Failed to find process state for application bundle; will use extension if available` と判断して `ShowTodosIntent` をウィジェットの Extension に回し、Extension 側が `Couldn't find AppShortcutsProvider.` (`LNActionForAutoShortcutPhraseFetchError` Code=1) を返していたんです。`linkd` はこれを 0.5 秒おきに繰り返して、最後に Siri が諦めます。
+これは TestFlight のビルドで踏みました。Siri に "Show todos in Intento" と話しかけると "something went wrong" になって、取ってもらったログにはこう出ていました。アプリが起動していなかったので、`linkd` (App Intents の実行を仲介するシステムのデーモン) が `Failed to find process state for application bundle; will use extension if available` と判断して `ShowTodosIntent` を Widget Extension に回し、Extension 側が `Couldn't find AppShortcutsProvider.` (`LNActionForAutoShortcutPhraseFetchError` Code=1) を返していたんです。`linkd` はこれを 0.5 秒おきに繰り返して、最後に Siri が諦めます。
 
-登録したフレーズからアクションを引くには `AppShortcutsProvider` が要るんですが、3/N に書くとおりこれは **アプリターゲットにしか置けません**。なので Extension に回った時点で解決できない、ということでした。上の「未指定ならアプリ未起動時は Extension を起こす」がそのまま実機のログに出ていた形です。
+登録したフレーズからアクションを引くには `AppShortcutsProvider` が要るんですが、3/N に書いているとおりこれは **アプリターゲットにしか置けません**。Extension に回った時点で解決できない、ということでした。上の「未指定ならアプリ未起動時は Extension を起こす」がそのまま実機のログに出ていた形です。
 
-なので、**App Shortcut に登録した Intent は読み取り系でも `[.main]`** にしました (`ShowTodosIntent` と `ShowTodoCountIntent`)。上のテストの ④ がこれを見張っています。この件はもう 1 つ反省があって、同じ変更で「アプリを開かないようにする (`supportedModes`)」と「`[.main]` を外す」を一緒に動かしていたので、壊れたときにどちらが原因か分かりませんでした。経緯は 9/N に書きました。
+そこで、**App Shortcut に登録した Intent は読み取り系でも `[.main]`** にしました (`ShowTodosIntent` と `ShowTodoCountIntent`)。上のテストの ④ でこれを確かめています。この件はもう 1 つ反省があって、同じ変更で「アプリを開かないようにする (`supportedModes`)」と「`[.main]` を外す」を一緒に動かしていたので、壊れたときにどちらが原因か分かりませんでした。経緯は 9/N に書いています。
 
 ## defer 集約の効果
 
-`defer { Self.dataDidChange() }` を TodoService の各 mutation メソッドに置く設計、見た目は地味ですが、後から振り返るとだいぶ助かっている部分です。
+`defer { Self.dataDidChange() }` を TodoService の各変更系メソッドに置く設計、見た目は地味ですが、後から振り返るとだいぶ助かっている部分です。
 
-- mutation を増やすたびに後処理を書き忘れる、というクラスのバグがそもそも発生しない
+- 変更系メソッドを増やすたびに後処理を書き忘れる、という種類のバグがそもそも発生しない
 - 「データ変更 → Widget 反映」という不変条件をコードの構造そのもので表現できる
 - レビュー時に「Widget 更新の呼び忘れがないか」を確認する手間が消える
 
@@ -230,12 +230,12 @@ public func create(...) throws -> TodoAppEntity {
 ```
 
 逆に `delete` は、ID の形を確かめたあとは、削除が throw しても必ず走るように `defer` を置いています。
-Spotlight の deindex はそもそも idempotent だし、CloudKit の merge で既に消えていて `repository.delete` が throw したケースでも、ローカルの index と Widget は更新しておく方が整合が取れるからです。
+Spotlight の deindex はそもそも冪等だし、CloudKit の merge で既に消えていて `repository.delete` が throw したケースでも、ローカルの index と Widget は更新しておく方が整合が取れるからです。
 「`defer` に何を入れるか」は副作用の冪等性しだいで変わる、と書いてみて分かりました。
 
 ### 集約点は 1 つでも、中身は育つ
 
-この `dataDidChange()`、最初は `WidgetReloader.reloadAllWidgets()` 1 行だったんですが、今は 2 つになっています。
+この `dataDidChange()`、最初は `WidgetReloader.reloadAllWidgets()` 1 行だったんですが、今は 2 行になっています。
 
 ```swift
 // TodoService+Organize.swift (リスト・タグの操作) からも呼ぶので private にしていない
@@ -245,9 +245,9 @@ static func dataDidChange() {
 }
 ```
 
-2 行目は App Shortcut のパラメータ候補をシステムに取り直させるためのものです。App Shortcut のフレーズに Intent のパラメータを埋める (`"Complete \(\.$todo) in IntentTodo"` みたいな形) と、システムは候補を `suggestedEntities()` から取ってくるんですが、**`updateAppShortcutParameters()` を呼んで「変わった」と伝えないと候補が古いまま** で、フレーズが一致しなくなります。呼ぶタイミングは「entity の追加 / 削除 / 表示名の変化」と、それに **アプリの初回起動時** です (セッション 10102 の 9:24〜9:52。初回については「一度もフェッチされていないとパラメータ入りフレーズは機能しない」と明言されています)。
+2 行目は App Shortcut のパラメータ候補をシステムに取り直させるためのものです。App Shortcut のフレーズに Intent のパラメータを埋める (`"Complete \(\.$todo) in IntentTodo"` みたいな形) と、システムは候補を `suggestedEntities()` から取ってくるんですが、**`updateAppShortcutParameters()` を呼んで「変わった」と伝えないと候補が古いまま** で、フレーズが一致しなくなります。呼ぶタイミングは「entity の追加 / 削除 / 表示名の変化」と、それに **アプリの初回起動時** です (WWDC 2023 のセッション 10102 の 9:24〜9:52。初回については「一度もフェッチされていないとパラメータ入りフレーズは機能しない」と明言されています)。
 
-ここで 1 つ構造的な面倒があって、`updateAppShortcutParameters()` は `AppShortcutsProvider` の **具体型に対する static メソッド** です。そしてその具体型は 3/N で書くとおりアプリターゲットにしか置けません。パッケージ側から呼びようがないので、`AppShortcutParameterUpdater` というクロージャ受けの間接層を挟んで、アプリ起動時に `{ TodoAppShortcuts.updateAppShortcutParameters() }` を登録してもらう形にしました。
+ここで 1 つ構造的な面倒があって、`updateAppShortcutParameters()` は `AppShortcutsProvider` の **具体型に対する static メソッド** です。そしてその具体型は 3/N で書いているとおりアプリターゲットにしか置けません。パッケージ側から呼びようがないので、`AppShortcutParameterUpdater` というクロージャを受け取るだけの薄い層を挟んで、アプリ起動時に `{ TodoAppShortcuts.updateAppShortcutParameters() }` を登録してもらう形にしました。
 
 初回の更新を呼ぶ場所でも 1 回転んでいます。最初は登録と一緒に `App.init()` で呼んでいたんですが、ログに `Failed to refresh AppShortcut parameters` が出ていました。`init()` の時点ではプロセスがまだ `linkd` に繋がっていないので、更新が失敗するんです。パラメータ入りのフレーズがどれも値を持てなくなるので、**登録だけ `init()` に残して、初回の更新はシーンの `.task` から呼ぶ** 形に変えました。
 
@@ -260,9 +260,9 @@ WindowGroup {
 }
 ```
 
-**呼び忘れを構造で防ぐ集約点を作っておくと、後から足すものが 1 箇所で済みます**。逆に集約点が無いまま「変更系メソッド 9 箇所に 2 行ずつ足す」をやっていたら、たぶんどこかを取りこぼしていました。5/N には集約先の中身が片肺だった (ウィジェットはリロードしていたのにコントロールはしていなかった) という失敗も書いていて、集約点があること自体は正しいんだけど、中身が正しいかは別途見ないといけない、というのが今の実感です。
+**呼び忘れを構造で防ぐ集約点を作っておくと、後から足すものが 1 箇所で済みます**。逆に集約点が無いまま「変更系メソッド 17 箇所に 2 行ずつ足す」をやっていたら、たぶんどこかを取りこぼしていました。5/N には集約先の中身が片肺だった (Widget はリロードしていたのに Control はしていなかった) という失敗も書いていて、集約点があること自体は正しいんだけど、中身が正しいかは別途見ないといけない、というのが今の実感です。
 
-## ファクトリで「Repository を知らない」caller を作る
+## ファクトリで「Repository を知らない」呼び出し側を作る
 
 最後に `TodoService.swiftDataBacked(container:)` ファクトリの話。
 
@@ -277,16 +277,16 @@ public extension TodoService {
 
 何が嬉しいかというと、Widget Extension target は `Repository` パッケージを直接依存に持たなくても、`TodoAppIntents` だけを import すれば `TodoService.swiftDataBacked(container:)` で TodoService を組み立てられることです。
 
-これによって、プロジェクトファイル側の package product dependencies を増やさずに、TodoService の差し替えやテスト用の差し替えも将来的に追加しやすくなりました。
+これによって、プロジェクトファイル側の package product dependencies を増やさずに、TodoService を別の実装に替えたり、テストでモックに替えたりする口も将来的に追加しやすくなりました。
 
 ## まとめ
 
 - `TodoActions` enum + static func から `TodoService` クラスへ昇格させると、Repository の都度生成 / Widget reload の呼び忘れリスク / View からの利用経路の 3 つを同時に解消できる
 - `@Dependency` で Intent に注入する。`AppDependencyManager` への登録は **プロセスごと** に必要。`.background` の実行プロセスは未指定ならヒューリスティクスで決まる
-- **SwiftData を書き換える Intent は `allowedExecutionTargets = [.main]` でアプリ本体に固定**、読み取り系は未指定のまま Extension に応答させる。Widget 側の登録は「読み取り専用の利用」として残る
+- **SwiftData を書き換える Intent は `allowedExecutionTargets = [.main]` でアプリ本体に固定**、読み取り系は未指定のまま Extension に応答させる。Widget 側の登録は読み取り専用として残る
 - ただし **App Shortcut に登録した Intent は読み取り系でも `[.main]`**。フレーズの解決に要る `AppShortcutsProvider` がアプリターゲットにしか無いので、Extension に回ると Siri が失敗する
-- mutation には `defer { Self.dataDidChange() }` で副作用を集約すると、呼び忘れバグが構造で防げる。集約点があると、後から足す後処理 (App Shortcut のパラメータ更新) も 1 箇所で済む。ただし初回のパラメータ更新は `App.init()` ではなくシーンから呼ぶ
-- `swiftDataBacked(container:)` のような薄いファクトリを置くと、consumer 側のターゲット依存を最小化できる
+- 変更系メソッドには `defer { Self.dataDidChange() }` で副作用を集約すると、呼び忘れバグが構造で防げる。集約点があると、後から足す後処理 (App Shortcut のパラメータ更新) も 1 箇所で済む。ただし初回のパラメータ更新は `App.init()` ではなくシーンから呼ぶ
+- `swiftDataBacked(container:)` のような薄いファクトリを置くと、呼び出し側のターゲット依存を最小化できる
 
 次回は、[Extension target を SPM パッケージ化してマルチプラットフォーム対応を進めた話 (3/N)](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions) を書きます。
 
@@ -294,6 +294,7 @@ public extension TodoService {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した (呼出元・Widget・変更系メソッドなどの表記を統一、比喩を言い換え)。`dataDidChange()` を呼ぶ変更系メソッドを今のコードで数え直して 17 箇所にした
 - **2026-11-12**: 今のコードに合わせて直した。`dataDidChange()` は `TodoService+Organize.swift` からも呼ぶので `private` ではないこと、`delete` の `defer` は ID の形を確かめたあとに置いていること、`[.main]` の総数 (22 個) の内訳。見出しの空白の誤字
 - **2026-10-30**: 誤字・文の呼応の校正。まとめの「コンパイル時に消せる」が冒頭の「コンパイル時には強制できない」と食い違っていたので「構造で防げる」に訂正。あわせて表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃えた
 - **2026-10-01**: 「App Shortcut に登録した Intent は、読み取り系でもアプリ本体に固定する」の節を追加 (未指定だとアプリ未起動時に Extension へ回り、`AppShortcutsProvider` が無くて Siri が失敗する)。実行プロセスの表に Siri / Shortcuts (未指定) と App Shortcut の行を追加。固定数を 13 → 20 に更新し、ガードテストを 4 本立てに。`updateAppShortcutParameters()` の初回呼び出しを `App.init()` からシーンの `.task` へ移した話を追加

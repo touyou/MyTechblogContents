@@ -24,7 +24,7 @@ WWDC 2026 編の 3 本目です (この編の前提は 6/N 冒頭を見てくだ
 ### requestConfirmation で破壊的操作を確認する
 
 削除みたいな取り返しのつかない操作は、いきなり実行せず一度確認したいです。
-`requestConfirmation(dialog:)` を呼ぶと `perform()` がそこで止まって、Siri / Shortcuts 側に確認 UI が出ます。拒否されると **cancellation error が throw されて intent ごと中断** されるので、確認が通った場合だけ削除に進めます。
+`requestConfirmation(dialog:)` を呼ぶと `perform()` がそこで止まって、Siri / Shortcuts 側に確認 UI が出ます。拒否されると **cancellation error が throw されて Intent ごと中断** されるので、確認が通った場合だけ削除に進めます。
 
 ```swift
 @MainActor
@@ -39,7 +39,7 @@ public func perform() async throws -> some IntentResult {
 }
 ```
 
-confirm が通らなければ throw で抜けるので、`if` で分岐する必要すらなくて、書き味はかなり素直でした。
+確認が通らなければ throw で抜けるので、`if` で分岐する必要すらなくて、書き味はかなり素直でした。
 
 #### 呼出元に確認を出す面が無いと失敗する
 
@@ -105,10 +105,10 @@ private enum SnoozeDuration: CaseIterable {
 }
 ```
 
-これで「選択肢のリスト」と「逆引きの mapping」が同じ enum から生えるので、片方だけ直してもう片方を直し忘れる、というドリフトが起きません。
+これで「選択肢のリスト」と「逆引きの mapping」が同じ enum から生えるので、片方だけ直してもう片方を直し忘れる、ということが起きません。
 `IntentChoiceOption` に id が無いという地味な制約を、enum に寄せて吸収した、という感じです。
 
-ちなみに `requestChoice` も `requestConfirmation` も **`.background` モードの intent から呼べます** (Siri / Shortcuts の UI に surface される)。
+ちなみに `requestChoice` も `requestConfirmation` も **`.background` モードの Intent から呼べます** (Siri / Shortcuts の UI に表示される)。
 `SnoozeTodoIntent` は UI の Button からは呼ばれず Siri / Shortcuts 専用なので、ここに対話を置くのが安全でした。Live Activity のボタン用には、対話を求めず既定 30 分で即実行する `QuickSnoozeTodoIntent` を別に用意しています。
 
 ## 返事を出し分ける: IntentDialog(full:supporting:)
@@ -180,7 +180,7 @@ Button(intent: ToggleTodoCompletionIntent(todo: entity)) {
 }
 ```
 
-ボタンが走ると、システムがスニペットを再 perform するので、`perform()` の中で **毎回 entity を取り直して** いれば、ラベルが「Mark Complete」⇄「Mark Incomplete」と正しく切り替わります。
+ボタンが走ると、システムがスニペットを再実行するので、`perform()` の中で **毎回 entity を取り直して** いれば、ラベルが「Mark Complete」⇄「Mark Incomplete」と正しく切り替わります。
 だから `TodoSnippetIntent.perform()` は `todoId` から `TodoEntityStore` 経由で最新を再フェッチする作りにしています (6/N で出てきた共有コンテナのアクセサです)。
 
 一覧を返す `ShowTodosIntent` にもスニペットを付けました (`ShowTodosSnippetIntent`)。先頭 5 件を完了ボタン付きで出して、最後に「アプリで開く」ボタンを置いています。このボタンが `Button(intent: LaunchAppIntent(...))` で、**値を返す Intent 自身はアプリを開かず、開くのはスニペットのボタンに任せる** という分担です。最初は Intent 自身に開かせようとしてうまくいかなかったので、その経緯は 9/N に書きました。
@@ -201,7 +201,7 @@ Button(intent: ToggleTodoCompletionIntent(todo: entity)) {
 
 CosmoTunes の `DonationManager` にも同じことがコメントで書いてあります (*"Avoid issuing donations from inside an intent's `perform()`, because the framework already donates intents invoked through Siri or Shortcuts."*)。システムは自分が走らせた Intent をすでに寄付しているので、二重計上になる、ということでした。
 
-そして **`perform()` は呼出元を判別できません**。`IntentSystemContext` が公開しているのは `currentMode` / `isVoiceOnly` / `locale` / `preciseTimestamp` の 4 つで (Xcode 27 RC の SDK で数え直しました)、invocation source を知る API はありません。「音声だけで完結する状況か」も「どの言語で話しかけられたか」も分かるのに、**どの面から呼ばれたかだけが分からない** という切り口になっています。つまり `perform()` 内の寄付は必ず Siri / Shortcuts 経由でも走るので、分岐しようがない。撤去しました。
+そして **`perform()` は呼出元を判別できません**。`IntentSystemContext` が公開しているのは `currentMode` / `isVoiceOnly` / `locale` / `preciseTimestamp` の 4 つで (Xcode 27.2 正式版と 27.3 beta の SDK で数え直しました)、invocation source を知る API はありません。「音声だけで完結する状況か」も「どの言語で話しかけられたか」も分かるのに、**どの面から呼ばれたかだけが分からない** という切り口になっています。つまり `perform()` 内の寄付は必ず Siri / Shortcuts 経由でも走るので、分岐しようがない。撤去しました。
 
 ### 第 2 段階: `Button(intent:)` の実行は、そもそもシステムが寄付していた
 
@@ -220,11 +220,11 @@ CosmoTunes の `DonationManager` にも同じことがコメントで書いて�
 
 アプリは `donate()` をどこからも呼んでいないのに記録されています。つまり **アプリ内 `Button(intent:)` の実行は、システムが donation として記録している**。
 
-これで結論の理由が入れ替わりました。「規約違反になるから寄付しない」ではなく、**アプリ内 UI が全部 `Button(intent:)` である限り、寄付すべき「Intent を通らない UI 操作」が存在しないから** です。公式サンプル 4 本が明示 donate を必要とするのは、UI が Manager を直接呼んでいるからで (`Button(` 94 件のうち `Button(intent:)` は **0 件** でした)、前提が違います。セッション 343 の "Apple Intelligence can't learn from actions people take through your app's UI without your help" も、**UI の操作が intent の実行になっていない** アプリの話だと読むのが自然でした。
+これで結論の理由が入れ替わりました。「規約違反になるから寄付しない」ではなく、**アプリ内 UI が全部 `Button(intent:)` である限り、寄付すべき「Intent を通らない UI 操作」が存在しないから** です。公式サンプル 4 本が明示 donate を必要とするのは、UI が Manager を直接呼んでいるからで (`Button(` 94 件のうち `Button(intent:)` は **0 件** でした)、前提が違います。セッション 343 の "Apple Intelligence can't learn from actions people take through your app's UI without your help" も、**UI の操作が Intent の実行になっていない** アプリの話だと読むのが自然でした。
 
 設計の核 (Intent を唯一の実行経路とする) を寄付のために崩す必要は無かった、というのが当時の理解です。むしろ核を守っていたから寄付が要らなかった、という順序でした。ただし、この「全部 `Button(intent:)`」という前提そのものが怪しかったことを、第 4 段階で書きます。
 
-### 第 3 段階: 載せ替え案の方も畳んだ
+### 第 3 段階: 載せ替え案もやめた
 
 そうすると、宙に浮くのが最初の問いの前半 (「`callAsFunction(donate:)` に切り替えるべきでは」) です。アプリ内の `Button(intent:)` をやめて `try await intent(donate: true)` の形に載せ替える、という案でした。これは **やらない** ことにしました。
 
@@ -240,7 +240,7 @@ donate という動機が上の実測で消えたので、残るのは副次的�
 
 ### 第 4 段階: 「全部 `Button(intent:)`」を確かめていなかった
 
-第 2 段階の結論は「アプリ内 UI が全部 `Button(intent:)` である限り」という前提の上に立っていました。この前提を一度も洗っていなかったのが穴です。
+第 2 段階の結論は「アプリ内 UI が全部 `Button(intent:)` である限り」という前提の上に立っていました。この前提を一度も確かめていなかったのがまずかったです。
 
 5/N の落とし穴 6 (Siri が一覧の依頼に Intent を使わずに答えていた件) を追っていたときに、「donation が足りていないだけでは」と思って UI の操作経路を全部洗い直したら、`Button(intent:)` を通らない操作が 3 つありました。一覧のフィルタを選ぶ、行を選んで詳細を開く、ドラッグで並べ替える、です。前の 2 つは View の状態を書き換えるだけ、並べ替えは Intent を通らずに `TodoService` を直接呼んでいて、どれもアプリの中でやった分はシステムに 1 回も記録されていませんでした。
 
@@ -277,14 +277,14 @@ Picker(.copy("Filter"), selection: $selection.onUserSet(UIActionDonation.showLis
 
 確かめ方は少し変わりました。シミュレータ (iOS 27.1) でフィルタを 3 回切り替えて行を 1 回開いたら、Intent の実行ログの方 (Transcript) に `ShowTodosIntent` が 3 件、`OpenTodoIntent` が 1 件増えて、比較のために叩いた `Button(intent:)` と同じ形で載りました。一方で Donation のストリームは、その比較用の `Button(intent:)` も含めて今回は書かれていませんでした。第 2 段階の実測はこのストリームで見ていたので、同じ観測点が OS のバージョンで変わりうる、ということは頭に置いておいた方がよさそうです。
 
-「UI が全部 `Button(intent:)` だから要らない」は設計の意図であって、実装を確かめた事実ではありませんでした。99/N に書いた「できない理由を測り直さない」のちょうど裏返しで、**「要らない理由」も測り直さないと穴が開いたままになる** んだなと思います。
+「UI が全部 `Button(intent:)` だから要らない」は設計の意図であって、実装を確かめた事実ではありませんでした。99/N に書いた「できない理由を測り直さない」のちょうど裏返しで、**「要らない理由」も測り直さないと漏れたままになる** んだなと思います。
 
 ### 測り方を 2 回間違えた
 
 この結論に至る前に、**逆の判断を 2 回書いています**。どちらも読み方の問題で、覚えておく価値があるので残しておきます。
 
 1. **`mtime` を信じた**。ストリームのセグメントは mtime が 1 か月以上前なのに、中身は当日まで入っています (mmap 書き込みで mtime が更新されない)。→ **中身の時刻を見る**
-2. **`+0` を「書かれていない」と読んだ**。donation は派生ストリームなので **生成が遅れます**。実測で 4 分後は未反映、80 分後は反映済みでした。→ **`+0` を見たら待つ**。intent が走ったかどうかは即時反映される別のストリームで見る
+2. **`+0` を「書かれていない」と読んだ**。donation は派生ストリームなので **生成が遅れます**。実測で 4 分後は未反映、80 分後は反映済みでした。→ **`+0` を見たら待つ**。Intent が走ったかどうかは即時反映される別のストリームで見る
 
 5/N に書いた「まず既知の良い面 (positive control) で動かしてから疑わしい面に持っていく」は今回もやったんですが、**「待つ」が抜けていると positive control 自体が偽陰性になる** ので、そこだけでは足りませんでした。
 
@@ -347,7 +347,7 @@ private static func requiredUpdate<T>(_ state: IntentParameter<T?>.ValueState) -
 
 そのうえで 1 つ決めたのが、**`UpdateTodoIntent` の便宜 init は全フィールドを必須にする** ことでした。デフォルト値を与えると引数を省ける分は楽になるんですが、後から Intent にフィールドが増えたときに **フォームの方は、気付かないうちに古いままになります** (コンパイルは通るので、増えたフィールドだけ保存で消える、という壊れ方をします)。必須にしておけばコンパイルエラーで気付けるので、面倒な方を採りました。「呼出側を楽にする既定値」が、この手の *後から増える* 契約とは相性が悪いんだなと思います。
 
-全フィールドを毎回送るようにしたことで、副作用も 1 つ出てきました。6/N に書いたとおり場所は「名前 + 座標」に分解して保存しているんですが、**名前だけ差し替えると座標が前の場所のまま残ります**。座標は解決元の名前に属するので、名前が変わったら落とす、同じなら保つ、という分岐を足しました。フォームが毎回全フィールドを送る以上、これが無いと **場所と無関係な保存で座標が消える** (あるいは古い座標が生き残る) ことになります。3 ケースともテストにしました。
+全フィールドを毎回送るようにしたことで、副作用も 1 つ出てきました。6/N に書いたとおり場所は「名前 + 座標」に分解して保存しているんですが、**名前だけ差し替えると座標が前の場所のまま残ります**。座標は解決元の名前に属するので、名前が変わったら落とす、同じなら保つ、という分岐を足しました。フォームが毎回全フィールドを送る以上、「同じなら保つ」が無いと **場所と無関係な保存で座標が消え**、「変わったら落とす」が無いと古い座標が生き残ることになります。3 ケースともテストにしました。
 
 深さはこのあたりまで単体 (U) で、Shortcuts の UI が実際に「クリア」と「未指定」を区別して渡してくるかは実機待ちです。
 
@@ -389,7 +389,7 @@ static func registerRestore(
 
 ## Siri に読ませるエラー文言を決める
 
-対話まわりでもう 1 つ、失敗したときの言い方も Siri に届く経路でした。IntentTodo は `IntentError` に `CustomAppIntentErrorConvertible` を付けています。
+対話まわりでもう 1 つ、失敗したときの言い方も Siri に届くので、決めておく必要がありました。IntentTodo は `IntentError` に `CustomAppIntentErrorConvertible` を付けています。
 
 ```swift
 extension IntentError: CustomAppIntentErrorConvertible {
@@ -430,16 +430,16 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 - **ビルド成立 (B)**: `requestConfirmation` / `requestChoice` / `IntentDialog(full:supporting:)` / `SnippetIntent` / `UndoableIntent` / `CustomAppIntentErrorConvertible` はすべて OK。
 - **単体 (U)**: `valueState` の三状態は AppIntentsTesting で (10/N)、`UndoableIntent` の復元は `TodoService` の単体テストで確認済みです。`requestChoice` を使う Intent だけはテストから run できません。
-- **観測 (シミュレータ)**: `Button(intent:)` の実行がシステムの donation に記録されること、UI 側から寄付したフィルタ選択と行の選択が `Button(intent:)` と同じ形で記録されることは実測しました。ただし Widget / Control / Live Activity 起点は測れていません。
+- **観測 (シミュレータ)**: `Button(intent:)` の実行がシステムの donation に記録されること、UI 側から寄付したフィルタ選択と行の選択が Intent の実行ログ (Transcript) に `Button(intent:)` と同じ形で記録されることは実測しました。ただし Widget / Control / Live Activity 起点は測れていません。
 - **実機 (R)**: Siri が実際に確認 UI / 選択 UI を出すか、スニペットが応答に出るかは未確認です。端末で触れたら追記します。
 
 ## まとめ
 
 - `requestConfirmation` (yes/no) / `requestChoice` (多分岐) は `perform()` を止めてユーザーに聞ける。拒否 / `.cancel` は throw で中断される
-- `requestChoice` の `IntentChoiceOption` は安定 id を持たないので、選択肢生成と逆引きを enum に一元化してタイトル照合 + フォールバックでドリフトを防ぐ
+- `requestChoice` の `IntentChoiceOption` は安定 id を持たないので、選択肢生成と逆引きを enum に一元化してタイトル照合 + フォールバックで両者のずれを防ぐ
 - `IntentDialog(full:supporting:)` で「音声単独」と「視覚併用」のメッセージを出し分ける
 - `valueState` の三状態が要るのは **Siri / Shortcuts 側だけ**。アプリのフォームは全フィールドを `.set` で送る last-write-wins にする。便宜 init に既定値を与えると、Intent にフィールドが増えたときフォームが気付かないうちに古いままになる
-- Interactive Snippet はボタンを押すたびにシステムが `SnippetIntent` を再 perform するので、perform で毎回最新 entity を取り直す。app プロセス提示なので entity 解決クラッシュは無関係
+- Interactive Snippet はボタンを押すたびにシステムが `SnippetIntent` を再実行するので、`perform()` で毎回最新 entity を取り直す。app プロセス提示なので entity 解決クラッシュは無関係
 - **`perform()` の中で `donate()` を呼ぶのは規約違反**。呼出元を判別する API が無いので Siri / Shortcuts 経由でも走ってしまう
 - そのうえで **アプリ内 `Button(intent:)` の実行はシステムがすでに donation として記録している** (実測)。ただし「UI が全部 `Button(intent:)`」は確かめていない前提で、実際にはフィルタの選択と行の選択が Intent を通っていなかった。**Intent を通らない UI 操作だけを、Binding の setter から寄付する**。`deleteDonations(matching:)` は呼出元に関係なく正しいので残す
 - 残っていた `callAsFunction(donate:)` への載せ替え案も **不採用**。donate の動機が消えたうえ、別プロセスは `Button(intent:)` のままなので、載せ替えると呼び出し形が 2 種類に増える
@@ -452,6 +452,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した。`IntentSystemContext` のメンバが 4 つなのを Xcode 27.2 正式版と 27.3 beta の SDK で確かめ直した
 - **2026-11-12**: 校正。あとから節を足して「4 本立て」「最後が寄付」と構成が合わなくなっていたのを直し、`UndoableIntent` の復元を確かめたテストの種類を今のリポジトリに合わせた
 - **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

@@ -53,8 +53,7 @@ public struct CompleteTodosIntent: LongRunningIntent, CancellableIntent {
             logger.notice("CompleteTodosIntent cancelled: \(String(describing: reason))")
         }
 
-        let noun = completed == 1 ? "todo" : "todos"
-        return .result(dialog: IntentDialog("Completed \(completed) \(noun)."))
+        return .result(dialog: IntentDialog("Completed ^[\(completed) todo](inflect: true)."))
     }
 }
 ```
@@ -63,8 +62,8 @@ public struct CompleteTodosIntent: LongRunningIntent, CancellableIntent {
 
 ### EntityCollection で「解決しない」
 
-`@Parameter` の型を `EntityCollection<TodoAppEntity>` にすると、**パラメータ解決のときに各 id を full entity へ解決しません**。
-数百件を相手にするとき、全部 `TodoAppEntity` に hydrate するのはメモリも時間ももったいないので、これは助かります。
+`@Parameter` の型を `EntityCollection<TodoAppEntity>` にすると、**パラメータ解決のときに各 id を完全な entity へ解決しません**。
+数百件を相手にするとき、全部 `TodoAppEntity` として読み込むのはメモリも時間ももったいないので、これは助かります。
 
 `.identifiers` で id (`[String]`) だけ取り出せて、完全な entity が要るときだけ `resolvedEntities()` を呼ぶ、という設計です。
 完了処理は id さえあればできるので、今回は **entity 解決を完全に回避** できました。
@@ -76,7 +75,7 @@ public struct CompleteTodosIntent: LongRunningIntent, CancellableIntent {
 ただし注意点があって、**`progress` を定期的に更新しないとシステムが延長を打ち切ります**。
 `progress.totalUnitCount` / `completedUnitCount` をループの中で逐次更新する必要があります。これをサボると、長い処理の途中で勝手に止められる、ということになりそうです。
 
-あとから「そもそも `ProgressReportingIntent` を使っていないな」と思って調べたら、SDK が `LongRunningIntent: ProgressReportingIntent` になっていて **すでに採用済み** でした。未実装の種別ではなかった、というオチです。ただ見直したこと自体は無駄ではなくて、進捗の更新・キャンセルの観測・件数の複数形という 3 つの契約をソースで押さえるテストを足せたのと、上のコードで手書きしていた `completed == 1 ? "todo" : "todos"` を `^[\(completed) todo](inflect: true)` に直せました (6/N に書いた inflection です)。
+あとから「そもそも `ProgressReportingIntent` を使っていないな」と思って調べたら、SDK が `LongRunningIntent: ProgressReportingIntent` になっていて **すでに採用済み** でした。未実装の種別ではなかった、というオチです。ただ見直したこと自体は無駄ではなくて、進捗の更新・キャンセルの観測・件数の複数形という 3 つの振る舞いをソースで押さえるテストを足せたのと、もともと手書きしていた `completed == 1 ? "todo" : "todos"` を `^[\(completed) todo](inflect: true)` に直せました (6/N に書いた inflection です)。
 
 ### CancellableIntent で途中で止める
 
@@ -113,20 +112,19 @@ IntentTodo も共有パッケージが Widget Extension にリンクされてい
 
 宣言漏れはエラーを出さずに壊れる (Extension で書けてしまうだけ) ので、`Intents/` のソースを走査して「変更メソッドを呼ぶのに `allowedExecutionTargets` を宣言していないファイル」を検出するテストを足しました。わざと違反する probe intent を置いて、**実際に落ちることを確認してから** 入れています。
 
-ちなみに `ExecutionTargets` は `AppIntent` だけでなく **`EntityQuery` 側にも生えています** (公式が "available on both `AppIntent` and `EntityQuery`" と書いています)。IntentTodo の entity 解決は読み取りしかしないので、こちらは未指定のままです。
+ちなみに `allowedExecutionTargets` は `AppIntent` だけでなく **`EntityQuery` 側にも生えています** (公式が "available on both `AppIntent` and `EntityQuery`" と書いています)。IntentTodo の entity 解決は読み取りしかしないので、こちらは未指定のままです。
 
 では **指定しなかったとき** はどうなるかというと、これが「呼出元に応じて固定的に決まる」ではありませんでした。セッション 345 (15:59〜16:55) によると、未指定の Intent は **システムのヒューリスティクス** でプロセスが選ばれます (アプリが起動中ならアプリを優先、そうでなければ Extension を起こす)。SDK 側でも `IntentExecutionTargets` は `.default` を独立したケースに持つ `OptionSet` になっていて、「既定はシステムに委ねる」が型としても表現されていました。2/N の実行プロセスの表もこれを前提に書いています。
 
-### workaround を畳む道具にはならなかった (そして workaround の方が消えた)
+### workaround を無くす道具にはならなかった (そして workaround の方が消えた)
 
-`allowedExecutionTargets` を見つけたとき、自分は「これで 5/N の Primary / FromExtension 分離を 1 つに畳めるのでは」と期待しました。結論は **畳めません**。制御できるのは **どのプロセスが `perform()` するか** だけで、クラッシュが起きていた **パラメータ解決を経由するかどうか** は変えられないからです。分離はパラメータの「型」を変えて解決そのものを踏まない形なので、実行先を動かしても解決は解決として走ります。
+`allowedExecutionTargets` を見つけたとき、自分は「これで 5/N の Primary / FromExtension 分離を 1 つにまとめられるのでは」と期待しました。結論は **まとめられません**。制御できるのは **どのプロセスが `perform()` するか** だけで、クラッシュが起きていた **パラメータ解決を経由するかどうか** は変えられないからです。分離はパラメータの「型」を変えて解決そのものを踏まない形なので、実行先を動かしても解決は解決として走ります。
 
-ただ、この宿題は結局そっちでは解けませんでした。**前提の方が消えた** からです。Live Activity のボタン経由でも entity の事前解決はメインアプリプロセスで走ってクラッシュしない、と実機で確かめられたので、そもそも分ける理由が無くなって分離ごと撤去しました (経緯は [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls))。
+ただこの宿題は結局別のところで片付きました。**前提の方が消えた** からです。Live Activity のボタン経由でも entity の事前解決はメインアプリプロセスで走ってクラッシュしない、と実機で確かめられたので、そもそも分ける理由が無くなって分離ごと撤去しました (経緯は [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls))。
 
-ここは自分としてはちょっと面白くて、**「この API で workaround を畳めるか」を延々考えていたけれど、答えは「workaround がもう要らない」だった** わけです。道具の側で解決しようとすると、前提が生きているかどうかを疑う機会を逃すんだなと思いました。
+ここは自分としてはちょっと面白くて、**「この API で workaround を無くせるか」を延々考えていたけれど、答えは「workaround がもう要らない」だった** わけです。道具の側で解決しようとすると、前提が生きているかどうかを疑う機会を逃すんだなと思いました。
 
-この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化しています。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、公式に正しい設計だったと裏が取れた格好です。
-
+この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 ([WidgetKit foundations](https://developer.apple.com/videos/play/wwdc2026/277/)) が WidgetKit の実行モデルを明文化しています。**ウィジェットのビューはアーカイブされてシステムが描くので、表示中にアプリのコードは走らない / ボタンやトグルの操作は App Intent で表現する**、という整理です。アプリを開くだけの導線については、セッションでは `widgetURL` でのディープリンクが紹介されていて、ドキュメントの [Adding interactivity to widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities) には「ボタンやトグルは開く以上のことをする。開くだけなら `Link` と `widgetURL(_:)` を使う」と書かれています。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、公式に正しい設計だったと裏が取れた格好です。
 
 ## 複数の型を 1 つの結果で返す: @UnionValue
 
@@ -175,34 +173,34 @@ public func perform() async throws -> some IntentResult & ReturnsValue<[TodoOrCa
 
 つまり、**reminders ドメインのアプリでは `RelevantEntities` は現状そもそも適合できない** という結論になりました。
 Apple が todo / reminders 向けの `AppEntityContext` を追加してくれるまでは保留です。
-(名前が似ている `RelevantIntent` / `RelevantIntentManager` は WidgetConfigurationIntent ベースのウィジェット提案で、別軸の API です。文脈提案がどうしても必要になったら、そっちを検討することになりそうです。)
+(名前が似ている `RelevantIntent` / `RelevantIntentManager` は `WidgetConfigurationIntent` ベースのウィジェット提案で、別軸の API です。文脈提案がどうしても必要になったら、そっちを検討することになりそうです。)
 
-これは「実装をミスった」のではなく「**API の設計上、自分のドメインには口が用意されていない**」という種類の壁で、ドキュメントを上から読んでいるだけだと「使えそう」に見えてしまうやつでした。
-実際に適合させようと手を動かして初めて、context の選択肢が音楽再生などに限定されていると分かったので、こういうのこそ記録に残す価値があるなと思っています。
+これは「実装をミスった」のではなく「**API の設計上、自分のドメインに対応する context が用意されていない**」という種類の壁で、ドキュメントを上から読んでいるだけだと「使えそう」に見えてしまうやつでした。
+実際に適合させようと手を動かして初めて、context の選択肢が再生中のメディアに限定されていると分かったので、こういうのこそ記録に残す価値があるなと思っています。
 
 この結論、SDK が上がるたびに確かめ直しているんですが、今のところ変わっていません。iOS 27 で **寄付を取り消す側** の API (`removeAllEntities(for:)` など) が増えましたが、寄付する側の context が無い以上は出番がありません。`AppEntityContext` のファクトリも `.audio(_:)` 1 つのままです。
 
 ついでに、SDK の公開シンボルを全部並べて「リポジトリのどこにも名前が出てこないもの」を洗ったこともあるんですが、iOS 27 で入っていて記録が無かったのは 4 つだけで (RC で測り直しても増えていません)、どれも採用する筋がありませんでした (`.requiresGPU` を宣言する `LongRunningTaskOptions`、公開イニシャライザが無くてアプリからは値を作れない `RunSystemShortcutIntent`、下線付きの `_ModelDelegationIntent` と組で使う前提で、公開 API としては使えない `IntentResponseStream`、`@UnionValue` が生成する裏側のプロトコル)。**「まだ使っていない API」を数えるより、使えない理由を 1 行ずつ書き残す方が後で役に立つ** な、というのがこの棚卸しの感想です。
 
-## 「使えるけど使わない」を決めた API の棚卸し
+## 「使えるけど入れない」を決めた API の棚卸し
 
-`RelevantEntities` は「使いたくても口が無い」でしたが、逆に **使えるけど入れない** と決めたものもいくつかあります。判断の記録として並べておきます。
+`RelevantEntities` は「使いたくても対応する context が無い」でしたが、逆に **使えるけど入れない** と決めたものもいくつかあります。判断の記録として並べておきます。
 
 ### `.foreground(.dynamic)` と `OpensIntent`: 値を返す Intent にアプリを開かせない
 
 ここは「使えるけど入れない」の結論を 1 回書いたあとで、実機に出してからもう 2 回作り直しています。いちばん長く引きずったところなので、順に書きます。
 
-「背景で走らせて、必要になったら前面に引き上げる」という `.foreground(.dynamic)` + `continueInForeground` は、最初に `ShowTodosIntent` に入れて revert しました。`OpensIntent` と両立しないのが理由です。`OpensIntent` は返り値の型に現れるので「条件によっては開かない」を表現できず、dynamic を使うなら Intent 合成 (`ShowTodosIntent` → `LaunchAppIntent`) を外して `NavigationModel` を直に叩く形にするしかありません。合成を残したかったので、`ShowTodosIntent` は `.foreground` + `OpensIntent` のまま、「dynamic は当て先が無い」で閉じていました。
+「背景で走らせて、必要になったら前面に引き上げる」という `.foreground(.dynamic)` + `continueInForeground` は、最初に `ShowTodosIntent` に入れて revert しました。`OpensIntent` と両立しないのが理由です。`OpensIntent` は返り値の型に現れるので「条件によっては開かない」を表現できず、dynamic を使うなら Intent 合成 (`ShowTodosIntent` → `LaunchAppIntent`) を外して `NavigationModel` を直に叩く形にするしかありません。合成を残したかったので、`ShowTodosIntent` は `.foreground` + `OpensIntent` のまま、「dynamic を当てる Intent が無い」で閉じていました。
 
-これが TestFlight で崩れました。Siri で一覧を頼むと "something went wrong" になり、ショートカットアプリで「実行時に開く」をオフにして走らせると `not allowed` で拒否されます。後者で原因が分かって、**`.foreground` だけの Intent は、アプリを前面に出せない実行経路では丸ごと拒否される** んです。合成を守るために dynamic を戻した結果、値を返すだけの経路が無くなっていたわけでした。
+これが TestFlight で崩れました。Siri で一覧を頼むと "something went wrong" になり、Shortcuts で「実行時に開く」をオフにして走らせると `not allowed` で拒否されます。後者で原因が分かって、**`.foreground` だけの Intent は、アプリを前面に出せない実行経路では丸ごと拒否される** んです。合成を守るために dynamic を外した結果、値を返すだけの経路が無くなっていたわけでした。
 
-そこで dynamic を入れ直して、「前面に出せるなら出す」にしました。今度は Shortcuts では開かなくなったんですが、**Siri から呼ぶたびに毎回アプリが開きます**。Siri から呼ばれたときは `canContinueInForeground` が常に真だからです。`perform()` からは呼出元が分からない (`systemContext.currentMode` は前面に出せるかどうかだけ) ので、「Siri からは開かず、ショートカットで『実行時に開く』がオンのときだけ開く」は書けません。
+そこで dynamic を入れ直して、「前面に出せるなら出す」にしました。今度は Shortcuts では開かなくなったんですが、**Siri から呼ぶたびに毎回アプリが開きます**。Siri から呼ばれたときは `canContinueInForeground` が常に真だからです。`perform()` からは呼出元が分からない (`systemContext.currentMode` は前面に出せるかどうかだけ) ので、「Siri からは開かず、Shortcuts で『実行時に開く』がオンのときだけ開く」は書けません。
 
 結局、**「返す」と「開く」を 1 つの Intent に兼ねさせない** ことにしました。
 
 | 形 | 起きたこと |
 |---|---|
-| `.foreground` だけ + `OpensIntent` | 前面に出せない経路 (ショートカットの「実行時に開く」オフ) で `not allowed`。Siri でも失敗 |
+| `.foreground` だけ + `OpensIntent` | 前面に出せない経路 (Shortcuts の「実行時に開く」オフ) で `not allowed`。Siri でも失敗 |
 | `[.background, .foreground(.dynamic)]` + 出せるなら前面へ | Shortcuts では開かず、**Siri からは毎回アプリが開く** |
 | `.background` + `snippetIntent:` | どこから呼んでも一覧を返してスニペットを出し、アプリは開かない |
 
@@ -222,7 +220,7 @@ public struct ShowTodosIntent: AppIntent {
 }
 ```
 
-この最後の `[.main]` が、もう 1 回の転びです。dynamic のときは `NavigationModel` を使っていたので `[.main]` を付けていて、`.background` 専用にしたときに「もう `NavigationModel` を使わないから」と一緒に外しました。そうしたら Siri から呼ぶと失敗するようになって、原因はアプリ未起動時に Widget Extension へ回されていたことでした (詳しくは 2/N)。dynamic のビルドで Siri が動いていたのは、たまたま `[.main]` が付いていたからだったわけです。
+この最後の `[.main]` で、もう 1 回転んでいます。dynamic のときは `NavigationModel` を使っていたので `[.main]` を付けていて、`.background` 専用にしたときに「もう `NavigationModel` を使わないから」と一緒に外しました。そうしたら Siri から呼ぶと失敗するようになって、原因はアプリ未起動時に Widget Extension へ回されていたことでした (詳しくは 2/N)。dynamic のビルドで Siri が動いていたのは、たまたま `[.main]` が付いていたからだったわけです。
 
 反省は、「開かない」(`supportedModes`) と「どこで走るか」(`allowedExecutionTargets`) という 2 つの変数を 1 回の変更で動かしたことでした。しかも実機で確かめる前に審査中のビルドを差し替えていたので、失敗したときにどちらが原因か分かりません。3/N の「メカニズムは変える要素を 1 つに絞った比較でしか決まらない」を、配布の段でもう 1 回やってしまった形です。
 
@@ -239,13 +237,13 @@ public struct ShowTodosIntent: AppIntent {
 - **`LiveActivityStartingIntent`**: iOS 17 で deprecated で、`LiveActivityIntent` が後継
 - **`PredictableIntent`**: 提案の前提になる寄付が無い、という理由で外していた
 
-その `PredictableIntent` だけは、**前提の方が崩れて格下げになりました**。8/N のとおり、アプリ内 `Button(intent:)` の実行はシステムが donation として記録していて、Intent を通らない UI 操作も今は UI 側から寄付しています。「寄付がゼロだから提案が出ない」がそもそも成立しないので、これは **「入れられない」ではなく「まだ手を付けていない」** です。機能として先回りの提案が欲しくなったら普通に候補に戻ります。
+その `PredictableIntent` だけは、**前提の方が崩れて「入れられない」という判断を取り下げました**。8/N のとおり、アプリ内 `Button(intent:)` の実行はシステムが donation として記録していて、Intent を通らない UI 操作も今は UI 側から寄付しています。「寄付がゼロだから提案が出ない」がそもそも成立しないので、これは **「入れられない」ではなく「まだ手を付けていない」** です。機能として先回りの提案が欲しくなったら普通に候補に戻ります。
 
-「できない理由」を書いたあと、その理由の前提が別の検証でひっくり返ったのに、結論だけが残っていた形でした。99/N に書いた「できない理由を測り直さない」の実例がまた 1 つ増えた格好です。
+「できない理由」を書いたあと、その理由の前提が別の検証でひっくり返ったのに、結論だけが残っていた形でした。[99/N (将来トピック集)](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) に書いた「できない理由を測り直さない」という型の実例がまた 1 つ増えた格好です。
 
 ### `SpotlightSearchTool`: 前提は揃ったけどスコープの外
 
-WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分の Todo に対する会話型検索) は、前提になる「Spotlight への entity 寄付」が 5/N と 6/N で揃っているので、あと一歩ではありました。ただ残りの作業は `LanguageModelSession` と tool 登録、それに結果表示の UI で、**主体が FoundationModels 側に移ります**。このリポジトリで示したいのは「App Intents を設計の中心に据えるとどう組み立てられるか」なので、ここから先は別題材だなと思って外しました。99/N に書いた FoundationModels をやらない判断と同じ線引きです。
+WWDC 2026 のセッション 246 ([LLM search using Core Spotlight](https://developer.apple.com/videos/play/wwdc2026/246/)) で出てきた `SpotlightSearchTool` (自分の Todo に対する会話型検索) は、前提になる「Spotlight への entity 寄付」が 5/N と 6/N で揃っているので、あと一歩ではありました。ただ残りの作業は `LanguageModelSession` と tool 登録、それに結果表示の UI で、**主体が FoundationModels 側に移ります**。このリポジトリで示したいのは「App Intents を設計の中心に据えるとどう組み立てられるか」なので、ここから先は別題材だなと思って外しました。99/N に書いた FoundationModels をやらない判断と同じ線引きです。
 
 ## 検証できた深さ
 
@@ -253,7 +251,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 
 - **ビルド成立 (型レベル)**: `EntityCollection` / `LongRunningIntent` / `CancellableIntent` / `allowedExecutionTargets` / `@UnionValue` は OK。
 - **単体**: バルク完了の id ベース処理は確認済み。
-- **`RelevantEntities`**: 適合不能と結論 (型レベルで口が無い、という結論)。
+- **`RelevantEntities`**: 適合不能と結論 (対応する context が型として存在しない)。
 - **実機**: `ShowTodosIntent` の実行モードと実行プロセスは TestFlight の実機で決着させました。大量件数での progress 表示やキャンセル挙動、Siri からのバルク実行は未確認です。件数を盛って progress がちゃんと出るかは端末で見たいので、できたら追記します。
 
 ## まとめ
@@ -264,7 +262,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 - `allowedExecutionTargets` は `.main` / `.appIntentsExtension` / `.widgetKitExtension` の 3 つ。未指定なら実行プロセスはヒューリスティクスで決まる。制御できるのは perform のプロセスであって、entity 解決を踏むかどうかではない
 - 1 件だけ付けて止まっていた `allowedExecutionTargets` は、**書き込み系は全部 `[.main]` / 読み取り系は未指定** という方針に格上げした。App Shortcut に登録した読み取り系だけは例外で `[.main]`。宣言漏れはソース走査のテストで検出する
 - **値を返す Intent にアプリを開かせない**。`.foreground` だけだと前面に出せない経路で拒否され、`.foreground(.dynamic)` は Siri から毎回開く。`.background` + スニペットにして、開くのはスニペットのボタン (`LaunchAppIntent`) に任せる。実行モードと実行プロセスは 1 回の変更で一緒に動かさない
-- 「使えるけど入れない」も判断として残す。`EntityPropertyQuery` は `EnumerableEntityQuery` で足りている。ただし **理由の前提が崩れることがある** ので、結論だけ持ち越さない (`PredictableIntent` は「寄付ゼロだから動かない」が崩れて未着手に格下げ)
+- 「使えるけど入れない」も判断として残す。`EntityPropertyQuery` は `EnumerableEntityQuery` で足りている。ただし **理由の前提が崩れることがある** ので、結論だけ持ち越さない (`PredictableIntent` は「寄付ゼロだから動かない」が崩れて、「対象外」から「未着手」に戻した)
 - `@UnionValue` で複数 Entity 型を 1 つの結果に混ぜられる。`public enum` は `: Sendable` 明示が必要
 - `RelevantEntities` は **reminders ドメイン向けの `AppEntityContext` が存在せず適合不能**。公開 SDK で使える context は `.audio(.nowPlaying)` の 1 つだけ。実装ミスではなく API 設計上の壁で、保留
 
@@ -274,6 +272,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した。セッション 277 が言っていること (ビューはアーカイブされる / 操作は App Intent) と、「開くだけなら `Link`」の出どころ (ドキュメント) を分けた。セッション 246 / 277 に題名とリンクを付けた
 - **2026-11-12**: 校正。`[.main]` の総数 (例外を合わせて 22 個) と、`IntentResponseStream` が使えない理由 (下線付きなのは組になる `_ModelDelegationIntent` の方) をリポジトリの記録に合わせた
 - **2026-11-01**: Xcode 27.2 の記述を beta から正式版の確認結果に更新 (`@UnionValue` の `default:` / `size:` と、`AppEntityContext` が `.audio(_:)` だけなのは正式版でも同じ)
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

@@ -57,7 +57,7 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 }
 ```
 
-ポイントは、`category` のように **別の `AppEntity` を `@Property` で持てる** ことです。
+大事なのは、`category` のように **別の `AppEntity` を `@Property` で持てる** ことです。
 これで「あるカテゴリに属する Todo」みたいな辿り方が Shortcuts 側で組めるようになります。名詞と名詞を関連でつなぐ、というのを App Intents の語彙でやっている感じです。
 
 ### @Property(indexingKey:) でセマンティック検索に載せる
@@ -106,12 +106,12 @@ public var todoDescription: String?
 WWDC 2026 で、`@Parameter` や `@Property` に `Duration` / `PersonNameComponents` / `PlaceDescriptor` (GeoToolbox) といった **システム共通のネイティブ型** をそのまま使えるようになりました。
 これらを使うと、Siri / Shortcuts が型に応じた入力 UI (期間ピッカー、連絡先からの人名解決、場所の解決) を出してくれます。
 
-ただ、ここで CloudKit と正面衝突します。
-本編 4/N で書いたとおり、SwiftData + CloudKit 互換にするには **全属性が optional か default value 付きの primitive** でないといけません。`Duration` や `PlaceDescriptor` をそのまま `@Model` に持たせるのは無理があります。
+ただここで CloudKit と正面衝突します。
+本編 4/N で書いたとおり、SwiftData + CloudKit 互換にするには **全属性が optional か デフォルト値付きの primitive** でないといけません。`Duration` や `PlaceDescriptor` をそのまま `@Model` に持たせるのは無理があります。
 
 そこで採った設計が、**保存層は CloudKit 互換の primitive、App Intents の境界でネイティブ型に変換する** という二重表現です。
 
-モデル (`TodoItem`) 側は、あくまで primitive で持ちます。
+モデル (`TodoItem`) 側はあくまで primitive で持ちます。
 
 ```swift
 @Model
@@ -131,7 +131,7 @@ public final class TodoItem {
 }
 ```
 
-Entity (`TodoAppEntity`) 側は、ネイティブ型で公開します。
+Entity (`TodoAppEntity`) 側はネイティブ型で公開します。
 
 ```swift
 /// 所要時間。App Intents ネイティブの Duration で公開する。
@@ -147,7 +147,7 @@ public var assigneeName: String?
 public var location: PlaceDescriptor?
 ```
 
-そして、入力を受ける `AddTodoIntent` の `@Parameter` はネイティブ型で受けて、`perform()` の中で primitive に落とします。
+そして入力を受ける `AddTodoIntent` の `@Parameter` はネイティブ型で受けて、`perform()` の中で primitive に落とします。
 
 ```swift
 @Parameter(title: "Estimated Duration")
@@ -178,7 +178,7 @@ public func perform() async throws -> some IntentResult & ... {
 
 このコードは考え方を示すための簡略版です。実際の `AddTodoIntent` は 7/N の reminders スキーマ適合でパラメータ名がいくつか変わっていて、`location` は下に書く SDK のバグのせいで今も場所名の `String` です。
 
-場所の変換は、`PlaceDescriptor` まわりが少しややこしいので `TodoPlace` という enum に橋渡しを切り出しました。
+場所の変換は `PlaceDescriptor` まわりが少しややこしいので `TodoPlace` という enum に橋渡しを切り出しました。
 
 ```swift
 enum TodoPlace {
@@ -235,7 +235,7 @@ extension TodoAppEntity: Transferable {
 }
 ```
 
-担当者は `IntentPerson`、場所は `PlaceDescriptor` という **システムの intent value 型** へ橋渡ししています。この節で書いた「二重表現」の外向き版で、保存は primitive でも境界でネイティブ型に揃えてあったからこそ、export がすんなり書けました。
+担当者は `IntentPerson`、場所は `PlaceDescriptor` という **システムの intent value 型** へ橋渡ししています。この節で書いた「二重表現」をアプリの外に向けて使ったもので、保存は primitive でも境界でネイティブ型に揃えてあったからこそ、export がすんなり書けました。
 
 細かい気付きも 2 つ書いておきます。
 
@@ -246,7 +246,7 @@ extension TodoAppEntity: Transferable {
 
 ここまでさんざん「ネイティブ型で受ける」と書いておいて何なんですが、**`AddTodoIntent.location` だけは今も場所名の `String`** です。SDK のバグを踏むからで、Feedback (FB24548956) を出していました。Xcode 27.2 で直りましたが、まだ戻していない理由は後で書きます。
 
-きっかけは Xcode Cloud が赤くなったことでした。ログを追うと `AppIntentsSSUTraining` (Siri の音声理解の学習アセットを作るフェーズ) が、`PlaceDescriptor` のパラメータを SSU の variable に変換するときに、裏側のシステム Entity 型名 `GeoToolbox.PlaceDescriptorEntity` をそのまま variable 名に使っていて、**ドットが入っているせいで検証器の正規表現 `^[a-zA-Z_][a-zA-Z_$0-9]*$` に落ちて** いました。生成器と検証器が食い違っている形なので、アプリ側でできることは「その型を使わない」しかありません。
+きっかけは Xcode Cloud が赤くなったことでした。ログを追うと `AppIntentsSSUTraining` (Siri の音声理解の学習アセットを作るフェーズ) が、`PlaceDescriptor` のパラメータを SSU の variable に変換するときに、裏側のシステム Entity 型名 `GeoToolbox.PlaceDescriptorEntity` をそのまま variable 名に使っていて、**ドットが入っているせいで、名前をチェックする側の正規表現 `^[a-zA-Z_][a-zA-Z_$0-9]*$` に落ちて** いました。変数名を作る側とチェックする側が食い違っている形なので、アプリ側でできることは「その型を使わない」しかありません。
 
 厄介なのが壊れ方で、手元の `xcodebuild` は exit 0 (`** BUILD SUCCEEDED **`) で返ってきます。Xcode Cloud が emitted error を失敗扱いにするので、そこで初めて表に出てきました。実害は「該当 Intent だけ」ではなく、**そのターゲットの全 App Shortcut が音声理解の学習アセットを失う** ことです (`nlu/` が丸ごと生成されなくなります)。
 
@@ -288,13 +288,13 @@ SSU の variable は「**App Shortcut が参照する Intent のパラメータ�
 
 #### 判定は必ずクリーンビルドで
 
-検証で 1 つ気を付けることがあって、**SSU のタスクは incremental ビルドだと前回のエラーをそのままログに再表示してきます**。`Metadata.appintents` が変わっていないとタスク自体が再実行されないためで、編集直後のビルドが緑でも、SSU セクションのタイムスタンプが編集前のままだったりします。「直った」とも「まだ落ちてる」とも誤読できる形なので、判定は DerivedData ごと消してからにしないといけません。ビルドログを再現性の判定に使うなら、**そのログがいつ生成されたものか** まで見る、というのは地味に大事な教訓でした。ログに限らず `Metadata.appintents` そのものも、インクリメンタルビルドだとパッケージ側が作り直されずに古い値が混ざることがあって、`persistentIdentifier` を確かめたときにもう 1 回踏みかけています (→ [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions))。
+検証で 1 つ気を付けることがあって、**SSU のタスクはインクリメンタルビルドだと前回のエラーをそのままログに再表示してきます**。`Metadata.appintents` が変わっていないとタスク自体が再実行されないためで、編集直後のビルドが緑でも、SSU セクションのタイムスタンプが編集前のままだったりします。「直った」とも「まだ落ちてる」とも誤読できる形なので、判定は DerivedData ごと消してからにしないといけません。ビルドログを再現性の判定に使うなら、**そのログがいつ生成されたものか** まで見る、というのは地味に大事な教訓でした。ログに限らず `Metadata.appintents` そのものも、インクリメンタルビルドだとパッケージ側が作り直されずに古い値が混ざることがあって、`persistentIdentifier` を確かめたときにもう 1 回踏みかけています (→ [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions))。
 
 ## `parameterSummary` は Shortcuts 編集画面の allowlist
 
 Entity の話から少し逸れますが、`@Parameter` を足すときにセットで踏むところなので書いておきます。
 
-`AddTodoIntent` にネイティブ型のパラメータをいろいろ足したあと、**それらが Shortcuts の編集画面に 1 つも出ていない** ことに気付きました。原因は `parameterSummary` で、Apple のガイダンスがこう明言しています。
+`AddTodoIntent` にネイティブ型のパラメータをいろいろ足したあと、**それらが Shortcuts の編集画面に 1 つも出ていない** ことに気付きました。原因は `parameterSummary` で、Apple の App Intents ガイダンス (公開ドキュメントではなく、自分がエージェント用のスキルに取り込んでいるもの) がこう明言しています。
 
 > `ParameterSummary` is not cosmetic — it is the allowlist for which parameters the Shortcuts editor surfaces. […] every other `@Parameter` is **silently omitted** from the editor UI, even though it still exists and still resolves.
 
@@ -319,7 +319,6 @@ public static var parameterSummary: some ParameterSummary {
 そして、この非対称はちょうど裏返しの形でも起きていました。**場所 (`location`) は `AddTodoIntent` では受け取れるのに、`UpdateTodoIntent` にはパラメータが無く、アプリの編集画面にも欄がありませんでした**。作成時に付けた場所を後から直す手段がまったく無かったわけです。詳細画面は「値のあるフィールドだけ」を出す作りなので、**見えるのに直せない** という状態で残っていました。
 
 `parameterSummary` の方が「Shortcuts から書けない」で、こちらは「アプリから書けない」。どちらも **どこか 1 つの経路で書けているのを見て、書けると思い込んでいた** のが原因でした。書き込み経路は、Intent・`parameterSummary`・サービス層・UI の 4 つが揃って初めて通るので、属性を足したら 4 つ並べて確認するのが確実そうです。
-
 
 ## @ComputedProperty と @DeferredProperty
 
@@ -395,7 +394,7 @@ private static func loadSubtaskProgress(forID id: String) async throws -> String
 
 プレビューや SPM テストみたいに未登録の場面では、空の結果に degrade させて落ちないようにしています。
 
-登録場所については、最初「deferred property が走るのはメインアプリプロセスだけだから `App.init()` で 1 回登録すれば足りる」と書いていたんですが、これは足りませんでした。2/N に書いたとおり Widget / Control の Intent は既定でどちらのプロセスでも実行されうるので、**Widget Extension 側の `WidgetBundle.init()` でも登録が要ります**。登録し忘れると、Extension プロセスで解決されたときだけ中身が空になって「Todo not found」が描かれる、という切り分けにくい症状になりました。
+登録場所については最初「deferred property が走るのはメインアプリプロセスだけだから `App.init()` で 1 回登録すれば足りる」と書いていたんですが、これは足りませんでした。2/N に書いたとおり Widget / Control の Intent は既定でどちらのプロセスでも実行されうるので、**Widget Extension 側の `WidgetBundle.init()` でも登録が要ります**。登録し忘れると、Extension プロセスで解決されたときだけ中身が空になって「Todo not found」が描かれる、という切り分けにくい症状になりました。
 
 ```swift
 MainActor.assumeIsolated {
@@ -456,7 +455,7 @@ WWDC 2026 の `SyncableEntity` (セッション 345) も、Phase 1 のついで�
 
 ```swift
 public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
-    public var id: String  // CloudKit レコード id と同一。デバイス間で一貫。
+    public var id: String  // TodoItem の UUID。CloudKit の複製でデバイス間で一貫。
     // ... 追加の変更なしで適合 ...
 }
 ```
@@ -468,7 +467,7 @@ public struct TodoAppEntity: AppEntity, Hashable, SyncableEntity {
 
 Phase 1 で 1 つだけ手を付けられずに残していた `TransientAppEntity` (セッション 344) を、Xcode 27 beta 4 のタイミングで試しました。
 
-これは名前のとおり **永続化されないエンティティ** で、`AppEntity` との違いはだいたいこのあたりです。
+これは名前のとおり **永続化されない entity** で、`AppEntity` との違いはだいたいこのあたりです。
 
 | | `AppEntity` | `TransientAppEntity` |
 |---|---|---|
@@ -525,7 +524,7 @@ public func perform() async throws
 
 嬉しいのは Shortcuts 側で、「Get Todo Summary → Overdue Todos が 0 より大きければ通知する」みたいな条件分岐が、`@Property` 1 つずつを変数として組めることでした。既存の `ShowTodosIntent` で Todo を全件返してもらって数を数える、みたいな遠回りをしなくて済みます。サービス層は `fetchAll()` 1 回で全部の件数を作る `summarize()` を足しただけです。
 
-棲み分けとしては、99/N に書いた「通知の `appEntityIdentifiers` は永続 `AppEntity` 必須で `TransientAppEntity` は不可」という制約と表裏だと思っていて、**後から id で名指しされる名詞は `AppEntity`、その場で計算して返すだけの値は `TransientAppEntity`** と分かれている感じです。集計値に無理やり id を付けて永続 Entity に見せかけなくてよくなった、というのが実際に使ってみての感想でした。深さはビルド成立 (B) までで、Shortcuts で実際に条件分岐を組んで走らせるところは実機待ちです。
+棲み分けとしては 99/N に書いた「通知の `appEntityIdentifiers` は永続 `AppEntity` 必須で `TransientAppEntity` は不可」という制約と表裏だと思っていて、**後から id で名指しされる名詞は `AppEntity`、その場で計算して返すだけの値は `TransientAppEntity`** と分かれている感じです。集計値に無理やり id を付けて永続 Entity に見せかけなくてよくなった、というのが実際に使ってみての感想でした。深さはビルド成立 (B) までで、Shortcuts で実際に条件分岐を組んで走らせるところは実機待ちです。
 
 ## 公式サンプルと突き合わせて直した、名詞の「見せ方」の作法
 
@@ -571,7 +570,7 @@ DisplayRepresentation(
 
 ### `displayRepresentations(for:)` で候補一覧を軽くする
 
-`EntityQuery` には表示表現だけをまとめて返す口があります。公式いわく "Return full representations; the system materializes only the components it needs (for example, dropping a deferred image when only text is required)" で、候補一覧の描画で entity 本体を N 回組み立てるコストを避けるためのものです。
+`EntityQuery` には表示表現だけをまとめて返す `displayRepresentations(for:)` があります。公式ドキュメントのこのメソッドの項いわく "Return full representations; the system materializes only the components it needs (for example, dropping a deferred image when only text is required)" で、候補一覧の描画で entity 本体を N 回組み立てるコストを避けるためのものです。
 
 既定の実装は `entities(for:)` を呼んでから 1 件ずつ `displayRepresentation` を読むので、IntentTodo だと「表示に使わない `CategoryAppEntity` の生成」がまるごと乗ってきます。`TodoEntityQuery` / `CategoryEntityQuery` / `SubTaskEntityQuery` の 3 つに実装して、いずれも **SwiftData のモデルから直接** `makeDisplayRepresentation(...)` を呼ぶ形にしました。表示表現の組み立てを static 関数に切り出したのは、ここで entity を作らずに同じ表現を返せるようにするためです。
 
@@ -626,6 +625,7 @@ Visual Intelligence のラベルは英語主体なので最初は例外にして
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した。コード片のコメントの id の説明を本文に合わせ、Apple のガイダンスとして引いた文の出どころを明記した
 - **2026-11-12**: 今のコードとリポジトリの記録に合わせて直した。`AddTodoIntent` のパラメータ名、`TodoAppEntity` の id が何か (モデルの UUID)、`IntentPerson` のエラーが出る条件、UnicornChat での再現条件 (App Shortcut への登録)、`Hashable` の明示実装の今の状態
 - **2026-11-05**: 校正。打ち明け話の体裁になる「正直に」「正直なところ」を外した
 - **2026-11-01**: SSU バグ (FB24548956) が Xcode 27.2 正式版で直ったことを反映し、「Xcode 27.2 で直った、けどまだ戻さない」の節を追加 (配布ビルドの Xcode Cloud がまだ 27.1 なので `@Parameter` の退避は継続)

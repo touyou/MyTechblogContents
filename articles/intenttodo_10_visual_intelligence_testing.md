@@ -49,18 +49,18 @@ public struct TodoVisualIntelligenceQuery: IntentValueQuery {
 ここが面白かった点をいくつか。
 
 - **`IntentValueQuery` は `@Dependency` が使えます**。6/N で「`AppEntity` は `@Dependency` 使えない」と書きましたが、value query の方は `_SupportsAppDependencies` に適合しているので、`TodoService` を直接注入できます。entity みたいに `TodoEntityStore` を迂回しなくていいので、ここは素直でした。
-- 戻り値が **単一 Entity 型に縛られない** のが `EntityQuery` との違いです。9/N で作った `@UnionValue` の `[TodoOrCategory]` をそのまま返せるので、Todo とカテゴリの混在結果を出せます。
+- 戻り値が **単一 entity 型に縛られない** のが `EntityQuery` との違いです。9/N で作った `@UnionValue` の `[TodoOrCategory]` をそのまま返せるので、Todo とカテゴリの混在結果を出せます。
 - `SemanticContentDescriptor` は `labels: [String]` と `pixelBuffer: CVReadOnlyPixelBuffer?` を持っています。`labels` は一般的な英語ラベル (建物の固有名みたいなのは来ない、`en_US`、同義語や翻訳なし) です。本アプリは labels を Todo タイトル / カテゴリ名に部分一致させました。`pixelBuffer` で画像一致もできますが、それは ML モデルが要るので今回は見送りました。なお最初はラベルが英語主体だからと `lowercased()` してから `contains` していたんですが、**突き合わせ先の Todo は日本語** なので例外にする理由がなく、他の検索経路と同じ `localizedStandardContains(_:)` に揃えました (6/N)。自前の小文字化も要らなくなります。
 - **並行性**: `values(for:)` は nonisolated なので、MainActor の `TodoService` は `MainActor.run { ... }` でホップして取得して、その後は Sendable な `TodoAppEntity` 値で off-actor にフィルタする、という形にしています。
 - 他の query と同じで **登録は不要** で、システムが自動発見します (AppShortcut も要りません)。
-- 数の制限があって、**`SemanticContentDescriptor` を受ける `IntentValueQuery` はアプリに 1 つだけ** です (セッション 297 の 11:39)。IntentTodo は `TodoVisualIntelligenceQuery` の 1 つきりなので問題になっていませんが、あとから「Todo 用と Category 用で分けよう」と思い付いていたら通らなかったことになります。複数の型を返したいときは、次の項目の `@UnionValue` で戻り値の型を混ぜて 1 つの query に集約するのが正解でした。
+- 数の制限があって、**`SemanticContentDescriptor` を受ける `IntentValueQuery` はアプリに 1 つだけ** です (セッション 297 の 11:39)。IntentTodo は `TodoVisualIntelligenceQuery` の 1 つきりなので問題になっていませんが、あとから「Todo 用と Category 用で分けよう」と思い付いていたら通らなかったことになります。複数の型を返したいときは、1 つ前の項目の `@UnionValue` で戻り値の型を混ぜて 1 つの query に集約するのが正解でした。
 
 そして、結果まわりは **これまでに作った部品をそのまま再利用** できました。
 
 - 結果をタップして詳細を開く経路 → 7/N の `OpenTodoIntent` (`OpenIntent`)
 - 複数結果型 → 9/N の `@UnionValue` (`TodoOrCategory`)
 
-Visual Intelligence のために新しい Entity や型を増やさずに済んだのは、Entity と Intent を最初から「再利用できる部品」として設計してきた効果かなと思っていて、シリーズ 1/N で書いた「名詞と動詞が原子単位」という話がここで生きた感じがありました。
+Visual Intelligence のために新しい entity や型を増やさずに済んだのは、Entity と Intent を最初から「再利用できる部品」として設計してきた効果かなと思っていて、シリーズ 1/N で書いた「名詞と動詞が原子単位」という話がここで生きた感じがありました。
 
 ## 「もっと見る」: semanticContentSearch schema
 
@@ -99,7 +99,7 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 
 この要求、最初は「Mac 固有の追加バリデーション」だと思っていたんですが、そうではありませんでした。**ルール自体は全プラットフォーム共通** です。セッション 275 (9:19) が "This `OpenIntent` must exist, otherwise your app won't show up" と言っているとおりで、`OpenIntent` の無い entity はそもそも Visual Intelligence の結果に出てきません。Mac 固有なのは **macOS 向けのビルドだけがそれをコンパイル時エラーとして弾いてくる** という enforce のされ方の方でした。
 
-なのでこのエラーの出方が面白くて、`OpenCategoryIntent` を外しても **iOS ビルドは普通に通り**、macOS 向けビルドでだけ appintentsmetadataprocessor が `result type 'CategoryAppEntity' that is not openable ... must be associated with an OpenIntent` で止まります (手元の beta 2 で両方確認しました)。iOS だけ見ていると、ビルドは通るのに実機で「なぜか候補に出てこない」という形でしか気付けないことになります。SDK 更新のたびに複数 destination でフルビルドして確かめるのが結局いちばん確実だなと思うのは、こういうところです。深さはビルド成立 (B) までで、Mac の visual search で実際に Todo が出てくるかは実機待ちです。
+なのでこのエラーの出方が面白くて、`OpenCategoryIntent` を外しても **iOS ビルドは普通に通り**、macOS 向けビルドでだけ appintentsmetadataprocessor が `result type 'CategoryAppEntity' that is not openable ... must be associated with an OpenIntent` で止まります (手元の beta 2 で両方確認しました)。iOS だけ見ていると、ビルドは通るのに実機で「なぜか候補に出てこない」という形でしか気付けないことになります。SDK 更新のたびに複数 destination でフルビルドして確かめるのが結局いちばん確実だなと思うのは、こういうところです。深さはビルド成立 (B) までで (B / U / R の凡例は 6/N の冒頭にあります)、Mac の visual search で実際に Todo が出てくるかは実機待ちです。
 
 ちなみに「期限 → カレンダー」「担当者 → 連絡先」みたいな EventKit / Contacts 連携は、別フレームワークの話で App Intents 中心設計の検証主眼からは外れるので、今回は記録だけして未実装にしています。
 
@@ -124,16 +124,16 @@ public struct TodoSemanticContentSearchIntent: AppIntent {
 
 教訓としては 3 つで、まず `canImport` はあくまで存在チェックなので、API の対応プラットフォームが限られている機能では `&& !os(...)` を併用すること。次に **シミュレータのビルドが通ったことを「その OS で通る」根拠にしない** こと (Xcode Cloud やアーカイブは実機 SDK でビルドするので、手元でも `Any <OS> Device` を回しておくのが確実でした)。最後に、今回みたいに Intent と Query が対になっている機能では **ガードを全ファイルで揃える** こと。片方だけ外すと相互参照が dangling して別のエラーになります。
 
-本編 5/N で `CSSearchableIndex` と `IndexedEntity` の gate を揃える話を書きましたが、あれの「揃える相手が `#if os(...)` とは限らない」版だなと思いました。
+本編 5/N で `CSSearchableIndex` と `IndexedEntity` の gate を揃える話を書きましたが、あれの「揃える相手が `#if os(...)` とは限らない」パターンだなと思いました。
 
 ## AppIntentsTesting で Intent を実経路テストする
 
 WWDC 2026 編の締めとして、Intent を **実際の経路で動かすテスト** (セッション 295) を試しました。
-これまで Intent のテストは「perform の中のロジックを純関数に切り出して SPM テストする」くらいしかできていなかったんですが、AppIntentsTesting を使うと **Siri / Shortcuts が通るのと同じ経路** で intent を実行して検証できます。
+これまで Intent のテストは「perform の中のロジックを純関数に切り出して SPM テストする」くらいしかできていなかったんですが、AppIntentsTesting を使うと **Siri / Shortcuts が通るのと同じ経路** で Intent を実行して検証できます。
 
 ### UI テストバンドル必須 (unit test では動かない)
 
-[Apple のドキュメント](https://developer.apple.com/documentation/AppIntentsTesting/testing-your-app-intents-code) が明記していて、AppIntentsTesting は intent を **ライブのアプリプロセスで実行** するので、テストは unit test ではなく **UI テストバンドル** に置く必要があります。
+[Apple のドキュメント](https://developer.apple.com/documentation/AppIntentsTesting/testing-your-app-intents-code) が明記していて、AppIntentsTesting は Intent を **ライブのアプリプロセスで実行** するので、テストは unit test ではなく **UI テストバンドル** に置く必要があります。
 アプリプロセスと、登録済みの `AppDependencyManager` が要るからで、SPM の Testing パッケージでは動きません。IntentTodo は既存の `IntentTodoUITest` (UI テストターゲット) に追加しました。
 
 もう 1 つ、セッション 295 (2:54) が明言している要件があって、**テストランナーとアプリ本体が同じ development team で code signing されている必要があります**。同一 Apple ID でしか触っていないので「自分には関係ない要件」だと思っていたんですが、後で別の形でまともに踏みました (後述)。ランナーとアプリの紐付けを署名で確かめている、という仕組みの方を覚えておくのが正解でした。
@@ -238,7 +238,7 @@ func testAddThenShowChain() async throws {
 
 `AppEntityDefinition.viewAnnotations()` を使うと、**いま画面が publish している onscreen entity** を検証できます。CosmoTunes は Now Playing / ライブラリの各セグメント / Canvas / タイマーカードと **画面ごとに** テストを持っていて、IntentTodo は詳細画面 (単一 annotation) と一覧 (コレクション annotation) の 2 本にしました。一覧側は「作った 2 件が両方 annotation に出る」を superset で見ています。他のテストが残した Todo が混ざりうるので、件数の完全一致で見ると不安定になるためです。
 
-ただし **watchOS ではこの手が使えませんでした**。`AppIntentsTesting` は watchOS SDK にも存在していて、`IntentDefinitions` の発見も `suggestedEntities()` も `viewAnnotations()` もリンク・実行ともに通るんですが、**intent の `run()` が `LNPerformActionPrebuiltErrorCodeActionNotAllowed` (`LNPerformIntentPrebuiltErrorDomain` の code 4025) で落ちます**。テストの前提データを作る `AddTodoIntent` が走らないので、annotation を読むところまで到達できません。
+ただし **watchOS ではこの手が使えませんでした**。`AppIntentsTesting` は watchOS SDK にも存在していて、`IntentDefinitions` の発見も `suggestedEntities()` も `viewAnnotations()` もリンク・実行ともに通るんですが、**Intent の `run()` が `LNPerformActionPrebuiltErrorCodeActionNotAllowed` (`LNPerformIntentPrebuiltErrorDomain` の code 4025) で落ちます**。テストの前提データを作る `AddTodoIntent` が走らないので、annotation を読むところまで到達できません。
 
 watch アプリの UI から前提データを作る道もあるんですが、watchOS シミュレータの `typeText` が不安定なのは既存テストで経験済みで、そちらに寄せると「落ちても理由が分からないテスト」になります。5/N に書いた条件付き assert の反省もあるので、**watchOS 側は自動化を諦めて手動確認に回しました**。実装 (annotation 自体) は 4 プラットフォームのビルドで担保しています。
 
@@ -250,7 +250,7 @@ watch アプリの UI から前提データを作る道もあるんですが、w
 
 もう 1 つ、AppIntentsTesting をどこまでやればいいのかの目安が見つかりました。セッション 240 (24:13〜25:57) が **progressive validation** として順番を明示していて、`AppIntentsTesting` → Shortcuts アプリ → Spotlight → Siri、と段階を上げていく形です。
 
-大事なのが 1 段目の位置づけで、AppIntentsTesting は "entirely in isolation. No Siri involved." と言われています。セッション 295 (24:46) も "test your intents manually with Siri" と、**Siri は手動** だと明示していました。実際 AppIntentsTesting の公開 API を全文検索しても shortcut / phrase / siri / utterance に相当するシンボルは 0 件で、型名で intent を引く設計上フレーズ経路は通りません。
+大事なのが 1 段目の位置づけで、AppIntentsTesting は "entirely in isolation. No Siri involved." と言われています。セッション 295 (24:46) も "test your intents manually with Siri" と、**Siri は手動** だと明示していました。実際 AppIntentsTesting の公開 API を全文検索しても shortcut / phrase / siri / utterance に相当するシンボルは 0 件で、型名で Intent を引く設計上フレーズ経路は通りません。
 
 なので「App Shortcut のフレーズが Siri で正しくルーティングされるか」は、どうやっても手で確認するしかない領域です。自動化できないのが自分の怠慢に思えていたんですが、**Apple の想定どおりの分担** だと分かってちょっと安心しました。27.3 beta では、Siri の段そのものを自動化する道具が加わりました (フレーズまで見られるかはまだ分かりません)。次の節に書きます。
 
@@ -314,7 +314,7 @@ UserTurn("In IntentTodo, mark Buy milk as done") {
 
 テストとは少し違う道具ですが、検証まわりでもう 1 つ足したものがあります。システムが query を呼んだ記録を、アプリの中に残す仕組みです。
 
-きっかけは、ピッカーが空・検索に出ない・entity が解決しない、という症状を見たときに **呼ばれていないのか、呼ばれて 0 件を返したのか** が、手持ちのどの観測手段でも分からなかったことでした。出荷メタデータの検査は「ビルドがシステムに何を伝えたか」、donation のストリームは「intent が実行されたか」を答えてくれますが、query の呼び出しは見えません。AppIntentsTesting は自分が呼んだ query しか見ないし、`os_log` はライブでしか読めず、呼んだのが Extension だと拾いにくいです。この 2 つは直し方が逆 (前者は登録とメタデータ、後者は query の中身とストア) なので、本当は最初に切り分けたいところでした。5/N の落とし穴 6 を追ったときも、この記録を読んで切り分けています。
+きっかけは、ピッカーが空・検索に出ない・entity が解決しない、という症状を見たときに **呼ばれていないのか、呼ばれて 0 件を返したのか** が、手持ちのどの観測手段でも分からなかったことでした。出荷メタデータの検査は「ビルドがシステムに何を伝えたか」、donation のストリームは「Intent が実行されたか」を答えてくれますが、query の呼び出しは見えません。AppIntentsTesting は自分が呼んだ query しか見ないし、`os_log` はライブでしか読めず、呼んだのが Extension だと拾いにくいです。「呼ばれていない」と「呼ばれて 0 件」は直し方が逆 (前者は登録とメタデータ、後者は query の中身とストア) なので、本当は最初に切り分けたいところでした。5/N の落とし穴 6 を追ったときも、この記録を読んで切り分けています。
 
 形は外部のサンプル ([kntkymt/ios-app-intents-sample](https://github.com/kntkymt/ios-app-intents-sample)) にあったものを借りて、DEBUG ビルドと TestFlight のときだけ、各 query のメソッドから 1 行ずつ App Group の `UserDefaults` に追記します。元の形から 4 か所変えました。
 
@@ -334,7 +334,7 @@ AppIntentsTesting の話とは別に、テストを増やしたり日本語を�
 
 ### テストが「落ちる」のではなく「存在しないことになる」
 
-いちばん堪えたのがこれです。`TodoAppEntity.dueDate` の型を変えたとき、SPM パッケージ側のユニットテスト 4 箇所がコンパイルできない状態のまま `main` にマージされていました。
+いちばん堪えたのがこれです。`TodoAppEntity.dueDate` の型を変えたとき、SPM パッケージ側のユニットテスト 4 か所がコンパイルできない状態のまま `main` にマージされていました。
 
 原因は Xcode のスキームで、テストアクションに入っている `TestableReference` が **UI テストバンドル 1 つだけ** で、SPM パッケージのテストターゲットが 1 つも入っていなかったことでした。**241 件 (そのうち `TodoAppIntentsTests` が 137 件) のテストが `xcodebuild test` からも CI からも走らない** 状態です。テストは「落ちる」のではなく「存在しないことになる」ので、赤くなりません。
 
@@ -375,7 +375,7 @@ app.buttons["Delete todo"]         // 実際は「やることを削除」
 
 これ自体は素直な回帰なんですが、**落ちた 2 件より、落ちなかった 3 件の方が問題でした**。条件付き assert (`if element.waitForExistence(...) { XCTAssert... }`) で書かれていて、ラベルが引けないと中身が一度も実行されないまま緑になります。5/N に書いた壊れ方がそのまま再現した形です。
 
-対処はテスト対象アプリの言語を `-AppleLanguages (en)` で固定することにしました。ラベル引きが 7 箇所あって、個別に直すより言語を固定する方が確実だったので。
+対処はテスト対象アプリの言語を `-AppleLanguages (en)` で固定することにしました。ラベル引きが 7 か所あって、個別に直すより言語を固定する方が確実だったので。
 
 同じ「ホスト言語が ja」の事故は、上のスキーム修正でユニットテストを入れたときにも 11 件出ています。`String(localized: TodoFilter.all.displayName) == "All"` の形で書かれていて、コメントには「en では key がそのまま返る」とあったんですが、**シミュレータ上では ja で解決される** ので `"すべて"` が返ります。`swift test` では通るので、スキームに入れるまで表に出ませんでした。こちらは `resource.locale = Locale(identifier: "en")` でソース言語に固定しています。
 
@@ -434,7 +434,7 @@ AppIntentsTesting はテスト対象アプリの App Intents をアプリのプ�
 
 原因が自分側だったこととは別に、**この誤診を 1 日生かしてしまった仕組み** の方が問題でした。
 
-テストの前段に「intent がまだ発見できないなら待つ」というヘルパーを置いていて、タイムアウトしたら `XCTSkip` を投げるようにしていたんです。結果こうなります。
+テストの前段に「Intent がまだ発見できないなら待つ」というヘルパーを置いていて、タイムアウトしたら `XCTSkip` を投げるようにしていたんです。結果こうなります。
 
 ```
 Executed 1 test, with 1 test skipped and 0 failures (0 unexpected)
@@ -498,7 +498,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 - `@AppIntent(schema: .visualIntelligence.semanticContentSearch)` は entity プロパティを要求しないので、reminder スキーマのように適合がサブグラフ全体へ広がらない。`VisualIntelligence` のガードは `#if canImport(VisualIntelligence) && !os(visionOS)` (beta 2 で Mac にも import 可能になり、`canImport` だけだと visionOS 実機ビルドが落ちたため)
 - visual search が返す entity は全部 openable でないといけない。ルールは全プラットフォーム共通で、**macOS ビルドだけがコンパイル時に弾いてくる**
 - 結果タップ (`OpenTodoIntent`) / 複数結果型 (`@UnionValue`) は既存部品を再利用できた
-- AppIntentsTesting は実経路で intent を動かせるが **UI テストバンドル必須**、かつテストランナーとアプリの署名チームを揃える必要がある。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
+- AppIntentsTesting は実経路で Intent を動かせるが **UI テストバンドル必須**、かつテストランナーとアプリの署名チームを揃える必要がある。型消去 API + 文字列キーなので誤りは実行時に出る。自己クリーンアップ設計にする
 - `entity.id` は `NSNull` で、id は `entity.identifier.instanceIdentifier` から取る。`makeIntent(x: nil)` は `.unset` になるので明示クリアは型付き nil で渡す。`requestChoice` を使う Intent は run できない
 - `viewAnnotations()` で画面が publish している entity を検証できる。ただし **watchOS では `run()` が code 4025 で落ちて前提データを作れない** ので、そこは手動確認に回す。`forSelectionType:` も「`List` なら効く」ではなく「**selection のある `List` なら効く**」
 - Intent の一覧はそのまま「アプリでできること」の一覧なので、AppIntentsTesting で `run()` できる Intent はすべて `run()` して結果を確かめる (Shopify の Reflex と同じ考え方)。ロジックの境界値は単体テスト、アプリ内のボタン経路は UI テストに残す。テスト中にネットワークへ出たら失敗にするルールは、通信するアプリで試したい
@@ -514,6 +514,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した。watchOS で落ちるエラーのドメイン名 `LNPerformIntentPrebuiltErrorDomain` (code 4025) をシミュレータの runtime で確かめ直した (本文は正しかった)
 - **2026-11-12**: 校正。Visual Intelligence のコード片のガードを今のコード (`&& !os(visionOS)` 付き) に合わせ、走っていなかったテストの件数 (4 ターゲットで 241 件) とオーバーヘッドの計算の元 (19.9 秒) を書き足した
 - **2026-11-07**: 「梯子のどの段にテストを厚く置くか」の節を新設。Shopify Engineering の Reflex を読んで、AppIntentsTesting の振る舞いテストを中心に置く考え方と、テスト中のネットワークを失敗にするルールを追加
 - **2026-11-04**: Xcode 27.3 beta の Siri AI Developer Preview を反映。「27.3 beta で梯子に 2 段増えた: sirimetadataanalyzer と SiriEvaluations」の節を新設 (IntentTodo の基準値 / ツール化した後の指摘と誤検知の抑止 / SiriEvaluations の実機要件とテストターゲットの最小 OS)

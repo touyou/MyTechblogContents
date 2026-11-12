@@ -80,11 +80,11 @@ dialog の方は 2026-04-14 に、snippet の方は 2026-08-12 に、それぞ�
 
 dialog は素直に実機で分かったんですが、snippet は自分の推論が邪魔をして遠回りしました。せっかくなので失敗の経緯ごと書いておきます。
 
-最初、AppIntents の [Visual presentation](https://developer.apple.com/documentation/AppIntents/visual-presentation) が "Siri, Spotlight, and the Shortcuts app display snippets" と書いていて、WWDC25 のセッション 281 (0:29) も同じ 3 つを挙げているのを見て、「列挙に Control が無いから出ないんだろう」と判断しました。**これは肯定リストからの推論で、実測ではありません**。にもかかわらず dialog の実測結果と並べて書いてしまったので、あとから自分で見返したときに実測されたルールのように見えていました。
+最初、AppIntents の [Visual presentation](https://developer.apple.com/documentation/AppIntents/visual-presentation) が "Siri, Spotlight, and the Shortcuts app display snippets" と書いていて、WWDC 2025 のセッション 281 (0:29) も同じ 3 つを挙げているのを見て、「列挙に Control が無いから出ないんだろう」と判断しました。**これは肯定リストからの推論で、実測ではありません**。にもかかわらず dialog の実測結果と並べて書いてしまったので、あとから自分で見返したときに実測されたルールのように見えていました。
 
 しかもこの推論、設計にも影響していました。「Control では snippet が出ない」を前提に、snippet を返す Intent を全部 Control から外して Siri 側に寄せてしまったので、**Control 経由で snippet を返す経路が 1 つも無い** 状態になっていたんです。誤った前提のせいで、それを反証する実験もできなくなっていました。
 
-疑いを持ったのは、同じく WWDC25 のセッション 275 (1:40〜1:59) が「コントロールをタップ → Intent 実行 → snippet 表示 → snippet 内のボタンで即更新」をそのまま実演していたからです。肯定リストと真っ向からぶつかります。
+疑いを持ったのは、同じく WWDC 2025 のセッション 275 (1:40〜1:59) が「コントロールをタップ → Intent 実行 → snippet 表示 → snippet 内のボタンで即更新」をそのまま実演していたからです。肯定リストと真っ向からぶつかります。
 
 そこで **呼出元だけを変えて、同じ Intent・同じ snippet を走らせる** 比較をしました。
 
@@ -97,7 +97,7 @@ dialog は素直に実機で分かったんですが、snippet は自分の推�
 
 2 番目と 1 番目は Intent も snippet も同一で、違うのは呼出元だけです。これで snippet 実装の不備 / パラメータの有無 / 実行プロセス / `isDiscoverable` / コントロールの形状 / メタデータ登録が全部否定できて、**残る差分は「呼出元が Control であること」だけ** になりました。
 
-セッションを横断して見ても矛盾しませんでした。Controls 専門の WWDC24 のセッション 10157 は snippet にも dialog にも一度も触れず、フィードバック手段として挙げるのは後述の 3 つだけです。逆に Snippets 専門のセッション 281 は control / Control Center という語を一度も使いません。唯一の反例に見えたセッション 275 は、そもそも "Control Center" / "ControlWidget" という語を全編で一度も使っていなくて (他のセッションは Control の話をするとき必ず明示します)、あの "the control" はアプリ内 UI のボタンを指していたと読むのが自然でした。
+セッションを横断して見ても矛盾しませんでした。Controls 専門の WWDC 2024 のセッション 10157 は snippet にも dialog にも一度も触れず、フィードバック手段として挙げるのは後述の 3 つだけです。逆に Snippets 専門のセッション 281 は control / Control Center という語を一度も使いません。唯一の反例に見えたセッション 275 は、そもそも "Control Center" / "ControlWidget" という語を全編で一度も使っていなくて (他のセッションは Control の話をするとき必ず明示します)、あの "the control" はアプリ内 UI のボタンを指していたと読むのが自然でした。
 
 教訓は 2 つです。**肯定リストから否定を導かない**、導いたなら推論だと明示する。そして **「どの面が何を提示するか」は呼出元だけを変えた比較が最短で確定させる**。最初に Spotlight で試していれば「実装の問題か、面の問題か」が一発で分かれて、プロセスや形状の仮説を立てる必要すらありませんでした。まず出ると分かっている面で動かして、次に疑わしい面に持っていく。逆順にやると変数が絡んで、いつまでも確定しません。
 
@@ -355,7 +355,7 @@ Task(priority: .utility) { await todoService.indexAllForSpotlight() }  // 起動
 
 これが無いと、Spotlight 側が index を作り直したくなったときに応答先が無くて、次にアプリが起動して全件 index が走るまで検索に出てこなくなります。`TodoEntityQuery` に `reindexEntities(for:indexDescription:)` / `reindexAllEntities(indexDescription:)` を実装しました。
 
-もう 1 つ、`indexAppEntities` で渡した entity は Spotlight だけでなく、Siri / Apple Intelligence 側の索引 (Cascade) にも donate されます。外部のサンプルで「`.reminders.reminder` の `urls` が空配列だと、Cascade への索引が `LNSpotlightCascadeTranslator` Code=5 で失敗する」(FB23563297) という報告を見かけて、IntentTodo の `urls` も普段は空なので確かめました。結果は当たっていなくて、URL の無い Todo も有る Todo も `Finished set donation <AppIntentsIndexedEntity…>` → `result: success` でした。あとから考えれば、IntentTodo は `urls` を `@DeferredProperty` にしているので (6/N)、そもそも index に値が載りません。サンプルは computed の `var` で返していたので、形が違ったわけです。確かめ方は、アプリのプロセスに絞って `log show` で `CascadeSets` / `com.apple.corespotlight:index` のカテゴリを見る、です。`urls` を `@Property` に変えるときは測り直すつもりです。
+もう 1 つ、`indexAppEntities` で渡した entity は Spotlight だけでなく、Siri / Apple Intelligence 側の index (Cascade) にも donate されます。外部のサンプルで「`.reminders.reminder` の `urls` が空配列だと、Cascade への index が `LNSpotlightCascadeTranslator` Code=5 で失敗する」(FB23563297) という報告を見かけて、IntentTodo の `urls` も普段は空なので確かめました。結果は当たっていなくて、URL の無い Todo も有る Todo も `Finished set donation <AppIntentsIndexedEntity…>` → `result: success` でした。あとから考えれば、IntentTodo は `urls` を `@DeferredProperty` にしているので (6/N)、そもそも index に値が載りません。サンプルは computed の `var` で返していたので、形が違ったわけです。確かめ方は、アプリのプロセスに絞って `log show` で `CascadeSets` / `com.apple.corespotlight:index` のカテゴリを見る、です。`urls` を `@Property` に変えるときは測り直すつもりです。
 
 書いてみて引っかかったのが 2 つ。まず **`@MainActor` を付けられません**。`CSSearchableIndexDescription` が non-Sendable なので、MainActor 隔離した実装には渡せなくて `Non-Sendable parameter type 'CSSearchableIndexDescription' cannot be sent from caller of protocol requirement` になります。同じファイルの `entities(for:)` などは `@MainActor` で問題ないので、ここだけ nonisolated にして内側で await する形にしました。もう 1 つは単体テストで直接呼びにくいことで、`CSSearchableIndexDescription` の public な init は `init(coder:)` だけなので、素直にインスタンスを作れません。
 

@@ -167,7 +167,7 @@ production でユーザーに同じ問題を起こしたくない場合は、本
 
 ただしこの指針、**一次資料で裏を取れていません**。当初は WWDC 2026 の SwiftData Group Lab (セッション 8017) で示されたものとして書いていたんですが、あとで調べ直したら、Apple の公開セッション一覧にも手元のアーカイブにも 8017 というセッションがありませんでした (Group Lab は Apple Intelligence の 8011 だけです)。出どころを辿れないので、出典は外しています。内容自体は SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので方針は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。実際に導入する段になったら API 名と挙動は公式ドキュメントで確認し直すつもりです。
 
-## ハマりどころ 4: fallback が気付かないうちにデータを分裂させる
+## ハマりどころ 4: フォールバックが気付かないうちにデータを分裂させる
 
 最初は `SharedModelContainer.configuration` を以下のように書いていました。
 
@@ -182,7 +182,7 @@ public static var configuration: ModelConfiguration? {
 }
 ```
 
-これは「テスト / プレビューで App Group が無い時のための fallback」のつもりだったんですが、production で entitlement が壊れた場合にも同じ経路を通ってしまい、**メインアプリと Widget Extension がそれぞれ別の default ストアを開く** という、エラーも出ずに壊れる状態になります。
+これは「テスト / プレビューで App Group が無い時のための フォールバック」のつもりだったんですが、production で entitlement が壊れた場合にも同じ経路を通ってしまい、**メインアプリと Widget Extension がそれぞれ別の default ストアを開く** という、エラーも出ずに壊れる状態になります。
 ユーザーには「Widget が壊れている」「データが反映されない」とだけ見えるパターン。
 
 なので、production では明示的に `fatalError` で落とすように変えました。
@@ -207,13 +207,13 @@ public static var configuration: ModelConfiguration {
 }
 ```
 
-「production でだけ fatalError、DEBUG では fallback」という分岐は、SPM テストやプレビューを動かしつつ、production の不整合は TestFlight や App Store 審査の段階で確実に表面化させたい、という意図です。
+「production でだけ fatalError、DEBUG では フォールバック」という分岐は、SPM テストやプレビューを動かしつつ、production の不整合は TestFlight や App Store 審査の段階で確実に表面化させたい、という意図です。
 
-### ただしこの fallback、macOS では働かない
+### ただしこの フォールバック、macOS では働かない
 
 その後 macOS の SPM テストで引っかかって分かったんですが、上の分岐の入口になっている `FileManager.containerURL(forSecurityApplicationGroupIdentifier:)` は、**プラットフォームで挙動が違います**。iOS は entitlement が無ければ `nil` を返しますが、**macOS は entitlement の無いプロセスでもパスを返します** (`~/Library/Group Containers/<id>`。ディレクトリは存在するけれど書き込みはできない、という状態です)。
 
-なので macOS では `sharedContainerURL` が `nil` にならず、DEBUG の fallback 経路にも入りません。開けない共有ストアをそのまま掴んで、`createContainer()` が `NSCocoaErrorDomain 256` / `SQLite 23` で throw します。「App Group が使えるかどうかの判定に `containerURL != nil` を使う」というのが、そもそも指標として成立していなかったわけです。
+なので macOS では `sharedContainerURL` が `nil` にならず、DEBUG の フォールバック 経路にも入りません。開けない共有ストアをそのまま掴んで、`createContainer()` が `NSCocoaErrorDomain 256` / `SQLite 23` で throw します。「App Group が使えるかどうかの判定に `containerURL != nil` を使う」というのが、そもそも指標として成立していなかったわけです。
 
 テスト側の扱いは 2 つに分けました。**entitlement を要する経路は SPM テストで緑にしようとしない** ことにして、共有ストアを作るテストは `withKnownIssue(isIntermittent: true)` で包んでいます (entitlement のあるホストで走れば成功して、`isIntermittent` なのでその場合も緑のままです)。ストアを実際に使うテストの方は、`SharedModelContainer.createInMemoryContainer()` に切り替えました。
 
@@ -366,7 +366,7 @@ public func incompleteCount() throws -> Int {
 - `cloudKitDatabase: .automatic` + entitlements に container + APS + Portal 側の capability 設定が必要
 - 全属性にデフォルト値、全リレーションを Optional `[T]?` にする
 - 旧スキーマのストアは削除して作り直す (開発中)
-- production の fallback はエラーも出ずに壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく。ただし macOS は entitlement 無しでも `containerURL` がパスを返すので、この分岐自体が効かない
+- production の フォールバック はエラーも出ずに壊れる経路になりやすいので、`#if !DEBUG` で `fatalError` にしておく。ただし macOS は entitlement 無しでも `containerURL` がパスを返すので、この分岐自体が効かない
 - `Calendar.RecurrenceRule` のように **コンパイルは通るのに schema 初期化で trap する型** がある。CloudKit 互換のために primitive へ落としていると、結果的にこれも避けられる
 - **削除済みオブジェクトの配列属性は読めない** (スカラーは耐える)。`isDeleted` のガードでは防げないので、`body` から `@Model` の配列属性を読まず、id から引き直す。絞り込みのように `@Query` の結果を回したくなる場面は、fetch 越しのスナップショットで読む
 - **`ModelContainer` の init はストアのロードを待たない**。直後の `mainContext` は初回起動だけ落ちるし、直後の fetch は行があっても空で返る
@@ -379,7 +379,7 @@ public func incompleteCount() throws -> Int {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
-- **2026-11-12 (2 回目)**: 言い回しと表記を見直した (fallback・マイグレーション・Core Data などの表記を統一、比喩を言い換え)
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した (マイグレーション・Core Data などの表記を統一、比喩を言い換え)
 - **2026-11-12**: 校正。マイグレーションの指針の出典 (セッション 8017 は公開一覧に無く、出典を外したこと) をほかの節とも揃え、Group Lab で聞いたように読める箇所を直した。最初のエラーログからリレーションの行を外し (ハマりどころ 2 と重複していた)、ログの文言を今のコードに合わせた。「ハマりどころは 3 と 4 と 6」が節の番号に読める書き方を直した
 - **2026-11-05**: 校正。打ち明け話の体裁になる「正直なところ」を外した
 - **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した

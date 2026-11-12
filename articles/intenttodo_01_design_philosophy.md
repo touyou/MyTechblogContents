@@ -154,8 +154,10 @@ IntentTodo で参考にしている指針は以下です。
                     │  ┊
               TodoService  ┊                                  ← 1 行為の不変条件・副作用
                     │      ┊ ← 読み取り (EntityQuery) は Service を通らない
-           TodoRepositoryProtocol  ┊
-                    │      ┊ ← Repository も通らないものがある
+                    │      ┊
+           TodoRepository  ┊ ← Repository も通らないものがある
+             Protocol      ┊
+                    │      ┊
               SwiftData / CloudKit
 ```
 

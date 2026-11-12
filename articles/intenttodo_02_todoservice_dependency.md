@@ -135,7 +135,7 @@ struct IntentTodoApp: App {
 
 ここがハマりどころです。`AppDependencyManager.shared` はプロセス単位なので、Intent が走るプロセスごとに登録しなおす必要があります。
 
-| 呼び出し元 | モード | 実行プロセス | 登録場所 |
+| 呼出元 | モード | 実行プロセス | 登録場所 |
 |---|---|---|---|
 | アプリ内 UI (`Button(intent:)`) | 全モード | メインアプリ | `App.init()` |
 | Siri / Shortcuts (`allowedExecutionTargets` 未指定) | `.background` | **アプリ未起動なら Extension に回る** | **両方** |
@@ -277,7 +277,7 @@ public extension TodoService {
 
 何が嬉しいかというと、Widget Extension target は `Repository` パッケージを直接依存に持たなくても、`TodoAppIntents` だけを import すれば `TodoService.swiftDataBacked(container:)` で TodoService を組み立てられることです。
 
-これによって、プロジェクトファイル側の package product dependencies を増やさずに、Repository を別の実装に替えたり、テストでモックに替えたりする口も将来的に追加しやすくなりました。
+これによって、プロジェクトファイル側の package product dependencies を増やさずに、TodoService を別の実装に替えたり、テストでモックに替えたりする口も将来的に追加しやすくなりました。
 
 ## まとめ
 
@@ -294,7 +294,7 @@ public extension TodoService {
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
-- **2026-11-12 (2 回目)**: 言い回しと表記を見直した (呼び出し元・Widget・変更系メソッドなどの表記を統一、比喩を言い換え)。`dataDidChange()` を呼ぶ変更系メソッドを今のコードで数え直して 17 か所にした
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した (呼出元・Widget・変更系メソッドなどの表記を統一、比喩を言い換え)。`dataDidChange()` を呼ぶ変更系メソッドを今のコードで数え直して 17 箇所にした
 - **2026-11-12**: 今のコードに合わせて直した。`dataDidChange()` は `TodoService+Organize.swift` からも呼ぶので `private` ではないこと、`delete` の `defer` は ID の形を確かめたあとに置いていること、`[.main]` の総数 (22 個) の内訳。見出しの空白の誤字
 - **2026-10-30**: 誤字・文の呼応の校正。まとめの「コンパイル時に消せる」が冒頭の「コンパイル時には強制できない」と食い違っていたので「構造で防げる」に訂正。あわせて表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃えた
 - **2026-10-01**: 「App Shortcut に登録した Intent は、読み取り系でもアプリ本体に固定する」の節を追加 (未指定だとアプリ未起動時に Extension へ回り、`AppShortcutsProvider` が無くて Siri が失敗する)。実行プロセスの表に Siri / Shortcuts (未指定) と App Shortcut の行を追加。固定数を 13 → 20 に更新し、ガードテストを 4 本立てに。`updateAppShortcutParameters()` の初回呼び出しを `App.init()` からシーンの `.task` へ移した話を追加

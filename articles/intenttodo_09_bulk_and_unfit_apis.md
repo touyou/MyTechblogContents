@@ -237,7 +237,7 @@ public struct ShowTodosIntent: AppIntent {
 - **`LiveActivityStartingIntent`**: iOS 17 で deprecated で、`LiveActivityIntent` が後継
 - **`PredictableIntent`**: 提案の前提になる寄付が無い、という理由で外していた
 
-その `PredictableIntent` だけは、**前提の方が崩れて「入れられない」という判断を取り下げました**。8/N のとおり、アプリ内 `Button(intent:)` の実行はシステムが寄付として記録していて、Intent を通らない UI 操作も今は UI 側から寄付しています。「寄付がゼロだから提案が出ない」がそもそも成立しないので、これは **「入れられない」ではなく「まだ手を付けていない」** です。機能として先回りの提案が欲しくなったら普通に候補に戻ります。
+その `PredictableIntent` だけは、**前提の方が崩れて「入れられない」という判断を取り下げました**。8/N のとおり、アプリ内 `Button(intent:)` の実行はシステムが donation として記録していて、Intent を通らない UI 操作も今は UI 側から寄付しています。「寄付がゼロだから提案が出ない」がそもそも成立しないので、これは **「入れられない」ではなく「まだ手を付けていない」** です。機能として先回りの提案が欲しくなったら普通に候補に戻ります。
 
 「できない理由」を書いたあと、その理由の前提が別の検証でひっくり返ったのに、結論だけが残っていた形でした。[99/N (将来トピック集)](https://zenn.dev/touyou/articles/intenttodo_99_future_topics) に書いた「できない理由を測り直さない」という型の実例がまた 1 つ増えた格好です。
 

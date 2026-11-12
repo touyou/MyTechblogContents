@@ -514,7 +514,7 @@ watch のテストが軒並み条件付きになっていたのには理由が�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
-- **2026-11-12 (2 回目)**: 言い回しと表記を見直した。watchOS で落ちるエラーのドメイン名が `LNPerformIntentPrebuiltErrorDomain` (code 4025) であることをシミュレータの runtime で確かめた
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した。watchOS で落ちるエラーのドメイン名 `LNPerformIntentPrebuiltErrorDomain` (code 4025) をシミュレータの runtime で確かめ直した (本文は正しかった)
 - **2026-11-12**: 校正。Visual Intelligence のコード片のガードを今のコード (`&& !os(visionOS)` 付き) に合わせ、走っていなかったテストの件数 (4 ターゲットで 241 件) とオーバーヘッドの計算の元 (19.9 秒) を書き足した
 - **2026-11-07**: 「梯子のどの段にテストを厚く置くか」の節を新設。Shopify Engineering の Reflex を読んで、AppIntentsTesting の振る舞いテストを中心に置く考え方と、テスト中のネットワークを失敗にするルールを追加
 - **2026-11-04**: Xcode 27.3 beta の Siri AI Developer Preview を反映。「27.3 beta で梯子に 2 段増えた: sirimetadataanalyzer と SiriEvaluations」の節を新設 (IntentTodo の基準値 / ツール化した後の指摘と誤検知の抑止 / SiriEvaluations の実機要件とテストターゲットの最小 OS)

@@ -205,7 +205,7 @@ Xcode 27 beta 5 が出たので追従したついでに、これまでとは毛�
 
 - Control Widget の `ControlValueProvider`: 「body が過剰評価される」ではなく、非同期取得は Provider の役目でリロード時に Provider → body の順に走る、という分担モデルの話 → [5/N](https://zenn.dev/touyou/articles/intenttodo_05_app_intents_pitfalls)
 - Widget Extension 内の `ControlConfigurationIntent` をアプリから参照できない理由: 「Name Mangling」ではなく単にターゲット/モジュール境界でした。共有したいなら SPM に出すのが公式の方法です
-- 全 Intent で `WidgetReloader.reloadAllWidgets()` を呼ぶルール: Widget 内の `Button(intent:)` 起点なら **システムが自動でリロードを保証している** (セッション 10028) ので、手動が本当に要るのは Siri / Shortcuts / アプリ UI 側から変えたときだけでした。無条件に呼ぶ運用は呼びすぎても害が無いので変えていませんが、理由は「Widget 起点は自動、それ以外の経路のために必要」が正確です
+- 全 Intent で `WidgetReloader.reloadAllWidgets()` を呼ぶルール: Widget 内の `Button(intent:)` 起点なら **システムが自動でリロードを保証している** (セッション 10028) ので、手動が本当に要るのは Siri / Shortcuts / アプリ UI 側から変えたときだけでした。無条件に呼ぶ運用は、余計なリロードが少し増えても表示が古いまま残るよりはいいと考えて変えていませんが (リロードは処理と電力を使い、回数が多いとシステムに抑えられるので、呼びすぎていいわけではありません)、理由は「Widget 起点は自動、それ以外の経路のために必要」が正確です
 - watchOS の `Button(intent:)`: プラットフォーム別のメモに「watchOS は `role:` 付きのシグネチャが使えないから手動で `Task { try? await intent.perform() }` する」と書いてあったんですが、これは別のメモにある「手動 `perform()` は `@Dependency` がゼロ初期化のままになるのでクラッシュする、必ず `Button(intent:)` を使う」という指針と真逆でした。実際の `WatchUI` のコードを見に行ったら全部 `role:` 無しの `Button(intent:)` で書いてあって、手動 perform を勧めていた方が誤記です。使えないのは `role:` 付きのシグネチャだけでした。同じリポジトリのドキュメント同士が正反対のことを言っているのに、突き合わせるまで誰も (自分も) 気付いていなかった、というのはちょっと怖かったです
 - `#Predicate` の Optional 直接比較: 「visionOS 等で」とプラットフォーム限定で書いていましたが、これは **マクロ固有の制約** でした。プラットフォーム差でも toolchain 差でもなくて、落ちるのは「非 Optional なプロパティ == Optional な値」の 1 パターンだけです。同じ式を `#Predicate` の外に書くと普通に通ります
 

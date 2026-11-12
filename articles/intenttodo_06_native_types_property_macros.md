@@ -107,7 +107,7 @@ WWDC 2026 で、`@Parameter` や `@Property` に `Duration` / `PersonNameCompone
 これらを使うと、Siri / Shortcuts が型に応じた入力 UI (期間ピッカー、連絡先からの人名解決、場所の解決) を出してくれます。
 
 ただここで CloudKit と正面衝突します。
-本編 4/N で書いたとおり、SwiftData + CloudKit 互換にするには **全属性が optional か default value 付きの primitive** でないといけません。`Duration` や `PlaceDescriptor` をそのまま `@Model` に持たせるのは無理があります。
+本編 4/N で書いたとおり、SwiftData + CloudKit 互換にするには **全属性が optional か デフォルト値付きの primitive** でないといけません。`Duration` や `PlaceDescriptor` をそのまま `@Model` に持たせるのは無理があります。
 
 そこで採った設計が、**保存層は CloudKit 互換の primitive、App Intents の境界でネイティブ型に変換する** という二重表現です。
 

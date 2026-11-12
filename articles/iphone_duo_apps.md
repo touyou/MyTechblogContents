@@ -359,8 +359,6 @@ Intento は、Siri やウィジェットなどアプリを開かなくても使�
 
 ![Intento のストアスクショ](/images/iphone_duo_apps/store-intento.jpg)
 
-月屏風は Duo が主役なので、全部の画面を Duo で描いています。縦長のサイズと横長のサイズで、それぞれこんな感じです。
+月屏風は開いた Duo で屏風を見せる絵にしました。
 
-![月屏風のストアスクショ（縦長）](/images/iphone_duo_apps/store-tsukibyobu-closed.jpg)
-
-![月屏風のストアスクショ（横長）](/images/iphone_duo_apps/store-tsukibyobu-open.jpg)
+![月屏風のストアスクショ](/images/iphone_duo_apps/store-tsukibyobu.jpg)

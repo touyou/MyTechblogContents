@@ -124,7 +124,7 @@ IntentTodo も共有パッケージが Widget Extension にリンクされてい
 
 ここは自分としてはちょっと面白くて、**「この API で workaround を無くせるか」を延々考えていたけれど、答えは「workaround がもう要らない」だった** わけです。道具の側で解決しようとすると、前提が生きているかどうかを疑う機会を逃すんだなと思いました。
 
-この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 が WidgetKit の実行モデルを明文化しています。**ウィジェットのビューはアーカイブ済みで任意コードは走らせられない / ユーザー操作は App Intent で表現する / アプリを開くだけなら `Link` を使う**、という整理です。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、公式に正しい設計だったと裏が取れた格好です。
+この「Widget / Extension からの操作はどう扱うべきか」については、WWDC 2026 のセッション 277 ([WidgetKit foundations](https://developer.apple.com/videos/play/wwdc2026/277/)) が WidgetKit の実行モデルを明文化しています。**ウィジェットのビューはアーカイブされてシステムが描くので、表示中にアプリのコードは走らない / ボタンやトグルの操作は App Intent で表現する**、という整理です。アプリを開くだけの導線については、セッションでは `widgetURL` でのディープリンクが紹介されていて、ドキュメントの [Adding interactivity to widgets and Live Activities](https://developer.apple.com/documentation/widgetkit/adding-interactivity-to-widgets-and-live-activities) には「ボタンやトグルは開く以上のことをする。開くだけなら `Link` と `widgetURL(_:)` を使う」と書かれています。IntentTodo はもともと「ボタン操作は `Button(intent:)`、アプリ起動は `Link(destination:)`」という方針で書いていて、これが当時は「動作検証が必要」くらいの歯切れの悪さだったんですが、公式に正しい設計だったと裏が取れた格好です。
 
 ## 複数の型を 1 つの結果で返す: @UnionValue
 
@@ -243,7 +243,7 @@ public struct ShowTodosIntent: AppIntent {
 
 ### `SpotlightSearchTool`: 前提は揃ったけどスコープの外
 
-WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分の Todo に対する会話型検索) は、前提になる「Spotlight への entity 寄付」が 5/N と 6/N で揃っているので、あと一歩ではありました。ただ残りの作業は `LanguageModelSession` と tool 登録、それに結果表示の UI で、**主体が FoundationModels 側に移ります**。このリポジトリで示したいのは「App Intents を設計の中心に据えるとどう組み立てられるか」なので、ここから先は別題材だなと思って外しました。99/N に書いた FoundationModels をやらない判断と同じ線引きです。
+WWDC 2026 のセッション 246 ([LLM search using Core Spotlight](https://developer.apple.com/videos/play/wwdc2026/246/)) で出てきた `SpotlightSearchTool` (自分の Todo に対する会話型検索) は、前提になる「Spotlight への entity 寄付」が 5/N と 6/N で揃っているので、あと一歩ではありました。ただ残りの作業は `LanguageModelSession` と tool 登録、それに結果表示の UI で、**主体が FoundationModels 側に移ります**。このリポジトリで示したいのは「App Intents を設計の中心に据えるとどう組み立てられるか」なので、ここから先は別題材だなと思って外しました。99/N に書いた FoundationModels をやらない判断と同じ線引きです。
 
 ## 検証できた深さ
 
@@ -272,6 +272,7 @@ WWDC 2026 のセッション 246 で出てきた `SpotlightSearchTool` (自分�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した。セッション 277 が言っていること (ビューはアーカイブされる / 操作は App Intent) と、「開くだけなら `Link`」の出どころ (ドキュメント) を分けた。セッション 246 / 277 に題名とリンクを付けた
 - **2026-11-12**: 校正。`[.main]` の総数 (例外を合わせて 22 個) と、`IntentResponseStream` が使えない理由 (下線付きなのは組になる `_ModelDelegationIntent` の方) をリポジトリの記録に合わせた
 - **2026-11-01**: Xcode 27.2 の記述を beta から正式版の確認結果に更新 (`@UnionValue` の `default:` / `size:` と、`AppEntityContext` が `.audio(_:)` だけなのは正式版でも同じ)
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

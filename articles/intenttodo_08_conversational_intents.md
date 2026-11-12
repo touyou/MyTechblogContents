@@ -201,7 +201,7 @@ Button(intent: ToggleTodoCompletionIntent(todo: entity)) {
 
 CosmoTunes の `DonationManager` にも同じことがコメントで書いてあります (*"Avoid issuing donations from inside an intent's `perform()`, because the framework already donates intents invoked through Siri or Shortcuts."*)。システムは自分が走らせた Intent をすでに寄付しているので、二重計上になる、ということでした。
 
-そして **`perform()` は呼出元を判別できません**。`IntentSystemContext` が公開しているのは `currentMode` / `isVoiceOnly` / `locale` / `preciseTimestamp` の 4 つで (Xcode 27 RC の SDK で数え直しました)、invocation source を知る API はありません。「音声だけで完結する状況か」も「どの言語で話しかけられたか」も分かるのに、**どの面から呼ばれたかだけが分からない** という切り口になっています。つまり `perform()` 内の寄付は必ず Siri / Shortcuts 経由でも走るので、分岐しようがない。撤去しました。
+そして **`perform()` は呼出元を判別できません**。`IntentSystemContext` が公開しているのは `currentMode` / `isVoiceOnly` / `locale` / `preciseTimestamp` の 4 つで (Xcode 27.2 正式版と 27.3 beta の SDK で数え直しました)、invocation source を知る API はありません。「音声だけで完結する状況か」も「どの言語で話しかけられたか」も分かるのに、**どの面から呼ばれたかだけが分からない** という切り口になっています。つまり `perform()` 内の寄付は必ず Siri / Shortcuts 経由でも走るので、分岐しようがない。撤去しました。
 
 ### 第 2 段階: `Button(intent:)` の実行は、そもそもシステムが寄付していた
 
@@ -452,6 +452,7 @@ WWDC 2022 から 2026 までのセッションを網羅的に洗い直したの�
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
+- **2026-11-12 (2 回目)**: 言い回しと表記を見直した。`IntentSystemContext` のメンバが 4 つなのを Xcode 27.2 正式版と 27.3 beta の SDK で確かめ直した
 - **2026-11-12**: 校正。あとから節を足して「4 本立て」「最後が寄付」と構成が合わなくなっていたのを直し、`UndoableIntent` の復元を確かめたテストの種類を今のリポジトリに合わせた
 - **2026-10-31**: 人から言われたように読める書き方 (「と言われました」「指摘されて」など) を、自分で触って気付いた書き方に直した
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

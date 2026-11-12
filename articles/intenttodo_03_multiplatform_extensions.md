@@ -74,10 +74,11 @@ Extension target には「ターゲット固有のスキャフォルド」 (`@ma
   - `IntentTodoLiveActivityBundle.swift` (`@main`)
   - `TodoLiveActivity.swift` (`ActivityConfiguration` と Dynamic Island の配置)
 
-Extension target の `TodoLiveActivity.swift` は、ロック画面はパッケージの View を置くだけです。Dynamic Island だけは `DynamicIslandExpandedRegion` の並べ方を Extension 側に書いていて、中に置く `TimeRemainingView` や完了・スヌーズの `Button(intent:)` はパッケージ側のものを使っています。
+Extension target の `TodoLiveActivity.swift` は、ロック画面はパッケージの View を置くだけです。Dynamic Island だけは `DynamicIslandExpandedRegion` の並べ方を Extension 側に書いていて、中に置く `TimeRemainingView` はパッケージ側のものです。完了・スヌーズの `Button(intent:)` は Extension 側に書いていて、パッケージから持ってくるのは Intent の型 (`TodoAppIntents`) だけです。
 
 ```swift
 import ActivityKit
+import Domain
 import LiveActivity
 import SwiftUI
 import WidgetKit
@@ -241,11 +242,11 @@ struct IntentTodoWatchApp: App {
 
 ## 別プロセス前提なので、マイグレーションはアプリ本体に寄せる
 
-ここまで書いたように Extension target は薄いスキャフォルドに留めますが、Widget / Live Activity は **アプリ本体とは別プロセス** で動く、という前提は変わりません。WWDC 2026 の SwiftData Group Lab で、この「別プロセスで同じ App Group のストアを共有する」構成のマイグレーション指針が示された、という話を見かけました。要は **マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。
+ここまで書いたように Extension target は薄いスキャフォルドに留めますが、Widget / Live Activity は **アプリ本体とは別プロセス** で動く、という前提は変わりません。この「別プロセスで同じ App Group のストアを共有する」構成について、マイグレーションの指針として聞いた話があります。要は **マイグレーションを担当するプロセスをアプリ本体 1 つに固定する** べき、というものです。
 
 アプリ更新直後は本体より先に Widget が起動し得るので、Extension 側にマイグレーションプランを持たせると本体の移行と競合し得る、というのが理屈です。Extension 構成の観点だと「View もデータ取得ロジックも SPM に寄せ、**マイグレーションの責務もアプリ本体に寄せる**」と覚えておくと収まりが良いです。SwiftData / CloudKit 側の具体的な書き方は [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) に書きました。
 
-ただこれ、**一次資料で裏を取れていない伝聞** です。当初はセッション 8017 として書いていたんですが、あとで手元に貯めたアーカイブを漁り直したら書き起こしが見つかりませんでした (出てくるのは別テーマの 8011 だけです)。Group Lab はライブ Q&A なので公式の書き起こしが出ないことも多いみたいです。指針そのものは SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので運用は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。
+ただこれ、**一次資料で裏を取れていない伝聞** です。当初は WWDC 2026 の SwiftData Group Lab (セッション 8017) で示されたものとして書いていたんですが、Apple の公開セッション一覧にも手元のアーカイブにも 8017 というセッションがなく、出どころを辿れませんでした (詳しくは [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit))。指針そのものは SwiftData を複数プロセスで共有するときの一般則として妥当だと思うので運用は変えていませんが、「Apple がこう言った」ではなく「そう聞いた」くらいの確度で読んでもらえればと思います。
 
 ## もう 1 つの例外: AppShortcutsProvider もアプリ本体に置く
 
@@ -552,7 +553,7 @@ IntentDialog(full: "You have no \(categoryLabel)s.")
 
 本文は常に最新の理解に直しています。何をいつ直したかはここに残しておきます。
 
-- **2026-11-12**: 今のコードに合わせて直した。Live Activity の切り出し (`TodoDeadlineActivityAttributes` は Domain、Dynamic Island の配置は Extension 側、型名) と、通知のデリゲートを `NotificationHandler` 自身が持つ形。watch 用の型を改名したときの衝突しない理由とメタデータが増える数を言い直し、`Intento.app` に変えたことを一言足した
+- **2026-11-12**: 今のコードに合わせて直した。Live Activity の切り出し (`TodoDeadlineActivityAttributes` は Domain、Dynamic Island の配置は Extension 側、型名) と、通知のデリゲートを `NotificationHandler` 自身が持つ形。watch 用の型を改名したときの衝突しない理由とメタデータが増える数を言い直し、`Intento.app` に変えたことを一言足した。マイグレーション指針の出どころの書き方を 4/N に揃えた
 - **2026-11-01**: 抜けていたキー数「134 件中 113 件」が開発記録の表と合わなかったので、「100 件以上」に改めた
 - **2026-10-31**: 検証の根拠を「梯子の下 3 段」と書いていたが、実際に通したのは AppIntentsTesting と Shortcuts の 2 段 (+ メタデータの件数) だったので訂正
 - **2026-10-30**: 校正。表記ゆれ (Live Activity / 気付く / いちばん / 半角括弧など) を揃え、言い回しを手直し

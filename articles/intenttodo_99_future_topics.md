@@ -43,7 +43,7 @@ published: true
 
 ## WWDC 2026 の SwiftData レビューで整理できたもの
 
-WWDC 2026 の SwiftData 関連セッションと Group Lab を見直したら、「これまで微妙だと思っていた / 判断を保留していた」観点のいくつかが、公式の裏付けで整理できました。本編側に反映したもの (マイグレーションをアプリ本体に一本化する話 → [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) / [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)、WidgetKit 実行モデルの明文化 → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)) とは別に、ここに棚卸しとして残しておきます。
+WWDC 2026 の SwiftData 関連セッションを見直したら、「これまで微妙だと思っていた / 判断を保留していた」観点のいくつかが整理できました。本編側に反映したもの (マイグレーションをアプリ本体に一本化する話 → [4/N](https://zenn.dev/touyou/articles/intenttodo_04_swiftdata_cloudkit) / [3/N](https://zenn.dev/touyou/articles/intenttodo_03_multiplatform_extensions)。こちらは出どころを辿れない伝聞でした。WidgetKit 実行モデルの明文化 → [9/N](https://zenn.dev/touyou/articles/intenttodo_09_bulk_and_unfit_apis)) とは別に、ここに棚卸しとして残しておきます。
 
 ### View 外での SwiftData 監視に公式 API ができた
 
@@ -364,7 +364,7 @@ Xcode 27 が RC (27A266a) になったタイミングで、ここまでに書い
 
 本文は常に最新の状況に直しています。何をいつ直したかはここに残しておきます。
 
-- **2026-11-12**: 本文で予告形だった 8/N・10/N への参照を書いた後の形に、`UISceneAppIntent` を採用したときのガードを今のコードに合わせて追記。誤字を修正
+- **2026-11-12**: 本文で予告形だった 8/N・10/N への参照を書いた後の形に。SwiftData の見直しの節から Group Lab と「公式の裏付け」を外し (4/N と揃えた)、`UISceneAppIntent` を採用したときのガードを今のコードに合わせて追記。誤字を修正
 - **2026-11-04**: 「27.3 beta (Siri AI Developer Preview) で増えた検証待ち」の節を追加
 - **2026-11-01**: Xcode 27.2 正式版での測り直しを RC の節に追加 (FB24548956 は直った・配布ビルドが 27.1 なので退避は継続 / FB24570185 は未解消 / `get(as:)` は正式版に無く `ValueRepresentation(importing:)` が増えた)。トピック J とまとめの SDK 待ちを更新
 - **2026-10-01**: **「8 つ目の型: 手元で正しいことを、配った先でも正しいと思う」** を追加 (`AppIntentsPackage` が配布したアプリでだけ App Intents を読ませなくしていた件と、`ShowTodosIntent` で 2 つの変数を一緒に動かした件)。`.foreground(.dynamic)` と寄付の項を、それぞれの結論の撤回に合わせて書き直し。`AppIntentsPackage` の断定取り下げの項を「今は 1 つも宣言しない」に更新。Xcode 27.1 / 27.2 beta の SDK 棚卸しを RC の節に追加。実機検証待ちを現状に更新 (フレーズ / 未指定の読み取り系 / Intent のスキーマ適合 / 配った先の登録 / 読み上げの日本語)。external storage を採用済みに。タイトルからダッシュを外した

@@ -12,8 +12,12 @@ published: true
 
 ただ自分は大学以降の数学に詳しいわけではなく、数学ガールを読んだのもだいぶ前なのでほとんど忘れている、という状態です。なので、Claude に資料を読んでもらいながら、受験数学（東大の入試に出てくるくらいまで）の道具でたとえるとどうなるかを整理してもらいました。この記事はその学習メモです。
 
+:::message
+**追記（2026-11-22）**: 公開した日の夜（日本時間）、Lean と Mathlib のコミュニティが連名で、Alpöge さんの Lean の証明は命題も証明も正しいと認める声明を出しました。詳しくは、Alpöge さんの証明の節の最後に追記しました。
+:::
+
 :::message alert
-2 本とも 2026 年 11 月 21 日時点で**査読を経ていません**。正しいかどうかは、これから専門家が検証して決まります。また、後半の「受験数学でのたとえ」は発想をつかむためのもので、実際の証明はずっと込み入っています。
+2 本とも論文としての**査読はまだです**。Masullo さんの証明は、正しいかどうかをこれから専門家が確かめる段階です。また、後半の「受験数学でのたとえ」は発想をつかむためのもので、実際の証明はずっと込み入っています。
 :::
 
 ## そもそもリーマン予想とは
@@ -147,11 +151,27 @@ Lean のコードは第三者が [GitHub にミラー](https://github.com/Tomodo
 theorem riemannHypothesis : RiemannHypothesis := rhOfAll
 ```
 
-「命題をすり替えていない」「ごまかしの印が無い」ので、あとは**本当にビルドが通るか**が焦点です。通ったという報告は多く出ていますが、自分（と Claude）の手元ではビルドしていません。1,700 万行は手元で回せる規模ではありませんでした。
+「命題をすり替えていない」「ごまかしの印が無い」ので、あとは**本当にビルドが通るか**が焦点でした。通ったという報告は多く出ていましたが、自分（と Claude）の手元ではビルドしていません。1,700 万行は手元で回せる規模ではありませんでした。この点は、次の追記のとおり Lean コミュニティが確かめてくれました。
 
 :::message
 Lean は、証明の一行一行が論理的に正しいかを機械が全部チェックしてくれる道具です。ビルドが通り、`#print axioms riemannHypothesis` で Lean 標準の公理（`propext` / `Classical.choice` / `Quot.sound`）しか出てこなければ、人間が 1,700 万行を読まなくても「正しい」と言える、というのが形式化の強みです。
 :::
+
+#### 追記：Lean コミュニティが正しさを認めた
+
+2026 年 11 月 21 日（日本時間の夜）、Lean と Mathlib のコミュニティが[連名の声明](https://leanprover-community.github.io/blog/posts/riemann-hypothesis/)を出しました。Lean の開発元の Lean FRO と Mathlib Initiative も支持しています。声明では「リーマン予想の命題と証明の両方が正しいことを認める」と書かれていて、Alpöge さんへのお祝いも添えられています。
+
+声明に書かれていた確認の中身はこんな感じです。
+
+- 証明が依存しているのは Mathlib だけ
+- 命題は Mathlib の `RiemannHypothesis` で、Lean と数論の専門家が確かめた。命題だけを切り出したファイルを別に用意して、Alpöge さんの定理と同じものかを 2 つのツールで突き合わせた
+- 何十人もが同じ形でビルドでき、エラーも出ない
+- 証明を書き出したデータを、Lean 公式のカーネルに加えて、別々のプログラミング言語で書かれた複数の独立したチェッカーでも検査した。そのうち 2 つのチェッカーは「間違った証明を受け付けない」こと自体が集合論の上で形式的に証明されている
+- 検査は、証明のソースに悪意のあるコードが仕込まれていても影響を受けない形で行った
+
+前の段で「あとはビルドが通るか」と書いていたところが、思っていた以上に念入りに確かめられた形です。特に、Lean そのものに穴があったら、という心配まで別のチェッカーで確かめにいっているのは、形式化ならではだなと思いました。
+
+一方で声明は、証明に出てくる新しいアイデアを数学のコミュニティが解き明かしていくのを楽しみにしている、という言葉で締めくくられていて、「なぜ正しいのか」はまだこれから、という状況は変わっていません。
 
 ### Masullo さんの証明（人の手だけ）
 
@@ -287,5 +307,6 @@ Alpöge さんの証明が 1,700 万行になったのは、この「評価を�
 
 - [remark.pdf](https://alpo.ge/remark.pdf)（Levent Alpöge さんの告知）
 - [Tomodovodoo/Riemann](https://github.com/Tomodovodoo/Riemann)（上記の Lean コードのミラー）
+- [Lean verification of the Riemann Hypothesis](https://leanprover-community.github.io/blog/posts/riemann-hypothesis/)（Lean と Mathlib のコミュニティの連名声明、追記の出典）
 - [Hurried Announcement: Alessandro Masullo GRH](https://math216.wordpress.com/2026/11/20/hurried-announcement-alessandro-masullo-grh/)（Ravi Vakil さんのブログ）
 - [The Music of the Primes](https://math216.wordpress.com/wp-content/uploads/2026/11/the-music-of-the-primes.pdf)（Masullo さんの原稿）
